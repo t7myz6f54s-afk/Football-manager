@@ -280,6 +280,14 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .scoreboard .score{font-size:30px;font-weight:900;letter-spacing:1px;font-variant-numeric:tabular-nums;
   text-shadow:0 0 18px rgba(47,230,160,.35)}
 .scoreboard .min{color:var(--dim);font-size:12px;text-align:center}
+.scoreboard .sb-meta{grid-column:1/-1;display:flex;gap:8px;justify-content:center;align-items:center;
+  flex-wrap:wrap;color:var(--dim);font-size:12px;margin-top:2px}
+.coach{border:1px solid #2c5d7a;background:linear-gradient(180deg,#12283a,#101f2d);border-radius:12px;
+  padding:12px 14px;margin-bottom:12px;box-shadow:var(--shadow)}
+.coach-t{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.coach-t .icn,.coach-t svg{width:16px;height:16px;stroke:var(--accent2);fill:none;stroke-width:1.9;
+  stroke-linecap:round;stroke-linejoin:round}
+.coach p{margin:0 0 10px;font-size:12.5px;color:#c6d4e2;line-height:1.55}
 .commentary{max-height:44dvh;overflow-y:auto;background:#0c131b;border:1px solid var(--line);
             border-radius:10px;padding:8px 10px;-webkit-overflow-scrolling:touch}
 .commentary div{padding:5px 0;border-bottom:1px solid #131d28;font-size:13px}
@@ -396,6 +404,11 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 
 /* ============ phone-only overrides for inline desktop layouts ============ */
 @media(max-width:899px){
+  #modal .box .g2,#modal .box .g3,#modal .box .g4{grid-template-columns:1fr}
+  .g3>*:last-child:nth-child(odd){grid-column:1/-1}
+  .stack{grid-template-columns:1fr !important}
+  body.pregame #btn-continue,body.pregame #statusbar,body.pregame #tabbar,body.pregame #topbar{display:none}
+  body.pregame #content{padding-bottom:28px}
   .scoreboard .team{font-size:11.5px}
   .scoreboard .score{font-size:22px}
   /* screens build some grids with inline styles; stack them on phones */

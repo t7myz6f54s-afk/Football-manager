@@ -3557,7 +3557,9 @@ def play_next_match(con, save, mode="key", rng=None, lineup=None):
         return {"ok": False, "msg": "No upcoming fixture."}
     if nf["match_date"] > save["date"]:
         advance(con, save, until="date", days=nf["match_date"], rng=rng, stop_for=())
-    nf = next_fixture(con, save)
+        nf = next_fixture(con, save)
+        if not nf:
+            return {"ok": False, "msg": "No upcoming fixture after advancing."}
     row = con.execute("""SELECT f.*, k.name AS comp_name, k.code AS comp_code, k.ctype
         FROM fixtures f LEFT JOIN competitions k ON k.id=f.comp_id WHERE f.id=?""", (nf["id"],)).fetchone()
     nf = dict(row)

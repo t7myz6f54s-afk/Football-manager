@@ -25,7 +25,7 @@ const api = {
   }
 };
 
-const VERSION = "1.3.1";
+const VERSION = "1.4.0";
 let DEAD = false;
 function deadScreen() {
   if (DEAD) return; DEAD = true;
@@ -306,6 +306,7 @@ const NAV = [
 ];
 function renderNav(items) {
   const real = items.filter(n => n[0] !== "sep");
+  document.body.classList.toggle("pregame", real.length === 0);
   $("#nav").innerHTML = items.map(n => n[0] === "sep" ? '<div class="sep"></div>' :
     `<button data-s="${n[0]}" onclick="go('${n[0]}')">${svg(n[0])}<span>${n[2]}</span><span class="badge hidden" id="nb-${n[0]}"></span></button>`).join("");
   renderTabbar(real);
@@ -316,6 +317,23 @@ async function enterGame() {
   $("#app").classList.remove("hidden");
   renderNav(NAV);
   await go("home");
+  coachHint();
+}
+function coachHint() {
+  try { if (localStorage.getItem("tl_coach_done")) return; } catch (e) { return; }
+  const host = $("#content"); if (!host) return;
+  const d = document.createElement("div");
+  d.className = "coach";
+  d.innerHTML = `<div class="coach-t">${svg("board")}<b>How a season runs</b></div>
+    <p><b>CONTINUE</b> advances time to the next meaningful event — mail, deadlines, match days.
+    On match days the button becomes <b>MATCH DAY</b>. The red badge is unread inbox;
+    everything else lives under <b>More</b>.</p>
+    <button class="btn sm primary" onclick="dismissCoach(this)">GOT IT ▸</button>`;
+  host.prepend(d);
+}
+function dismissCoach(btn) {
+  btn.closest(".coach").remove();
+  try { localStorage.setItem("tl_coach_done", "1"); } catch (e) {}
 }
 async function resumeMatch() {
   const r = await api.post("/api/match/abandon", {});
@@ -481,7 +499,7 @@ async function renderHome() {
         <div class="small muted">Budget ${money(h.finances.transfer_budget)} · wages ${money(h.finances.wage_bill)}/${money(h.finances.wage_budget)}</div></div>
     </div>
 
-    <div class="grid g2" style="margin-top:12px">
+    <div class="grid g2 stack" style="margin-top:12px">
       <div class="card">
         <h3>Next match</h3>
         ${h.next_fixture ? `
@@ -1073,7 +1091,7 @@ function showHalftime(st) {
           <td class="num"><b>${p.rating.toFixed(2)}</b></td><td class="num">${Math.round(p.fatigue)}</td></tr>`).join("")}</tbody></table>
       </div>
       <div class="card"><h3>Bench</h3>
-        <table><thead><tr><th>Pos</th><th>Name</th><th class="num">CA</th></tr></thead>
+        <table class="mc"><thead><tr><th>Pos</th><th>Name</th><th class="num">CA</th></tr></thead>
         <tbody>${st.bench.map(b => `<tr><td><span class="pos">${esc(b.pos)}</span></td><td>${esc(b.name)}</td>
           <td class="num">${b.ca.toFixed(1)}</td></tr>`).join("")}</tbody></table>
       </div>
@@ -1081,6 +1099,7 @@ function showHalftime(st) {
   window._ht = st;
   $("#ht-talk").addEventListener("change", e => $("#ht-hint").textContent = talkHint(e.target.value, st));
   addSubRow();
+  polish($("#content"));
 }
 function talkHint(talk, st) {
   const diff = st.my_score - st.opp_score;
@@ -1148,10 +1167,10 @@ function showResult(r) {
   modal(`
     <div class="scoreboard">
       <div class="team">${esc(r.home)}${isH ? ' <span class="tag">you</span>' : ""}</div>
-      <div><div class="score">${r.hg} – ${r.ag}</div>
-        <div class="min"><span class="tag ${res}">${res === "W" ? "WIN" : res === "D" ? "DRAW" : "LOSS"}</span>
-        ${esc(r.comp || "")} · ${fmtDate(r.date)}</div></div>
+      <div class="score">${r.hg} – ${r.ag}</div>
       <div class="team">${esc(r.away)}${!isH ? ' <span class="tag">you</span>' : ""}</div>
+      <div class="sb-meta"><span class="tag ${res}">${res === "W" ? "WIN" : res === "D" ? "DRAW" : "LOSS"}</span>
+        <span>${esc(r.comp || "")} · ${fmtDate(r.date)}</span></div>
     </div>
     ${r.penalties ? `<p class="small" style="text-align:center;margin-top:8px">Won ${esc(String(r.penalties.winner || ""))} on penalties — ${esc(JSON.stringify(r.penalties.home || ""))} / ${esc(JSON.stringify(r.penalties.away || ""))}</p>` : ""}
     <div class="grid g2" style="margin-top:12px">
@@ -1791,7 +1810,18 @@ function tableToCards(t) {
     card.className = "tcard" + (tr.classList.contains("me") ? " me" : "");
     const oc = tr.getAttribute("onclick");
     if (oc) { card.setAttribute("onclick", oc); card.classList.add("tap"); }
-    let ti = cells.findIndex(td => td.querySelector("b,strong"));
+    let ti = cells.findIndex(td => !td.classList.contains("num") && td.textContent.trim() &&
+                                 td.querySelector("b,strong"));
+    if (ti < 0) ti = cells.findIndex(td => !td.classList.contains("num") && td.textContent.trim().length > 6);
+    if (ti < 0) {
+      let best = -1;
+      cells.forEach((td, i) => {
+        if (td.querySelector("b,strong")) {
+          const len = td.textContent.trim().length;
+          if (len > best) { best = len; ti = i; }
+        }
+      });
+    }
     if (ti < 0) ti = cells.findIndex(td => !td.classList.contains("num"));
     if (ti < 0) ti = 0;
     const hd = document.createElement("div"); hd.className = "tcard-h"; hd.innerHTML = cells[ti].innerHTML;
@@ -1828,7 +1858,7 @@ function polish(root) {
     if (t.closest(".tw")) return;
     if (t.querySelector("tbody[id]")) { wrapTw(t); return; }   // live-updated tables stay tables
     const cols = t.querySelectorAll("thead th").length;
-    if (cols >= 4) tableToCards(t); else wrapTw(t);
+    if (cols >= 4 || t.classList.contains("mc")) tableToCards(t); else wrapTw(t);
   });
 }
 window.addEventListener("resize", () => { /* re-layout on rotate happens on next render */ });
