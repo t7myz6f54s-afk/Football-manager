@@ -8,6 +8,7 @@ from datetime import date, timedelta
 
 from . import constants as C
 from .names import make_name, make_manager_name, make_staff_name, NATIONALITY_POOL
+from .real_squads import REAL_SQUADS, REAL_MANAGERS
 
 DB_PATH = os.environ.get("FM_DB", "/home/user/data/world.db")
 
@@ -511,6 +512,49 @@ def build_world(seed=20260701):
         counts = POS_COUNTS[min(tier, 5)]
         squad_ca = c["squad_ca"]
         foreign_p = foreign_quota[tier]
+        real = REAL_SQUADS.get(code)
+        if real:
+            order_real = sorted(real, key=lambda t: -t[5])
+            n = len(order_real)
+            for ri, (nm, nat, age, pos, pos2, ca) in enumerate(order_real):
+                pid += 1
+                rank = ri / max(1, n - 1)
+                rr = random.Random(_seed(nm))
+                pa = min(20.0, ca + (2.0 if age <= 21 else 1.2 if age <= 23
+                                     else 0.4 if age <= 25 else 0.0))
+                vec = fit_ca(_attr_vector(rr, pos, ca, age, pa), min(20, ca + 0.3))
+                real_ca = compute_ca(vec)
+                cy = rr.choice([1, 2, 2, 3, 3, 4]) if age < 30 else rr.choice([1, 1, 2])
+                cend = date(2027 + cy - 1, 6, 30)
+                foot = rr.choice(["R", "R", "R", "L", "L", "B"])
+                height = int(rr.gauss({"GK": 190, "DC": 187, "ST": 183, "DM": 181}.get(pos, 178), 6))
+                val = value_of(real_ca, pa, age, pos, c["rep"], cy, c["coef"])
+                wg = wage_of(real_ca, age, c["coef"], c["rep"], tier)
+                players_rows.append(_player_row(dict(
+                    id=pid, name=nm, nat=nat,
+                    nat2="" if nat == c["country"] else c["country"],
+                    age=age, dob=str(date(2026 - age, rr.randint(1, 12), rr.randint(1, 28))),
+                    pos=pos, pos2=pos2, foot=foot, height=height, club_id=c["id"],
+                    squad="First Team" if rank < 0.8 else "Reserve",
+                    attrs=pack_attrs(vec), ca=round(real_ca, 2), pa=round(pa, 2),
+                    value=val, wage=wg, contract_end=cend.isoformat(),
+                    agent=make_staff_name(rr, nat), personality=rr.choice(C.PERSONALITIES),
+                    professionalism=rr.randint(8, 20), ambition=rr.randint(6, 20),
+                    loyalty=rr.randint(4, 18), pressure=rr.randint(5, 18),
+                    consistency=rr.randint(6, 18), big_games=rr.randint(6, 18),
+                    injury_prone=rr.randint(1, 12),
+                    fitness=round(rr.uniform(90, 100), 1), sharpness=round(rr.uniform(65, 95), 1),
+                    morale=round(rr.uniform(50, 85), 1), confidence=round(rr.uniform(45, 80), 1),
+                    form=round(rr.gauss(0, 1.2), 2), happiness=round(rr.uniform(50, 80), 1),
+                    int_apps=int(max(0, (real_ca - 12) * 8 + rr.randint(0, 30))) if ca >= 14
+                             else rr.randint(0, 10),
+                    int_goals=rr.randint(0, 40) if pos in ("ST", "AML", "AMR", "AMC")
+                              else rr.randint(0, 8),
+                    hidden_seed=_seed(code + nm),
+                    reputation=round(min(95, c["rep"] * (0.4 + real_ca / 28.0)), 1),
+                    languages=nat,
+                )))
+            continue
         # ability tiers inside squad: best -> fringe
         n = sum(counts.values())
         for pi, (pos, cnt) in enumerate(counts.items()):
@@ -581,7 +625,7 @@ def build_world(seed=20260701):
     # hand-seeded stars
     for st in C.STARS:
         code, nm, nat, age, pos, pos2, ca, pa, foot, wg, val = st
-        if code not in clubs:
+        if code not in clubs or code in REAL_SQUADS:
             continue
         c = clubs[code]
         r = random.Random(_seed(nm))
@@ -694,7 +738,14 @@ def build_world(seed=20260701):
         c = {"id": crow["id"], "code": code, "name": crow["name"], "country": crow["country"],
              "rep": crow["rep"], "coef": (_li["coef"] if _li else 0.4), "profile": crow["profile"]}
         r = random.Random(_seed(code + "manager"))
-        rep = min(95.0, c["rep"] * 0.72 + r.uniform(-4, 8))
+        mname = REAL_MANAGERS.get(code)
+        if mname:
+            mnat = c["country"] if r.random() < 0.35 else r.choice(NATIONALITY_POOL)
+            rep = min(96.0, c["rep"] * 0.85 + r.uniform(0, 8))
+        else:
+            mname = make_manager_name(r)
+            mnat = c["country"] if r.random() < 0.6 else r.choice(NATIONALITY_POOL)
+            rep = min(95.0, c["rep"] * 0.72 + r.uniform(-4, 8))
         styles = ["Possession", "High press", "Counter-attack", "Direct", "Balanced",
                   "Defensive solidity", "Wing play", "Youth-focused"]
         attrs = {}
@@ -703,8 +754,7 @@ def build_world(seed=20260701):
                   "youth", "man_mgmt", "motivation", "adaptability", "judging"):
             attrs[k] = max(3, min(20, int(round(lvl + r.gauss(0, 2.4)))))
         con.execute("INSERT INTO managers VALUES (?,?,?,?,?,?,?,?,?,?)",
-                    (mid + 1, make_manager_name(r), c["country"] if r.random() < 0.6
-                     else r.choice(NATIONALITY_POOL), r.randint(33, 66), c["id"], rep,
+                    (mid + 1, mname, mnat, r.randint(33, 66), c["id"], rep,
                      r.choice(styles), "2024-07-01", 0, json.dumps(attrs)))
         mid += 1
 

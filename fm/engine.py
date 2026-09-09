@@ -3646,3 +3646,74 @@ def auto_pick(con, save):
     save["flags"]["selected_xi"] = "[]"
     persist(con, save)
     return {"ok": True, "msg": "Team selection delegated to the assistant."}
+
+
+def advise(con, save):
+    """Godfather mode: a short, prioritised list of actionable briefings."""
+    items = []
+    cid = save.get("club_id")
+    if not cid or save["flags"].get("unemployed"):
+        return items
+    today = save["date"]
+    urg = con.execute(
+        "SELECT COUNT(*) FROM inbox WHERE read=0 AND priority='URGENT'").fetchone()[0]
+    if urg:
+        items.append(dict(tag="INBOX", t=f"{urg} urgent message(s) on your desk",
+                          b="Ignored urgent mail sours the board and the press. Answer it before anything else.",
+                          go="inbox"))
+    nfr = con.execute("""SELECT f.match_date, f.home_id, c1.name AS hn, c2.name AS an
+        FROM fixtures f JOIN clubs c1 ON c1.id=f.home_id JOIN clubs c2 ON c2.id=f.away_id
+        WHERE (f.home_id=? OR f.away_id=?) AND f.played=0 AND f.match_date>=?
+        ORDER BY f.match_date LIMIT 1""", (cid, cid, today)).fetchone()
+    nf = dict(nfr) if nfr else None
+    rows = con.execute("""SELECT name, pos, ca, fitness, contract_end FROM players
+        WHERE club_id=? AND squad IN ('First Team','Reserve')""", (cid,)).fetchall()
+    if nf and nf["match_date"] == today:
+        opp = nf["an"] if nf["home_id"] == cid else nf["hn"]
+        items.append(dict(tag="MATCH", t=f"Matchday: {nf['hn']} v {nf['an']}",
+                          b=f"Pick your XI and team talk in the match centre, then kick off against {opp}.",
+                          go="match"))
+    if rows:
+        avg = sum(r[2] for r in rows) / len(rows)
+        groups = {"GK": [], "DEF": [], "MID": [], "ATT": []}
+        for nm, pos, ca, fit, ce in rows:
+            if fit < 85:
+                continue
+            g = ("GK" if pos == "GK" else "DEF" if pos in ("DC", "DL", "DR")
+                 else "MID" if pos in ("DM", "MC", "AMC") else "ATT")
+            groups[g].append((ca, nm))
+        weak = [g for g, v in groups.items() if len(v) < 2]
+        if weak:
+            items.append(dict(tag="TRANSFERS", t="Thin squad: " + ", ".join(weak),
+                              b="You cannot cover injuries or rotation in these areas. Scout and bid before the window shuts.",
+                              go="transfers"))
+        exp = sorted([nm for nm, pos, ca, fit, ce in rows
+                      if ce <= "2027-06-30" and ca >= avg + 0.5])
+        if exp:
+            t = (f"{exp[0]} and {len(exp) - 1} more out of contract in 2027" if len(exp) > 1
+                 else f"{exp[0]} is out of contract in 2027")
+            items.append(dict(tag="CONTRACTS", t=t,
+                              b="Open negotiations now or lose them for nothing next summer.",
+                              go="squad"))
+        fit_avg = sum(r[3] for r in rows) / len(rows)
+        if fit_avg < 88:
+            items.append(dict(tag="TRAINING", t="Squad fitness slipping",
+                              b="Ease the training load or rotate: tired legs lose matches late.",
+                              go="training"))
+        if nf and nf["match_date"] > today:
+            best = sorted(rows, key=lambda r: -r[2])[:3]
+            items.append(dict(tag="PREP", t=f"Next: {nf['hn']} v {nf['an']} on {nf['match_date']}",
+                              b="Lean on " + ", ".join(b[0] for b in best) +
+                                " — your three best available players right now.",
+                              go="match"))
+    bc = save["board"]["confidence"]
+    if bc < 50:
+        items.append(dict(tag="BOARD", t=f"Board confidence {bc:.0f}/100 — danger zone",
+                          b="Results first, then calm press answers. Two wins in a row buys you time.",
+                          go="inbox"))
+    fin = save.get("finances", {})
+    if fin.get("wage_bill", 0) > fin.get("wage_budget", 0):
+        items.append(dict(tag="FINANCE", t="Wage bill over budget",
+                          b="Sell or release high earners before the board forces fire sales.",
+                          go="finances"))
+    return items[:5]

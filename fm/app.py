@@ -299,6 +299,20 @@ def api_inbox(cat: str = "", unread: bool = False):
     return V.inbox(con(), s, cat=cat or None, unread_only=unread)
 
 
+@app.get("/api/advice")
+def api_advice():
+    s = need_save()
+    return {"ok": True, "on": bool(s["flags"].get("godfather")), "items": E.advise(con(), s)}
+
+
+@app.post("/api/godfather")
+def api_godfather(payload: dict = Body(...)):
+    s = need_save()
+    s["flags"]["godfather"] = bool(payload.get("on"))
+    E.persist(con(), s)
+    return {"ok": True, "on": s["flags"]["godfather"]}
+
+
 @app.post("/api/inbox/read")
 def api_inbox_read(payload: dict = Body(...)):
     s = need_save()

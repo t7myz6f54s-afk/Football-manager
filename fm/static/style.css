@@ -439,3 +439,61 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 @media(min-width:360px) and (max-width:899px){
   .g2,.g3,.g4{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
+
+/* ================= v1.5: godfather mode, mail rows, game feel ============ */
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+#content > * { animation: rise .26s ease both; }
+#content > *:nth-child(2) { animation-delay: .04s; }
+#content > *:nth-child(3) { animation-delay: .08s; }
+#content > *:nth-child(4) { animation-delay: .12s; }
+.btn:active, .mrow:active, .tab:active { transform: scale(.97); }
+.btn, .mrow, .tab { transition: transform .08s ease, background .15s ease, border-color .15s ease; }
+
+/* godfather card */
+.card.god { border: 1px solid rgba(167,139,250,.35); background:
+  linear-gradient(160deg, rgba(109,40,217,.16), rgba(15,18,24,.6) 55%); position: relative; overflow: hidden; }
+.card.god.on { box-shadow: 0 0 0 1px rgba(167,139,250,.25), 0 8px 30px -12px rgba(124,58,237,.5); }
+.card.god::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(420px 120px at 12% 0%, rgba(139,92,246,.18), transparent 70%); }
+.god-m { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center;
+  font-weight: 800; letter-spacing: .04em; color: #ede9fe; font-size: 15px;
+  background: linear-gradient(145deg, #7c3aed, #4c1d95); box-shadow: inset 0 1px 0 rgba(255,255,255,.18); }
+.god-list { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.god-it { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 12px;
+  background: rgba(139,92,246,.08); border: 1px solid rgba(139,92,246,.18); }
+.god-it .tag { margin-top: 2px; background: rgba(139,92,246,.2); color: #ddd6fe; }
+.god-it b { font-size: 13.5px; }
+
+/* toggle switch */
+.sw { position: relative; display: inline-block; width: 46px; height: 26px; flex: none; }
+.sw input { opacity: 0; width: 0; height: 0; }
+.sw span { position: absolute; inset: 0; border-radius: 999px; cursor: pointer;
+  background: #2a3140; border: 1px solid #3a4356; transition: .18s; }
+.sw span::before { content: ""; position: absolute; width: 18px; height: 18px; border-radius: 50%;
+  left: 3px; top: 3px; background: #93a0b5; transition: .18s; }
+.sw input:checked + span { background: linear-gradient(145deg, #7c3aed, #5b21b6); border-color: #7c3aed; }
+.sw input:checked + span::before { transform: translateX(20px); background: #fff; }
+
+/* mail rows */
+.mrow { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 12px 14px; background: none; border: 0; border-bottom: 1px solid var(--line, #232a36);
+  color: inherit; cursor: pointer; position: relative; }
+.mrow:last-child { border-bottom: 0; }
+.mrow.slim { padding: 9px 12px; }
+.mrow .mdot { width: 8px; height: 8px; border-radius: 50%; background: #39424f; flex: none; }
+.mrow.unread .mdot { background: var(--acc, #22c55e); box-shadow: 0 0 8px rgba(34,197,94,.7); }
+.mrow.p-urgent .mdot { background: #ef4444; box-shadow: 0 0 8px rgba(239,68,68,.7); }
+.mmain { flex: 1; min-width: 0; }
+.msub { font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; color: #b9c2d0; }
+.mrow.unread .msub { color: #f2f5f9; }
+.mmeta { display: flex; gap: 8px; font-size: 11px; color: #7b8494; margin-top: 2px; }
+.mcat { text-transform: uppercase; letter-spacing: .08em; }
+.mpri { font-size: 16px; font-weight: 800; color: #ef4444; width: 14px; text-align: center; }
+.mrow.p-important .mpri { color: #f59e0b; }
+.mrow:hover { background: rgba(255,255,255,.03); }
+
+/* chips row scrolls cleanly on phones */
+.tabs { overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs button { flex: none; }

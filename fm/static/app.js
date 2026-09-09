@@ -25,7 +25,7 @@ const api = {
   }
 };
 
-const VERSION = "1.4.0";
+const VERSION = "1.5.0";
 let DEAD = false;
 function deadScreen() {
   if (DEAD) return; DEAD = true;
@@ -482,6 +482,8 @@ async function renderHome() {
   await refreshState();
   const h = G.home;
   if (h.unemployed) return renderJobs();
+  let adv = null;
+  try { adv = await api.get("/api/advice"); } catch (e) {}
   const pos = h.position;
   $("#content").innerHTML = `
     <div class="grid g4">
@@ -498,6 +500,8 @@ async function renderHome() {
         <div class="stat small">${money(h.finances.cash)} <span class="muted">cash</span></div>
         <div class="small muted">Budget ${money(h.finances.transfer_budget)} · wages ${money(h.finances.wage_bill)}/${money(h.finances.wage_budget)}</div></div>
     </div>
+
+    ${godCard(adv)}
 
     <div class="grid g2 stack" style="margin-top:12px">
       <div class="card">
@@ -558,11 +562,39 @@ async function renderHome() {
       </div>
     </div>`;
   const ib = await api.get("/api/inbox");
-  $("#home-inbox").innerHTML = ib.items.slice(0, 12).map(m => `
-    <div class="list-item ${m.read ? "" : "unread"}" onclick="openMail(${m.id})">
-      <span class="tag ${m.priority}">${esc(m.priority[0])}</span>
-      <div style="flex:1"><b>${esc(m.subject)}</b><div class="small muted">${esc(m.cat)} · ${esc(m.date)}</div></div>
-    </div>`).join("") || '<p class="muted small" style="padding:10px">Empty</p>';
+  $("#home-inbox").innerHTML = ib.items.slice(0, 8).map(m => `
+    <button class="mrow slim p-${(m.priority || "").toLowerCase()} ${m.read ? "" : "unread"}" onclick="openMail(${m.id})">
+      <span class="mdot"></span>
+      <div class="mmain"><div class="msub">${esc(m.subject)}</div>
+        <div class="mmeta"><span class="mcat">${esc(m.cat)}</span><span>${fmtDate(m.date)}</span></div></div>
+    </button>`).join("") || '<p class="muted small" style="padding:10px">Empty</p>';
+}
+function godCard(adv) {
+  if (!adv || !adv.ok) return "";
+  const items = adv.on ? (adv.items || []).map(it => `
+    <div class="god-it">
+      <span class="tag ${it.tag === "INBOX" || it.tag === "BOARD" ? "URGENT" : ""}">${esc(it.tag)}</span>
+      <div style="flex:1"><b>${esc(it.t)}</b><div class="small muted">${esc(it.b)}</div></div>
+      ${it.go ? `<button class="btn sm" onclick="go('${it.go}')">OPEN ▸</button>` : ""}
+    </div>`).join("") :
+    '<p class="small muted" style="margin:10px 0 2px">Off. You are on your own, boss — every decision yours, no whispers.</p>';
+  return `
+  <div class="card god ${adv.on ? "on" : ""}" style="margin-top:12px">
+    <div class="row" style="align-items:center;gap:12px">
+      <div class="god-m">GF</div>
+      <div style="flex:1">
+        <div class="stat-l" style="letter-spacing:.14em">GODFATHER MODE</div>
+        <div class="small muted">Your consigliere reads the room and tells you exactly what to do next.</div>
+      </div>
+      <label class="sw"><input type="checkbox" ${adv.on ? "checked" : ""} onchange="toggleGod(this.checked)"><span></span></label>
+    </div>
+    ${adv.on ? `<div class="god-list">${items || '<p class="small muted" style="margin:10px 0 2px">Nothing needs you right now. Continue and let the world turn.</p>'}</div>` : items}
+  </div>`;
+}
+async function toggleGod(on) {
+  await api.post("/api/godfather", { on });
+  toast(on ? "Godfather mode: ON — he whispers, you decide." : "Godfather mode: off.");
+  renderHome();
 }
 async function quickPlay() {
   await playMatch("instant");
@@ -581,14 +613,16 @@ async function renderInbox() {
       <span class="spacer"></span>
       <button class="btn sm" onclick="markAllRead()">Mark all read</button>
     </div>
-    <div class="card" style="padding:0">
+    <div class="card" style="padding:0;overflow:hidden">
       ${j.items.map(m => `
-        <div class="list-item ${m.read ? "" : "unread"}" onclick="openMail(${m.id})">
-          <span class="tag ${m.priority}">${esc(m.priority)}</span>
-          <div style="flex:1"><b>${esc(m.subject)}</b>
-            <div class="small muted">${esc(m.cat)} · ${fmtDate(m.date)}</div></div>
-          ${m.read ? "" : '<span class="tag">NEW</span>'}
-        </div>`).join("") || '<p class="muted" style="padding:12px">No mail.</p>'}
+        <button class="mrow p-${(m.priority || "").toLowerCase()} ${m.read ? "" : "unread"}" onclick="openMail(${m.id})">
+          <span class="mdot"></span>
+          <div class="mmain">
+            <div class="msub">${esc(m.subject)}</div>
+            <div class="mmeta"><span class="mcat">${esc(m.cat)}</span><span>${fmtDate(m.date)}</span></div>
+          </div>
+          <span class="mpri">${esc(m.priority === "URGENT" ? "!" : m.priority === "IMPORTANT" ? "•" : "")}</span>
+        </button>`).join("") || '<p class="muted" style="padding:12px">No mail.</p>'}
     </div>`;
 }
 async function markAllRead() { await api.post("/api/inbox/read", { all: true }); renderInbox(); refreshBadges(); }
