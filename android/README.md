@@ -56,6 +56,6 @@ server behaves exactly as before):
 | Variable | Default | Android value |
 |---|---|---|
 | `FM_DB` | `data/world.db` | `filesDir/data/world.db` |
-| `FM_SAVE_DIR` / `FM_SAVE` | `data/saves/…` | `filesDir/data/saves/…` |
+| `FM_SAVE_DIR` / `FM_SAVE` | `data/saves/…` | `filesDir/data/saves/…` (consumed by `fm/engine.py` too) |
 | `FM_STATIC` | `fm/static` | `filesDir/www` |
 | `FM_HOST` / `PORT` | `0.0.0.0` / `8000` | `127.0.0.1` / `8000` |

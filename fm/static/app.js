@@ -25,7 +25,7 @@ const api = {
   }
 };
 
-const VERSION = "1.3";
+const VERSION = "1.3.1";
 let DEAD = false;
 function deadScreen() {
   if (DEAD) return; DEAD = true;

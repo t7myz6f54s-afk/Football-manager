@@ -13,7 +13,7 @@ from . import match as M
 from .world import connect, unpack_attrs, value_of, wage_of, _seed, pack_attrs, compute_ca
 from .names import make_name, make_manager_name, make_staff_name, NATIONALITY_POOL
 
-SAVE_DIR = "/home/user/data/saves"
+SAVE_DIR = os.environ.get("FM_SAVE_DIR", "/home/user/data/saves")
 DEFAULT_SAVE = os.path.join(SAVE_DIR, "career1.json")
 
 INT_BREAKS_2026_27 = [
@@ -127,7 +127,7 @@ def comp(con, comp_id):
 # --------------------------------------------------------------- save / load
 def new_career(club_code, manager, difficulty="realistic", save_path=DEFAULT_SAVE,
                start=WINDOW_OPEN):
-    os.makedirs(SAVE_DIR, exist_ok=True)
+    os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
     con = connect()
     c = club_by_code(con, club_code)
     if not c:
