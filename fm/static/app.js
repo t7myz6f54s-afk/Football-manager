@@ -403,12 +403,12 @@ function paintTop() {
   if (h.unemployed) {
     $("#tb-club").innerHTML = `Unemployed<small>Available for appointment</small>`;
     $("#tb-budget").textContent = "—"; $("#tb-board").textContent = "—";
-    paintCrest("TL", null);
+    paintCrest("");
   } else {
     $("#tb-club").innerHTML = `${esc(h.club.name)}<small>${esc(h.club.league)}</small>`;
     $("#tb-budget").innerHTML = `Budget <b>${money(h.finances.transfer_budget)}</b>`;
     $("#tb-board").innerHTML = `Board <b>${Math.round(h.board.confidence)}</b>/100`;
-    paintCrest(h.club.name, h.club.id);
+    paintCrest(h.club.code);
   }
   $("#tb-date").textContent = fmtDate(h.date);
   const nf = h.next_fixture;
@@ -478,96 +478,100 @@ function showContinueModal(j) {
 }
 
 /* --------------------------------------------------------------------- HOME */
+function compLabel(f) {
+  return f.comp || (f.stage && f.stage !== "league" ? f.stage : "") || "Match";
+}
+function compColor(code) {
+  code = code || "";
+  if (code === "UCL") return "var(--ucl)";
+  if (code === "UEL" || code === "UECL") return "var(--blue)";
+  if (code.includes("CUP") || code.includes("POKAL") || code.includes("COUPE")) return "var(--gold)";
+  if (code.startsWith("ENG")) return "var(--pl)";
+  if (code.startsWith("ESP")) return "var(--liga)";
+  if (code.startsWith("ITA")) return "var(--serie)";
+  if (code.startsWith("GER")) return "var(--bund)";
+  if (code.startsWith("FRA")) return "var(--l1)";
+  return "var(--acc)";
+}
+function formPills(form, n) {
+  return (form || []).slice(0, n || 6).map(x =>
+    `<i class="fm-i ${x.res}" title="${esc(x.score || "")}">${x.res}</i>`).join("");
+}
 async function renderHome() {
   await refreshState();
   const h = G.home;
   if (h.unemployed) return renderJobs();
   let adv = null;
   try { adv = await api.get("/api/advice"); } catch (e) {}
-  const pos = h.position;
+  const pos = h.position, f = h.next_fixture, ss = h.squad_summary;
+  const ft = (ss.groups.find(g => g.squad === "First Team") || { n: 0 }).n;
+  const pills = formPills(h.form, 6);
+  const avail = Math.max(0, ft - ss.injured - ss.suspended - ss.unfit);
+  const tbl = h.table || [];
+  const mine = tbl.find(r => r.club_id === h.club.id);
+  const top = tbl.slice(0, 8);
+  const rowHtml = r => `<tr class="${r.club_id === h.club.id ? "me" : ""}">
+      <td class="num muted">${r.pos}</td>
+      <td><span class="cellclub">${crest(r.code)}<span>${esc(r.name)}</span></span></td>
+      <td class="num muted">${r.p}</td><td class="num"><b>${r.pts}</b></td></tr>`;
   $("#content").innerHTML = `
-    <div class="grid g4">
-      <div class="card"><div class="stat-l">League position</div>
-        <div class="stat">${pos && pos.played ? pos.pos + "<span class='muted' style='font-size:14px'>/" + pos.size + "</span>" : "—"}</div>
-        <div class="small muted">${pos ? pos.pts + " pts from " + pos.played + " · GD " + (pos.gd > 0 ? "+" : "") + pos.gd : ""}</div></div>
-      <div class="card"><div class="stat-l">Board confidence</div>
-        <div class="stat">${Math.round(h.board.confidence)}<span class="muted" style="font-size:14px">/100</span></div>
-        ${bar(h.board.confidence, h.board.confidence < 30 ? "red" : h.board.confidence < 55 ? "amber" : "")}</div>
-      <div class="card"><div class="stat-l">Fan sentiment</div>
-        <div class="stat">${Math.round(h.fans.sentiment)}<span class="muted" style="font-size:14px">/100</span></div>
-        ${bar(h.fans.sentiment, h.fans.sentiment < 30 ? "red" : "")}</div>
-      <div class="card"><div class="stat-l">Finances</div>
-        <div class="stat small">${money(h.finances.cash)} <span class="muted">cash</span></div>
-        <div class="small muted">Budget ${money(h.finances.transfer_budget)} · wages ${money(h.finances.wage_bill)}/${money(h.finances.wage_budget)}</div></div>
+    ${f ? `<div class="mhero" style="--comp:${compColor(f.code)}">
+      <div class="mhero-top"><span class="comp-dot"></span><span>${esc(f.comp || "Match")}${f.stage !== "league" ? " · " + esc(f.stage) : ""}</span><span class="spacer"></span><span>${fmtDate(f.date)}</span></div>
+      <div class="mhero-body">
+        <div class="mhero-club">${crest(f.home_code, "xl")}<div class="nm">${esc(f.home)}</div></div>
+        <div class="mhero-mid"><div class="vs">VS</div><div class="when">${f.is_home ? "HOME" : "AWAY"}</div><div class="venue">${esc(f.venue || "")}</div></div>
+        <div class="mhero-club">${crest(f.away_code, "xl")}<div class="nm">${esc(f.away)}</div></div>
+      </div>
+      <div class="mhero-foot">
+        <button class="btn primary" onclick="go('match')">MATCH CENTRE ▸</button>
+        <button class="btn" onclick="quickPlay()">Play now</button>
+      </div>
+    </div>` : `<div class="card"><h3>No fixtures left</h3><p class="muted small" style="margin-top:4px">Continue to process the end of season.</p></div>`}
+
+    <div class="strip">
+      <div class="st"><span class="st-l">Pos</span><span class="st-v">${pos && pos.played ? pos.pos + "<i>/" + pos.size + "</i>" : "—"}</span></div>
+      <div class="st"><span class="st-l">Pts</span><span class="st-v">${pos ? pos.pts : 0}<i>${pos && pos.played ? " · GD " + (pos.gd > 0 ? "+" : "") + pos.gd : ""}</i></span></div>
+      <div class="st"><span class="st-l">Form</span><span class="st-v">${pills || "<i>—</i>"}</span></div>
+      <div class="st"><span class="st-l">Board</span><span class="st-v">${Math.round(h.board.confidence)}</span>${bar(h.board.confidence, h.board.confidence < 30 ? "red" : h.board.confidence < 55 ? "amber" : "")}</div>
+      <div class="st"><span class="st-l">Fans</span><span class="st-v">${Math.round(h.fans.sentiment)}</span>${bar(h.fans.sentiment, h.fans.sentiment < 30 ? "red" : "")}</div>
+      <div class="st"><span class="st-l">Cash</span><span class="st-v">${money(h.finances.cash)}</span></div>
+    </div>
+
+    <div class="grid g2">
+      <div class="card tight">
+        <div class="sec-h"><h3>Squad readiness</h3><span class="spacer"></span><button class="btn sm" onclick="go('squad')">Open</button></div>
+        <div class="kv"><span>Fit &amp; available</span><b class="${avail < 12 ? "warn" : "good"}">${avail}</b></div>
+        <div class="kv"><span>Injured</span><b class="${ss.injured ? "bad" : ""}">${ss.injured}</b></div>
+        <div class="kv"><span>Suspended</span><b class="${ss.suspended ? "bad" : ""}">${ss.suspended}</b></div>
+        <div class="kv"><span>Below match fitness</span><b class="${ss.unfit ? "warn" : ""}">${ss.unfit}</b></div>
+      </div>
+      <div class="card tight">
+        <div class="sec-h"><h3>Board</h3><span class="spacer"></span>${h.board.warning ? '<span class="tag URGENT">WARNING</span>' : '<span class="tag">STABLE</span>'}</div>
+        ${h.board.objectives.map(o => `<div class="obj"><div class="t">${esc(o.text)}${o.critical ? ' <span class="tag URGENT">CRIT</span>' : ""}</div>
+          <div class="small muted">${esc(o.comp || o.status || "")}</div></div>`).join("")}
+      </div>
     </div>
 
     ${godCard(adv)}
 
-    <div class="grid g2 stack" style="margin-top:12px">
-      <div class="card">
-        <h3>Next match</h3>
-        ${h.next_fixture ? `
-          <div class="scoreboard" style="margin-bottom:10px">
-            <div class="team">${esc(h.next_fixture.home)}</div>
-            <div class="score">v</div>
-            <div class="team">${esc(h.next_fixture.away)}</div>
-          </div>
-          <div class="kv"><span>Competition</span><b>${esc(h.next_fixture.comp || "—")} ${h.next_fixture.stage !== "league" ? esc(h.next_fixture.stage) : ""}</b></div>
-          <div class="kv"><span>Date</span><b>${fmtDate(h.next_fixture.date)}</b></div>
-          <div class="kv"><span>Venue</span><b>${esc(h.next_fixture.venue)}</b></div>
-          <div class="row" style="margin-top:10px">
-            <button class="btn primary" onclick="go('match')">MATCH CENTRE ▸</button>
-            <button class="btn" onclick="quickPlay()">Play match now</button>
-          </div>` : '<p class="muted">No fixtures scheduled.</p>'}
-        <h3 style="margin-top:14px">Recent form</h3>
-        <div class="row">${(h.form || []).map(f => `<span class="tag ${f.res}" title="${esc(f.date)}">${f.res} ${f.score}</span>`).join("") || '<span class="muted small">No matches yet</span>'}</div>
-        <h3 style="margin-top:14px">Last result</h3>
-        ${h.last_result && h.last_result.result ? `<div class="row"><span class="tag ${h.last_result.result}">${h.last_result.result}</span>
-          <b>${esc(h.last_result.home)} ${h.last_result.hg}–${h.last_result.ag} ${esc(h.last_result.away)}</b>
-          <span class="muted small">${esc(h.last_result.comp || "")} · xG ${h.last_result.xg}–${h.last_result.xga}</span></div>`
-        : '<p class="muted small">No result yet.</p>'}
+    <div class="grid g2">
+      <div class="card tight" style="padding:0">
+        <div class="sec-h" style="padding:10px 12px 4px"><h3>${esc(h.club.league)}</h3><span class="spacer"></span><button class="btn sm" onclick="go('table')">Full</button></div>
+        <table><tbody>${top.map(rowHtml).join("")}${mine && mine.pos > 8 ? `<tr><td colspan="4" class="muted small" style="text-align:center;padding:2px">···</td></tr>${rowHtml(mine)}` : ""}</tbody></table>
       </div>
-
-      <div class="card">
-        <h3>Objectives</h3>
-        ${h.board.objectives.map(o => `<div class="obj"><div class="t">${esc(o.text)} ${o.critical ? '<span class="tag URGENT">CRITICAL</span>' : ""}</div>
-          <div class="small muted">${esc(o.comp || o.status || "")} ${o.target_pos ? "· target " + o.target_pos + "th" : ""}</div></div>`).join("")}
-        <h3 style="margin-top:14px">Squad</h3>
-        <div class="grid g4" style="gap:8px">
-          <div><div class="stat-l">Injured</div><div class="stat small">${h.squad_summary.injured}</div></div>
-          <div><div class="stat-l">Unfit</div><div class="stat small">${h.squad_summary.unfit}</div></div>
-          <div><div class="stat-l">Suspended</div><div class="stat small">${h.squad_summary.suspended}</div></div>
-          <div><div class="stat-l">Seniors</div><div class="stat small">${(h.squad_summary.groups.find(g => g.squad === "First Team") || { n: 0 }).n}</div></div>
-        </div>
-        <h3 style="margin-top:14px">Assistant</h3>
-        <div class="pre small" style="max-height:180px;overflow:auto">${esc(typeof h.assistant === "string" ? h.assistant : JSON.stringify(h.assistant))}</div>
-      </div>
-    </div>
-
-    <div class="grid g2" style="margin-top:12px">
-      <div class="card" style="padding:0">
-        <h3 style="padding:12px 14px 0">${esc(h.club.league)} table</h3>
-        <div style="max-height:330px;overflow:auto">
-        <table><thead><tr><th class="num">#</th><th>Club</th><th class="num">P</th><th class="num">W</th>
-          <th class="num">D</th><th class="num">L</th><th class="num">GD</th><th class="num">Pts</th></tr></thead>
-        <tbody>${(h.table || []).map(r => `<tr class="${r.club_id === h.club.id ? "me" : ""}">
-          <td class="num">${r.pos}</td><td>${esc(r.name)}</td><td class="num">${r.p}</td><td class="num">${r.w}</td>
-          <td class="num">${r.d}</td><td class="num">${r.l}</td><td class="num">${r.gf - r.ga > 0 ? "+" : ""}${r.gf - r.ga}</td>
-          <td class="num"><b>${r.pts}</b></td></tr>`).join("")}</tbody></table></div>
-      </div>
-      <div class="card" style="padding:0">
-        <h3 style="padding:12px 14px 0">Inbox <span class="muted small">(${h.unread} unread)</span></h3>
-        <div style="max-height:330px;overflow:auto" id="home-inbox"></div>
-        <div style="padding:8px 12px"><button class="btn sm" onclick="go('inbox')">Open inbox</button></div>
+      <div class="card tight" style="padding:0">
+        <div class="sec-h" style="padding:10px 12px 4px"><h3>Inbox</h3><span class="spacer"></span>${h.unread ? `<span class="tag NEW">${h.unread} new</span>` : ""}</div>
+        <div id="home-inbox"></div>
+        <div style="padding:8px 10px"><button class="btn sm wide" onclick="go('inbox')">Open inbox</button></div>
       </div>
     </div>`;
   const ib = await api.get("/api/inbox");
-  $("#home-inbox").innerHTML = ib.items.slice(0, 8).map(m => `
+  $("#home-inbox").innerHTML = ib.items.slice(0, 5).map(m => `
     <button class="mrow slim p-${(m.priority || "").toLowerCase()} ${m.read ? "" : "unread"}" onclick="openMail(${m.id})">
       <span class="mdot"></span>
       <div class="mmain"><div class="msub">${esc(m.subject)}</div>
         <div class="mmeta"><span class="mcat">${esc(m.cat)}</span><span>${fmtDate(m.date)}</span></div></div>
-    </button>`).join("") || '<p class="muted small" style="padding:10px">Empty</p>';
+    </button>`).join("") || '<p class="muted small" style="padding:10px 12px">Empty</p>';
 }
 function godCard(adv) {
   if (!adv || !adv.ok) return "";
@@ -1002,6 +1006,47 @@ async function setTraining(day, session, focus) {
 
 /* -------------------------------------------------------------------- MATCH */
 let MATCH = null;
+/* ------------------------------------------------------------------ MATCHDAY */
+function evIcon(t) {
+  if (t === "goal") return ["ev-goal", "G"];
+  if (t === "yellow") return ["ev-card", "Y"];
+  if (t === "red") return ["ev-red", "R"];
+  if (t === "sub") return ["ev-sub", "S"];
+  if (t === "injury") return ["ev-info", "+"];
+  if (t === "penalties") return ["ev-info", "P"];
+  return ["ev-info", "•"];
+}
+function evRow(e) {
+  const [cls, ic] = evIcon(e.type);
+  return `<div class="ev ${cls}"><span class="min">${e.minute}'</span><span class="ei">${ic}</span>
+    <div class="et">${esc(e.text || e.type)}</div></div>`;
+}
+function statDuo(a, b, label, fmt) {
+  const f = fmt || (x => x);
+  const an = Number(a) || 0, bn = Number(b) || 0;
+  const tot = an + bn || 1;
+  return `<div class="stat-duo"><span class="v">${f(a)}</span>
+    <span class="lb">${label}<span class="sb"><i style="width:${an / tot * 100}%"></i></span>
+    <span class="sb r"><i style="width:${bn / tot * 100}%"></i></span></span>
+    <span class="v r">${f(b)}</span></div>`;
+}
+function sv(S, side, k) {
+  const o = (S || {})[side] || {};
+  let v = o[k];
+  if (v == null) v = o[k === "possession" ? "poss" : k === "poss" ? "possession" : k];
+  return v;
+}
+function statsBlock(S, meFirst) {
+  const A = meFirst ? "me" : "home", B = meFirst ? "opp" : "away";
+  const rows = [["possession", "Possession %"], ["shots", "Shots"], ["sot", "On target"],
+    ["xg", "xG", x => Number(x || 0).toFixed(2)], ["big", "Big chances"], ["corners", "Corners"],
+    ["fouls", "Fouls"], ["saves", "Saves"]];
+  return rows.map(([k, label, f]) => {
+    const a = sv(S, A, k), b = sv(S, B, k);
+    if (a == null && b == null) return "";
+    return statDuo(a == null ? "—" : a, b == null ? "—" : b, label, f);
+  }).join("");
+}
 async function renderMatch() {
   await refreshState();
   if (G.pendingMatch) { showHalftime(G.halftimeState); return; }
@@ -1009,130 +1054,156 @@ async function renderMatch() {
   if (!j.ok) { $("#content").innerHTML = `<h1>Match Centre</h1><p class="muted">${esc(j.msg)}</p>`; return; }
   MATCH = j;
   const p = j.preview, f = p.fixture;
+  G.codes = { home: f.home_code, away: f.away_code, comp: f.code, compName: compLabel(f), stage: f.stage, venue: f.venue, date: f.date };
+  const myForm = p.my.form || [], opForm = p.opp.form || [];
+  const hForm = f.is_home ? myForm : opForm, aForm = f.is_home ? opForm : myForm;
   $("#content").innerHTML = `
-    <h1>Match Centre</h1>
-    <p class="sub">${esc(f.comp || "Friendly")}${f.stage && f.stage !== "league" ? " · " + esc(f.stage) : ""} · ${fmtDate(f.date)} · ${esc(f.venue)}</p>
-    <div class="scoreboard">
-      <div class="team">${esc(f.home)}${f.is_home ? ' <span class="tag">you</span>' : ""}</div>
-      <div class="score">v</div>
-      <div class="team">${esc(f.away)}${!f.is_home ? ' <span class="tag">you</span>' : ""}</div>
-    </div>
-    <div class="grid g3" style="margin-top:12px">
-      <div class="card"><h3>Your team</h3>
-        <div class="kv"><span>Squad strength</span><b>${p.my.ca.toFixed(1)}</b></div>
-        <div class="kv"><span>Attack</span><b>${p.my.attack}</b></div>
-        <div class="kv"><span>Defence</span><b>${p.my.defence}</b></div>
-        <div class="kv"><span>Condition</span><b>${p.my.condition}</b></div>
-        <div class="kv"><span>Tactic</span><b>${esc(p.tactic.formation)} / ${esc(p.tactic.mentality)}</b></div>
-        <div class="row" style="margin-top:6px">${(p.my.form || []).map(x => `<span class="tag ${x.res}">${x.res} ${x.score}</span>`).join("") || '<span class="muted small">no form</span>'}</div>
+    <div class="mhero" style="--comp:${compColor(f.code)}">
+      <div class="mhero-top"><span class="comp-dot"></span><span>${esc(compLabel(f))}${f.stage && f.stage !== "league" && f.comp ? " · " + esc(f.stage) : ""}</span><span class="spacer"></span><span>${fmtDate(f.date)}</span></div>
+      <div class="mhero-body">
+        <div class="mhero-club">${crest(f.home_code, "xl")}<div class="nm">${esc(f.home)}</div>
+          <div class="fm">${formPills(hForm, 5)}</div></div>
+        <div class="mhero-mid"><div class="vs">VS</div><div class="when">${fmtDate(f.date)}</div><div class="venue">${esc(f.venue || "")}</div></div>
+        <div class="mhero-club">${crest(f.away_code, "xl")}<div class="nm">${esc(f.away)}</div>
+          <div class="fm">${formPills(aForm, 5)}</div></div>
       </div>
-      <div class="card"><h3>Opposition</h3>
-        <div class="kv"><span>${esc(p.opp.name)}</span><b>${p.opp.ca ? p.opp.ca.toFixed(1) : "unknown"}</b></div>
-        <div class="kv"><span>Reputation</span><b>${p.opp.rep}</b></div>
-        <div class="kv"><span>League</span><b>${esc(p.opp.league)}</b></div>
-        <div class="row" style="margin-top:6px">${(p.opp.form || []).map(x => `<span class="tag ${x.res}">${x.res} ${x.score}</span>`).join("")}</div>
-        <h3 style="margin-top:12px">Scouting report</h3>
-        <div class="small muted">Knowledge: ${p.opposition_report.known}%</div>
-        ${p.opposition_report.key_players.length ? `<div style="margin-top:6px">${p.opposition_report.key_players.map(k =>
-          `<div class="kv"><span>${esc(k.name)} (${esc(k.pos)}, ${k.age})</span><b>${k.goals} goals${k.ca ? " · CA " + k.ca : ""}</b></div>`).join("")}</div>`
-        : '<div class="small muted" style="margin-top:6px">No report — you have not scouted this opponent.</div>'}
-      </div>
-      <div class="card"><h3>Kick off</h3>
-        <p class="small muted">The simulation is identical in every mode — only how much you watch changes.
-          In <b>full</b> and <b>key moments</b> mode the match pauses at half-time for your team talk and substitutions.</p>
-        <div class="row" style="flex-direction:column;align-items:stretch">
-          <button class="btn primary" onclick="playMatch('full')">Watch full match</button>
-          <button class="btn" onclick="playMatch('key')">Key moments (pause at HT)</button>
-          <button class="btn" onclick="playMatch('instant')">Instant result</button>
-        </div>
-        <div class="row" style="margin-top:10px">
-          <button class="btn sm" onclick="go('tactics')">Tactics & team</button>
-          <button class="btn sm" onclick="renderMatch()">Refresh</button>
-        </div>
+      <div class="mhero-foot">
+        <button class="btn primary" onclick="playMatch('full')">Watch full match</button>
+        <button class="btn" onclick="playMatch('key')">Key moments</button>
+        <button class="btn" onclick="playMatch('instant')">Instant result</button>
       </div>
     </div>
+
     <div class="grid g2" style="margin-top:12px">
-      <div class="card"><h3>Selected XI</h3>${pitchHTML(p.xi, false)}</div>
-      <div class="card"><h3>Bench</h3>
-        <table><thead><tr><th>Pos</th><th>Name</th><th class="num">CA</th><th class="num">Cond</th>
-          <th class="num">Fit</th><th class="num">Fat</th></tr></thead>
+      <div class="card tight">
+        <div class="sec-h"><h3>Your team</h3><span class="spacer"></span><button class="btn sm" onclick="go('tactics')">Change</button></div>
+        <div class="kv"><span>Shape &amp; mentality</span><b>${esc(p.tactic.formation)} · ${esc(p.tactic.mentality)}</b></div>
+        <div class="kv"><span>Squad strength</span><b>${p.my.ca.toFixed(1)}</b></div>
+        <div class="kv"><span>Attack / defence</span><b>${p.my.attack} / ${p.my.defence}</b></div>
+        <div class="kv"><span>Avg condition</span><b>${p.my.condition}</b></div>
+      </div>
+      <div class="card tight">
+        <div class="sec-h"><h3>Opposition</h3><span class="spacer"></span><span class="small muted">${p.opposition_report.known}% known</span></div>
+        <div class="kv"><span>${esc(p.opp.name)}</span><b>${p.opp.ca ? p.opp.ca.toFixed(1) : "unknown"}</b></div>
+        <div class="kv"><span>Reputation · league</span><b>${p.opp.rep} · ${esc(p.opp.league)}</b></div>
+        ${p.opposition_report.key_players.slice(0, 3).map(k => `<div class="kv"><span>${esc(k.name)} <i class="muted small">${esc(k.pos)}</i></span><b>${k.goals}g${k.ca ? " · " + k.ca : ""}</b></div>`).join("") || '<div class="small muted" style="padding:6px 0">No scouting report on this opponent.</div>'}
+      </div>
+    </div>
+
+    <div class="grid g2" style="margin-top:12px">
+      <div class="card tight"><div class="sec-h"><h3>Selected XI</h3></div>${pitchHTML(p.xi, false)}</div>
+      <div class="card tight" style="padding:0">
+        <div class="sec-h" style="padding:10px 12px 4px"><h3>Bench</h3></div>
+        <table class="mc"><thead><tr><th>Pos</th><th>Name</th><th class="num">CA</th><th class="num">Cond</th><th class="num">Fit</th></tr></thead>
         <tbody>${p.bench.map(b => `<tr><td><span class="pos">${esc(b.pos)}</span></td><td>${esc(b.name)}</td>
-          <td class="num">${b.ca.toFixed(1)}</td><td class="num">${b.condition.toFixed(2)}</td>
-          <td class="num">${Math.round(b.fitness)}</td><td class="num">${Math.round(b.fatigue)}</td></tr>`).join("")}</tbody></table>
+          <td class="num">${b.ca.toFixed(1)}</td><td class="num">${b.condition.toFixed(2)}</td><td class="num">${Math.round(b.fitness)}</td></tr>`).join("")}</tbody></table>
       </div>
     </div>`;
 }
+
+/* live presentation: clock ticks, events land at their minute, score pops */
+function liveScreen(cfg, onDone) {
+  const C = G.codes || {};
+  const evs = (cfg.events || []).slice().sort((a, b) => a.minute - b.minute);
+  const end = cfg.endMin || Math.max(45, ...evs.map(e => e.minute), 1);
+  $("#content").innerHTML = `
+    <div class="mhero" style="--comp:${compColor(C.comp)}">
+      <div class="mhero-top"><span class="comp-dot"></span><span>${esc(C.compName || "Match")}${C.stage && C.stage !== "league" ? " · " + esc(C.stage) : ""}</span><span class="spacer"></span><span>LIVE</span></div>
+      <div class="live-bar" style="border:0;border-radius:0;background:transparent">
+        <span class="lb-team">${crest(C.home)}<b>${esc(cfg.homeShort || "")}</b></span>
+        <span class="lb-mid"><span class="lscore" id="lv-score">${cfg.base[0]} – ${cfg.base[1]}</span>
+          <span class="clock" id="lv-clock">${cfg.startMin}'</span></span>
+        <span class="lb-team r"><b>${esc(cfg.awayShort || "")}</b>${crest(C.away)}</span>
+      </div>
+      <div id="lv-feed" style="padding:4px 14px 12px;min-height:34dvh;max-height:52dvh;overflow-y:auto">
+        <p class="muted small lv-empty" style="text-align:center;padding:26px 0">Events land here as they happen.</p>
+      </div>
+      <div class="mhero-foot"><button class="btn sm" id="lv-skip">Skip to ${cfg.label} ▸</button></div>
+    </div>`;
+  let min = cfg.startMin || 0, i = 0, sc = cfg.base.slice();
+  const feed = $("#lv-feed"), clock = $("#lv-clock"), scoreEl = $("#lv-score");
+  const push = e => {
+    const em = feed.querySelector(".lv-empty"); if (em) em.remove();
+    feed.insertAdjacentHTML("afterbegin", evRow(e));
+    if (e.type === "goal") {
+      if ((e.side === "H") === true) sc[0]++; else if (e.side === "A") sc[1]++;
+      scoreEl.textContent = sc[0] + " – " + sc[1];
+      scoreEl.animate([{ transform: "scale(1.25)" }, { transform: "scale(1)" }], { duration: 260 });
+    }
+  };
+  const finish = () => { clearInterval(timer); while (i < evs.length) push(evs[i++]); clock.textContent = end + "'"; setTimeout(onDone, 500); };
+  $("#lv-skip").onclick = finish;
+  const timer = setInterval(() => {
+    min++;
+    clock.textContent = min + "'";
+    while (i < evs.length && evs[i].minute <= min) push(evs[i++]);
+    if (min >= end) finish();
+  }, 85);
+}
+
 async function playMatch(mode) {
+  G.matchMode = mode;
   G.busy = true; setBusy(true);
   try {
     const j = await api.post("/api/match/play", { mode });
-    if (!j.ok) { toast(esc(j.msg || "Could not play the match"), 5000); G.busy = false; return; }
+    if (!j.ok) { toast(esc(j.msg || "Could not play the match"), 5000); G.busy = false; setBusy(false); return; }
     if (j.halftime) {
       G.pendingMatch = true; G.halftimeState = j.state; G.matchFixture = j.fixture;
-      showHalftime(j.state);
+      if (mode === "full") {
+        const st = j.state;
+        liveScreen({ events: st.events, base: [0, 0], startMin: 0, endMin: 45, label: "half-time",
+          homeShort: st.home_short || st.home_name, awayShort: st.away_short || st.away_name },
+          () => showHalftime(st));
+      } else showHalftime(j.state);
     } else {
       await refreshState();
       showResult(j.result);
     }
   } catch (e) { toast("Match failed: " + esc(e.message), 6000); }
   G.busy = false; setBusy(false);
-  G.busy = false;
 }
 function showHalftime(st) {
   if (!st) return;
+  window._ht = st;
+  const C = G.codes || {};
   $("#content").innerHTML = `
-    <h1>Half-time</h1>
-    <div class="scoreboard">
-      <div class="team">${esc(st.home_name)}${st.is_home ? ' <span class="tag">you</span>' : ""}</div>
-      <div><div class="score">${st.score.home} – ${st.score.away}</div><div class="min">45'</div></div>
-      <div class="team">${esc(st.away_name)}${!st.is_home ? ' <span class="tag">you</span>' : ""}</div>
+    <div class="mhero" style="--comp:${compColor(C.comp)}">
+      <div class="mhero-top"><span class="comp-dot"></span><span>${esc(C.compName || "Match")}</span><span class="spacer"></span><span>HALF-TIME</span></div>
+      <div class="live-bar" style="border:0;border-radius:0;background:transparent">
+        <span class="lb-team">${crest(C.home)}<b>${esc(st.home_name)}</b></span>
+        <span class="lb-mid"><span class="lscore">${st.score.home} – ${st.score.away}</span><span class="clock ht">HT</span></span>
+        <span class="lb-team r"><b>${esc(st.away_name)}</b>${crest(C.away)}</span>
+      </div>
+      <div style="padding:6px 14px 14px">${statsBlock(st.stats, true)}</div>
+    </div>
+    <div class="card tight" style="margin-top:12px">
+      <div class="sec-h"><h3>First-half incidents</h3></div>
+      ${st.events.length ? st.events.slice().reverse().map(evRow).join("") : '<p class="muted small">A quiet first half.</p>'}
     </div>
     <div class="grid g2" style="margin-top:12px">
-      <div class="card">
-        <h3>Half-time statistics</h3>
-        <table><tbody>
-          ${[["Possession %", "poss"], ["Shots", "shots"], ["On target", "sot"], ["xG", "xg"], ["Corners", "corners"], ["Fouls", "fouls"]]
-            .map(([label, k]) => `<tr><td class="num"><b>${k === "xg" ? Number(st.stats.me[k]).toFixed(2) : st.stats.me[k]}</b></td>
-              <td class="muted small" style="text-align:center">${label}</td>
-              <td class="num"><b>${k === "xg" ? Number(st.stats.opp[k]).toFixed(2) : st.stats.opp[k]}</b></td></tr>`).join("")}
-        </tbody></table>
-        <h3 style="margin-top:12px">First-half incidents</h3>
-        <div class="commentary" style="max-height:180px">
-          ${st.events.length ? st.events.map(e => `<div class="${e.type}"><span class="m">${e.minute}'</span>
-            <span class="${e.type === "goal" ? "goal" : e.type === "red" ? "red" : e.type === "injury" ? "inj" : ""}">${esc(e.text || e.type)}</span></div>`).join("")
-          : '<div class="muted">A quiet first half.</div>'}
-        </div>
-      </div>
-      <div class="card">
-        <h3>Team talk</h3>
-        <select id="ht-talk" style="width:100%">
+      <div class="card tight">
+        <div class="sec-h"><h3>Team talk</h3></div>
+        <select id="ht-talk" style="width:100%;min-height:38px;background:var(--sf2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:0 10px">
           ${st.talks.map(t => `<option value="${t}" ${t === "neutral" ? "selected" : ""}>${esc(t[0].toUpperCase() + t.slice(1))}</option>`).join("")}
         </select>
         <div class="small muted" style="margin-top:6px" id="ht-hint">${esc(talkHint("neutral", st))}</div>
-        <h3 style="margin-top:14px">Substitutions <span class="muted small">(up to 3)</span></h3>
+        <div class="sec-h" style="margin-top:12px"><h3>Substitutions</h3><span class="spacer"></span><span class="small muted">max 3</span></div>
         <div id="ht-subs"></div>
-        <div class="row" style="margin-top:8px"><button class="btn sm" onclick="addSubRow()">+ Add substitution</button></div>
-        <div class="row" style="margin-top:14px">
+        <button class="btn sm" onclick="addSubRow()" style="margin-top:6px">+ Add substitution</button>
+        <div class="row" style="margin-top:12px">
           <button class="btn primary" onclick="submitHalftime()">Send them back out ▸</button>
           <button class="btn" onclick="submitHalftime(true)">No changes</button>
         </div>
       </div>
-    </div>
-    <div class="grid g2" style="margin-top:12px">
-      <div class="card"><h3>Your players at the break</h3>
+      <div class="card tight" style="padding:0">
+        <div class="sec-h" style="padding:10px 12px 4px"><h3>Your players at the break</h3></div>
         <table><thead><tr><th>Pos</th><th>Name</th><th class="num">Rating</th><th class="num">Fatigue</th></tr></thead>
         <tbody>${st.xi.map(p => `<tr><td><span class="pos">${esc(p.pos)}</span></td><td>${esc(p.name)}</td>
           <td class="num"><b>${p.rating.toFixed(2)}</b></td><td class="num">${Math.round(p.fatigue)}</td></tr>`).join("")}</tbody></table>
       </div>
-      <div class="card"><h3>Bench</h3>
-        <table class="mc"><thead><tr><th>Pos</th><th>Name</th><th class="num">CA</th></tr></thead>
-        <tbody>${st.bench.map(b => `<tr><td><span class="pos">${esc(b.pos)}</span></td><td>${esc(b.name)}</td>
-          <td class="num">${b.ca.toFixed(1)}</td></tr>`).join("")}</tbody></table>
-      </div>
     </div>`;
-  window._ht = st;
   $("#ht-talk").addEventListener("change", e => $("#ht-hint").textContent = talkHint(e.target.value, st));
-  addSubRow();
+  SUB_ROWS = 0; addSubRow();
   polish($("#content"));
 }
 function talkHint(talk, st) {
@@ -1147,7 +1218,7 @@ function talkHint(talk, st) {
     attacking: "Raises the tempo and pushes the line up. Chases a goal."
   };
   let s = notes[talk] || "";
-  if (diff < 0 && (talk === "praise")) s += " You are losing — praise may read as complacency.";
+  if (diff < 0 && talk === "praise") s += " You are losing — praise may read as complacency.";
   if (diff > 0 && (talk === "firm" || talk === "aggressive")) s += " You are winning — harsh words can dent confidence.";
   return s;
 }
@@ -1160,9 +1231,9 @@ function addSubRow() {
   wrap.className = "row ht-sub";
   wrap.style.marginBottom = "6px";
   wrap.innerHTML = `
-    <select class="sub-off" style="flex:1"><option value="">Off…</option>
+    <select class="sub-off" style="flex:1;min-height:36px;background:var(--sf2);color:var(--tx);border:1px solid var(--line2);border-radius:8px"><option value="">Off…</option>
       ${st.xi.map(p => `<option value="${p.pid}">${esc(p.name)} (${esc(p.pos)} ${p.rating.toFixed(2)})</option>`).join("")}</select>
-    <select class="sub-on" style="flex:1"><option value="">On…</option>
+    <select class="sub-on" style="flex:1;min-height:36px;background:var(--sf2);color:var(--tx);border:1px solid var(--line2);border-radius:8px"><option value="">On…</option>
       ${st.bench.map(b => `<option value="${b.pid}">${esc(b.name)} (${esc(b.pos)} ${b.ca.toFixed(1)})</option>`).join("")}</select>
     <button class="btn sm" onclick="this.parentNode.remove()">✕</button>`;
   $("#ht-subs").appendChild(wrap);
@@ -1173,74 +1244,91 @@ async function submitHalftime(noChange) {
     const off = $(".sub-off", r).value, on = $(".sub-on", r).value;
     return off && on ? [+off, +on] : null;
   }).filter(x => x);
-  G.busy = true;
+  G.busy = true; setBusy(true);
   try {
     const j = await api.post("/api/match/halftime", { talk, subs });
     G.pendingMatch = false; G.halftimeState = null; SUB_ROWS = 0;
-    if (!j.ok) { toast(esc(j.msg || "Could not resume the match"), 5000); G.busy = false; return; }
+    if (!j.ok) { toast(esc(j.msg || "Could not resume the match"), 5000); G.busy = false; setBusy(false); return; }
     await refreshState();
-    showResult(j.result);
+    if (G.matchMode === "full") {
+      const st = window._ht;
+      const second = (j.result.events || []).filter(e => e.minute > 45);
+      liveScreen({ events: second, base: [st.score.home, st.score.away], startMin: 45, endMin: 90,
+        label: "full-time", homeShort: st.home_short || st.home_name, awayShort: st.away_short || st.away_name },
+        () => showResult(j.result));
+    } else showResult(j.result);
   } catch (e) { toast("Match failed: " + esc(e.message), 6000); }
-  G.busy = false;
+  G.busy = false; setBusy(false);
 }
 function showResult(r) {
   const isH = r.is_home;
   const my = isH ? r.hg : r.ag, opp = isH ? r.ag : r.hg;
   const res = r.result || (my > opp ? "W" : my === opp ? "D" : "L");
   const mySide = isH ? "H" : "A";
-  const all = r.events || [];
+  const all = (r.events || []).slice().sort((a, b) => a.minute - b.minute);
   const relevant = all.filter(e => e.type === "goal" || e.type === "red" || e.type === "injury" ||
     e.type === "sub" || e.type === "halftime" || e.type === "kickoff" || e.type === "team_talk" ||
     e.type === "penalties" || e.side === mySide);
   const shown = r.mode === "instant" ? all.filter(e => ["goal", "red", "penalties", "halftime", "kickoff"].includes(e.type))
     : r.mode === "key" ? relevant.filter(e => ["goal", "red", "injury", "sub", "halftime", "kickoff", "team_talk", "penalties"].includes(e.type))
     : relevant;
-  const statRows = [["Possession %", "possession"], ["Shots", "shots"], ["On target", "sot"],
-    ["Big chances", "big"], ["xG", "xg"], ["Corners", "corners"], ["Fouls", "fouls"],
-    ["Yellow", "yellow"], ["Red", "red"], ["Saves", "saves"]];
-  modal(`
-    <div class="scoreboard">
-      <div class="team">${esc(r.home)}${isH ? ' <span class="tag">you</span>' : ""}</div>
-      <div class="score">${r.hg} – ${r.ag}</div>
-      <div class="team">${esc(r.away)}${!isH ? ' <span class="tag">you</span>' : ""}</div>
-      <div class="sb-meta"><span class="tag ${res}">${res === "W" ? "WIN" : res === "D" ? "DRAW" : "LOSS"}</span>
-        <span>${esc(r.comp || "")} · ${fmtDate(r.date)}</span></div>
+  const C = G.codes || {};
+  const hCode = C.home || "", aCode = C.away || "";
+  const motm = (r.players || []).find(p => p.pid === r.motm);
+  $("#content").innerHTML = `
+    <div class="mhero" style="--comp:${compColor(C.comp)}">
+      <div class="mhero-top"><span class="comp-dot"></span><span>${esc(r.comp || C.compName || "Match")}${C.stage && C.stage !== "league" && r.comp ? " · " + esc(C.stage) : ""}</span><span class="spacer"></span><span>FULL-TIME</span></div>
+      <div class="mhero-body">
+        <div class="mhero-club">${crest(hCode, "xl")}<div class="nm">${esc(r.home)}</div></div>
+        <div class="mhero-mid"><div class="score" style="font-size:34px">${r.hg} – ${r.ag}</div>
+          <div class="row" style="justify-content:center"><span class="tag ${res}">${res === "W" ? "WIN" : res === "D" ? "DRAW" : "LOSS"}</span></div>
+          ${r.penalties ? `<div class="when">pens ${esc(JSON.stringify(r.penalties.home))}–${esc(JSON.stringify(r.penalties.away))}</div>` : ""}</div>
+        <div class="mhero-club">${crest(aCode, "xl")}<div class="nm">${esc(r.away)}</div></div>
+      </div>
+      ${motm ? `<div style="padding:0 14px 14px"><div class="motm"><div><div class="lbl">MAN OF THE MATCH</div>
+        <b>${esc(motm.name)}</b> <span class="muted small">${esc(motm.pos)} · rating ${motm.rating.toFixed(2)}${motm.goals ? " · " + motm.goals + "g" : ""}${motm.assists ? " · " + motm.assists + "a" : ""}</span></div></div></div>` : ""}
     </div>
-    ${r.penalties ? `<p class="small" style="text-align:center;margin-top:8px">Won ${esc(String(r.penalties.winner || ""))} on penalties — ${esc(JSON.stringify(r.penalties.home || ""))} / ${esc(JSON.stringify(r.penalties.away || ""))}</p>` : ""}
+
     <div class="grid g2" style="margin-top:12px">
-      <div>
-        <h3>Commentary <span class="muted small">(${esc(r.mode)} view)</span></h3>
-        <div class="commentary">
-          ${shown.map(e => `<div class="${e.type}"><span class="m">${e.minute}'</span>
-            <span class="${e.type === "goal" ? "goal" : e.type === "yellow" ? "card" : e.type === "red" ? "red" : e.type === "injury" ? "inj" : ""}">${esc(e.text || e.type)}</span></div>`).join("")}
-        </div>
-        <h3 style="margin-top:12px">Statistics</h3>
-        <table><tbody>${statRows.map(([label, k]) => `<tr>
-          <td class="num"><b>${fmtStat(r.stats.home[k], k)}</b></td>
-          <td class="muted small" style="text-align:center">${label}</td>
-          <td class="num"><b>${fmtStat(r.stats.away[k], k)}</b></td></tr>`).join("")}</tbody></table>
+      <div class="card tight">
+        <div class="sec-h"><h3>Match stats</h3></div>
+        ${statsBlock(r.stats, false)}
       </div>
-      <div>
-        <h3>Your players</h3>
-        <div style="max-height:340px;overflow:auto">
-        <table><thead><tr><th>Pos</th><th>Name</th><th class="num">Min</th><th class="num">G</th>
-          <th class="num">A</th><th class="num">Sh</th><th class="num">xG</th><th class="num">Rating</th></tr></thead>
-        <tbody>${r.players.map(p => `<tr class="${p.pid === r.motm ? "me" : ""}">
-          <td><span class="pos">${esc(p.pos)}</span></td>
-          <td>${esc(p.name)}${p.pid === r.motm ? ' <span class="tag" style="color:var(--gold)">MOTM</span>' : ""}</td>
-          <td class="num">${p.mins}</td><td class="num">${p.goals || ""}</td><td class="num">${p.assists || ""}</td>
-          <td class="num">${p.shots || ""}</td><td class="num">${p.xg || ""}</td>
-          <td class="num"><b>${p.rating.toFixed(2)}</b></td></tr>`).join("")}</tbody></table></div>
-        ${r.injuries && r.injuries.length ? `<h3 style="margin-top:12px">Injuries</h3>
-          ${r.injuries.map(i => `<div class="small" style="color:#ff9b9b">${esc(i.name)} — ${esc(i.injury)}, out ${i.days} days</div>`).join("")}` : ""}
-        <div class="kv" style="margin-top:10px"><span>Board confidence</span><b>${r.board_confidence}</b></div>
-        <div class="kv"><span>Fan sentiment</span><b>${r.fan_sentiment}</b></div>
-        <div class="small muted" style="margin-top:6px">${esc(r.weather || "")} · referee ${esc(r.referee || "")}</div>
+      <div class="card tight">
+        <div class="sec-h"><h3>Key events</h3><span class="spacer"></span><span class="small muted">${esc(r.mode)} view</span></div>
+        <div style="max-height:300px;overflow-y:auto">${shown.slice().reverse().map(evRow).join("") || '<p class="muted small">Nothing notable.</p>'}</div>
       </div>
     </div>
-    <div class="row" style="margin-top:14px"><span class="spacer"></span>
-      <button class="btn" onclick="closeModal();go('match')">Next fixture</button>
-      <button class="btn primary" onclick="closeModal();go('home')">Back to office</button></div>`, true);
+
+    <div class="card tight" style="margin-top:12px;padding:0">
+      <div class="sec-h" style="padding:10px 12px 4px"><h3>Your players</h3></div>
+      <div class="tw"><table><thead><tr><th>Pos</th><th>Name</th><th class="num">Min</th><th class="num">G</th>
+        <th class="num">A</th><th class="num">Sh</th><th class="num">xG</th><th class="num">Rating</th></tr></thead>
+      <tbody>${(r.players || []).map(p => `<tr class="${p.pid === r.motm ? "me" : ""}">
+        <td><span class="pos">${esc(p.pos)}</span></td>
+        <td>${esc(p.name)}${p.pid === r.motm ? ' <span class="tag" style="color:var(--gold)">MOTM</span>' : ""}</td>
+        <td class="num">${p.mins}</td><td class="num">${p.goals || ""}</td><td class="num">${p.assists || ""}</td>
+        <td class="num">${p.shots || ""}</td><td class="num">${p.xg || ""}</td>
+        <td class="num"><b>${p.rating.toFixed(2)}</b></td></tr>`).join("")}</tbody></table></div>
+    </div>
+
+    <div class="grid g2" style="margin-top:12px">
+      <div class="card tight">
+        <div class="sec-h"><h3>Aftermath</h3></div>
+        <div class="kv"><span>Board confidence</span><b>${r.board_confidence}</b></div>
+        <div class="kv"><span>Fan sentiment</span><b>${r.fan_sentiment}</b></div>
+        <div class="kv"><span>Conditions</span><b class="small">${esc(r.weather || "—")} · ${esc(r.referee || "—")}</b></div>
+        ${r.injuries && r.injuries.length ? r.injuries.map(i => `<div class="kv"><span class="bad">${esc(i.name)}</span><b class="small">${esc(i.injury)} · ${i.days}d</b></div>`).join("") : ""}
+      </div>
+      <div class="card tight">
+        <div class="sec-h"><h3>Continue</h3></div>
+        <p class="small muted">The result is recorded across league tables, cups, finances, morale and the news cycle.</p>
+        <div class="row" style="margin-top:10px;flex-direction:column;align-items:stretch">
+          <button class="btn primary" onclick="go('home')">Back to office ▸</button>
+          <button class="btn" onclick="go('inbox')">Check inbox</button>
+        </div>
+      </div>
+    </div>`;
 }
 function fmtStat(v, k) {
   if (v == null) return "—";
@@ -1557,11 +1645,11 @@ async function renderTable() {
         <th class="num">GD</th><th class="num">Pts</th><th>Form</th></tr></thead>
       <tbody>${j.rows.map(r => `<tr class="${r.club_id === j.my_club ? "me" : ""}">
         <td class="num">${r.pos}${r.zone === "promotion" ? ' <span style="color:var(--good)">▲</span>' : r.zone === "relegation" ? ' <span style="color:var(--bad)">▼</span>' : ""}</td>
-        <td>${esc(r.name)} <span class="muted small">(${r.rep})</span></td>
+        <td><span class="cellclub">${crest(r.code)}<span>${esc(r.name)} <i class="muted small">${r.rep}</i></span></span></td>
         <td class="num">${r.p}</td><td class="num">${r.w}</td><td class="num">${r.d}</td><td class="num">${r.l}</td>
         <td class="num">${r.gf}</td><td class="num">${r.ga}</td>
         <td class="num">${r.gf - r.ga > 0 ? "+" : ""}${r.gf - r.ga}</td><td class="num"><b>${r.pts}</b></td>
-        <td class="small">${(r.form || "").split("").map(x => `<span class="tag ${x}">${x}</span>`).join(" ")}</td></tr>`).join("")}</tbody></table>
+        <td><span class="frm">${(r.form || "").split("").map(x => `<i class="fm-i ${x}">${x}</i>`).join("")}</span></td></tr>`).join("")}</tbody></table>
     </div>`;
 }
 
@@ -1813,14 +1901,72 @@ function closeSheet() {
   setTimeout(() => s.classList.remove("open"), 220);
 }
 
-function paintCrest(name, id) {
+/* ---------------- club crests: procedural shields in real club colours -------- */
+const CREST = {
+  MCI:["#6CABDD","#1C2C5B","plain"], ARS:["#EF0107","#FFFFFF","halves"], LIV:["#C8102E","#00B2A9","plain"],
+  CHE:["#034694","#FFFFFF","plain"], MUN:["#DA291C","#FBE122","plain"], TOT:["#FFFFFF","#132257","plain"],
+  NEW:["#241F20","#FFFFFF","stripes"], AVL:["#670E36","#95BFE5","halves"], WHU:["#7A263A","#1BB1E7","sash"],
+  BRI:["#0057B8","#FFCD00","stripes"], BRE:["#E30613","#FFFFFF","plain"], CRY:["#1B458F","#C4122E","stripes"],
+  FUL:["#FFFFFF","#000000","plain"], EVE:["#003399","#FFFFFF","plain"], WOL:["#FDB913","#231F20","plain"],
+  NOT:["#DD0000","#FFFFFF","plain"], AFC:["#DA291C","#000000","stripes"], SUN:["#EB172B","#FFFFFF","stripes"],
+  LEE:["#FFFFFF","#FFCD00","plain"], BUR:["#6C1D45","#99D6F0","halves"],
+  RMA:["#FFFFFF","#FEBE10","plain"], BAR:["#A50044","#004D98","stripes"], ATM:["#CB3524","#FFFFFF","stripes"],
+  ATH:["#EE2523","#FFFFFF","stripes"], RSC:["#0067B1","#FFFFFF","stripes"], VIL:["#FFE667","#005187","plain"],
+  BET:["#00954C","#FFFFFF","stripes"], SEV:["#FFFFFF","#D4021D","plain"], VAL:["#FFFFFF","#F18E00","halves"],
+  CELT:["#8AC3EE","#FFFFFF","stripes"], GIR:["#CD2534","#FFFFFF","stripes"], RAY:["#FFFFFF","#E53027","sash"],
+  OSA:["#D91A21","#00282E","plain"], GET:["#005999","#FFFFFF","plain"], ALA:["#0066B3","#FFFFFF","stripes"],
+  ESP:["#007FC8","#FFFFFF","stripes"], RCD:["#007DC3","#FFFFFF","stripes"], MLL:["#E20613","#000000","halves"],
+  ELC:["#00A94F","#FFFFFF","stripes"], LEV:["#A52316","#004C99","halves"],
+  INT:["#0068A8","#000000","stripes"], JUV:["#FFFFFF","#000000","stripes"], ACM:["#FB090B","#000000","stripes"],
+  NAP:["#12A0D7","#FFFFFF","plain"], ROM:["#8E1F2F","#F0BC42","plain"], LAZ:["#87D8F7","#FFFFFF","plain"],
+  ATA:["#1E71B8","#000000","stripes"], FIO:["#582C83","#FFFFFF","plain"], BOL:["#1A2F3F","#D4021D","plain"],
+  TOR:["#8B0000","#FFFFFF","plain"], UDI:["#000000","#FFFFFF","stripes"], GEN:["#00204B","#FF0000","halves"],
+  CAG:["#A2162B","#0A2B6B","plain"], LEC:["#F0C803","#D4021D","halves"], EMP:["#003058","#FFFFFF","plain"],
+  PAR:["#F8E850","#000000","stripes"], COM:["#00204B","#FFFFFF","plain"], VER:["#F2CE2C","#003058","plain"],
+  SAS:["#00A650","#000000","stripes"], PIS:["#00275C","#FFFFFF","plain"],
+  BAY:["#DC052D","#0066B2","plain"], BVB:["#FDE100","#000000","plain"], LEV1:["#E32221","#000000","halves"],
+  RBL:["#FFFFFF","#DD0741","plain"], SGE:["#000000","#E1000F","stripes"], VFB:["#FFFFFF","#E32219","sash"],
+  BMG:["#000000","#FFFFFF","stripes"], WOB:["#65B32E","#FFFFFF","plain"], TSG:["#1961B7","#FFFFFF","plain"],
+  SCF:["#000000","#ED2219","plain"], FCU:["#EB1923","#FFFFFF","plain"], FCSP:["#654E30","#FFFFFF","stripes"],
+  WER:["#1E9053","#FFFFFF","plain"], FCA:["#BA3733","#FFFFFF","plain"], MAI1:["#C3141E","#FFFFFF","plain"],
+  HAI:["#003080","#E30613","plain"], FCN1:["#000000","#FF0000","plain"], KOE:["#ED1C24","#FFFFFF","plain"],
+  PSG:["#004170","#DA291C","sash"], OM:["#2FAEE0","#FFFFFF","plain"], ASM:["#E4032E","#FFFFFF","sash"],
+  LOSC:["#D00027","#003383","halves"], OL:["#FFFFFF","#D20500","plain"], NIC:["#CC0000","#000000","stripes"],
+  REN:["#E32219","#000000","plain"], RCL:["#FFDD00","#E32219","halves"], STR:["#0076C0","#FFFFFF","stripes"],
+  TFC:["#3B1E5C","#FFFFFF","plain"], BRE1F:["#E32219","#FFFFFF","plain"], NAN:["#FCD405","#009850","halves"],
+  SR:["#D3062B","#FFFFFF","stripes"], HAV:["#00A0E0","#002545","stripes"], AJA:["#FFFFFF","#005CA9","stripes"],
+  ANG:["#000000","#FFFFFF","stripes"], MET:["#6C1E3A","#FFFFFF","plain"], LOR:["#F26722","#000000","stripes"],
+  CEL:["#00A14E","#FFFFFF","hoops"], RAN:["#0033A0","#D4021D","plain"], AJA1:["#D2122E","#FFFFFF","stripes"],
+  PSV:["#ED1C24","#FFFFFF","stripes"], FEY:["#D2122E","#FFFFFF","halves"], SLB:["#E0001B","#FFFFFF","plain"],
+  FCP:["#0033A0","#FFFFFF","stripes"], SPORT:["#008050","#FFFFFF","stripes"], GAL:["#FDB912","#A90432","halves"],
+  FEN:["#FFED00","#003050","stripes"], BOC:["#0033A0","#FFB800","sash"], RIV:["#FFFFFF","#E32219","sash"],
+};
+let CREST_N = 0;
+function crest(code, cls) {
+  code = code || "";
+  const c = CREST[code];
+  let c1, c2, pat, txt = "";
+  if (c) { c1 = c[0]; c2 = c[1]; pat = c[2]; }
+  else {
+    let h = 7; for (const ch of code || "?") h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    const hue = h % 360;
+    c1 = "hsl(" + hue + " 45% 34%)"; c2 = "hsl(" + ((hue + 40) % 360) + " 60% 66%)"; pat = "plain";
+    txt = (code || "?").slice(0, 2);
+  }
+  const id = "cr" + (CREST_N++);
+  const sh = "M20 2 L36 8 V20 C36 30 29 36 20 38 C11 36 4 30 4 20 V8 Z";
+  let inner = "";
+  if (pat === "stripes") inner = '<rect x="8" y="0" width="4.6" height="40" fill="' + c2 + '"/><rect x="17.2" y="0" width="4.6" height="40" fill="' + c2 + '"/><rect x="26.4" y="0" width="4.6" height="40" fill="' + c2 + '"/>';
+  else if (pat === "hoops") inner = '<rect x="0" y="9" width="40" height="5" fill="' + c2 + '"/><rect x="0" y="19" width="40" height="5" fill="' + c2 + '"/><rect x="0" y="29" width="40" height="5" fill="' + c2 + '"/>';
+  else if (pat === "halves") inner = '<rect x="20" y="0" width="20" height="40" fill="' + c2 + '"/>';
+  else if (pat === "sash") inner = '<path d="M0 30 L40 6 L40 16 L0 40 Z" fill="' + c2 + '"/>';
+  else inner = '<path d="M4 8 H36 V14 H4 Z" fill="' + c2 + '"/>';
+  const t = txt ? '<text x="20" y="26" text-anchor="middle" font-size="12" font-weight="800" fill="' + c2 + '" font-family="Arial,sans-serif">' + txt + '</text>' : "";
+  return '<svg class="crest ' + (cls || "") + '" viewBox="0 0 40 40" aria-hidden="true"><defs><clipPath id="' + id + '"><path d="' + sh + '"/></clipPath></defs><path d="' + sh + '" fill="' + c1 + '"/><g clip-path="url(#' + id + ')">' + inner + '</g><path d="' + sh + '" fill="none" stroke="rgba(255,255,255,.25)" stroke-width="1.2"/>' + t + '</svg>';
+}
+function paintCrest(code) {
   const el = $("#crest"); if (!el) return;
-  const w = String(name || "Touchline").split(/\s+/).filter(Boolean);
-  el.textContent = ((w[0] || "T")[0] + (w[1] ? w[1][0] : (w[0] || "TL")[1] || "L")).toUpperCase();
-  let h = 7; for (const ch of String(name || "touchline")) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  const hue = h % 360;
-  document.documentElement.style.setProperty("--crest1", `hsl(${hue} 68% 55%)`);
-  document.documentElement.style.setProperty("--crest2", `hsl(${(hue + 42) % 360} 72% 30%)`);
+  el.innerHTML = crest(code || "TL");
 }
 
 /* ------------------- tables: scroll on desktop, cards on phones ------------------- */

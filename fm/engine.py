@@ -736,7 +736,7 @@ def retable(con, save, comp_id):
 
 
 def table(con, save, comp_id, limit=None):
-    rows = con.execute("""SELECT s.*, c.name, c.short, c.rep FROM standings s JOIN clubs c ON c.id=s.club_id
+    rows = con.execute("""SELECT s.*, c.name, c.short, c.rep, c.code FROM standings s JOIN clubs c ON c.id=s.club_id
         WHERE s.comp_id=? AND s.season=? AND s.stage='league' ORDER BY s.pos""",
         (comp_id, save["season"])).fetchall()
     out = [dict(r) for r in rows]

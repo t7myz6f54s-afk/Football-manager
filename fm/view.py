@@ -257,6 +257,7 @@ def _fixture_brief(con, save, f):
     return {"id": f["id"], "date": f["match_date"], "comp": f.get("comp_name"),
             "code": f.get("comp_code"), "ctype": f.get("ctype"), "stage": f.get("stage"),
             "home": home["name"] if home else "?", "away": away["name"] if away else "?",
+            "home_code": home["code"] if home else "", "away_code": away["code"] if away else "",
             "home_short": home["short"] if home else "?", "away_short": away["short"] if away else "?",
             "is_home": f["home_id"] == save["club_id"], "venue": f.get("venue") or
             (home["stadium"] if home else ""), "home_id": f["home_id"], "away_id": f["away_id"]}
