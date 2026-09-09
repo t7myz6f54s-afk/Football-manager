@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Touchline — Football Management Simulation</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="splash">
+  <h1>TOUCHLINE</h1>
+  <p>A football management simulation</p>
+  <div class="loader"><i></i></div>
+  <p id="splash-msg" style="text-transform:none;letter-spacing:0">Loading…</p>
+</div>
+
+<div id="app" class="hidden">
+  <div id="topbar">
+    <div class="club" id="tb-club">—<small id="tb-league"></small></div>
+    <div class="pill" id="tb-date">—</div>
+    <div class="pill" id="tb-budget">—</div>
+    <div class="pill" id="tb-board">—</div>
+    <div class="spacer"></div>
+    <div class="pill" id="tb-next">—</div>
+    <button class="btn primary" id="btn-continue">CONTINUE ▸</button>
+  </div>
+  <div id="main">
+    <nav id="nav"></nav>
+    <section id="content"></section>
+  </div>
+</div>
+
+<div id="modal"><div class="box" id="modal-box"></div></div>
+<div id="toast-wrap"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

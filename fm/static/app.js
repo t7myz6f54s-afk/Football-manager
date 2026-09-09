@@ -1,0 +1,1615 @@
+/* Touchline — front end. Pure fetch + DOM rendering, no frameworks. */
+"use strict";
+
+const $ = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+const api = {
+  async get(p) { const r = await fetch(p); if (!r.ok) throw new Error((await r.json()).detail || r.status); return r.json(); },
+  async post(p, b) {
+    const r = await fetch(p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b || {}) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.detail || j.error || r.status);
+    return j;
+  }
+};
+
+const G = { boot: null, home: null, screen: "home", sub: null, static: null, busy: false };
+
+/* ------------------------------------------------------------------ helpers */
+const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function money(m) {
+  if (m == null) return "—";
+  const a = Math.abs(m);
+  if (a >= 1000) return (m < 0 ? "-" : "") + "€" + (a / 1000).toFixed(a >= 10000 ? 0 : 1) + "bn";
+  if (a >= 1) return (m < 0 ? "-" : "") + "€" + a.toFixed(a >= 100 ? 0 : 1) + "m";
+  return (m < 0 ? "-" : "") + "€" + (a * 1000).toFixed(0) + "k";
+}
+const wk = w => w == null ? "—" : "€" + Number(w).toFixed(w >= 100 ? 0 : 1) + "k/wk";
+function stars(n) {
+  if (n == null) return '<span class="muted">—</span>';
+  const full = Math.floor(n), half = n - full >= 0.5;
+  return `<span class="stars">${"★".repeat(full)}${half ? "½" : ""}${"☆".repeat(Math.max(0, 5 - full - (half ? 1 : 0)))}</span>`;
+}
+const pct = n => Math.max(0, Math.min(100, Math.round(n || 0)));
+function condClass(v) { return v > 1.02 ? "W" : v < 0.92 ? "L" : "D"; }
+function fmtDate(s) {
+  if (!s) return "—";
+  const d = new Date(s + (s.length === 10 ? "T12:00:00" : ""));
+  return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+}
+function daysTo(a, b) { return Math.round((new Date(a) - new Date(b)) / 86400000); }
+function toast(msg, ms) {
+  const t = document.createElement("div");
+  t.className = "toast"; t.innerHTML = msg;
+  $("#toast-wrap").appendChild(t);
+  setTimeout(() => t.remove(), ms || 3200);
+}
+function modal(html, wide) {
+  const box = $("#modal-box");
+  box.className = "box" + (wide ? " wide" : "");
+  box.innerHTML = `<button class="close" onclick="closeModal()">✕</button>` + html;
+  $("#modal").classList.add("open");
+}
+function closeModal() { $("#modal").classList.remove("open"); }
+$("#modal").addEventListener("click", e => { if (e.target.id === "modal") closeModal(); });
+const bar = (v, cls) => `<div class="bar ${cls || ""}"><i style="width:${pct(v)}%"></i></div>`;
+
+/* --------------------------------------------------------------------- boot */
+async function boot() {
+  try {
+    $("#splash-msg").textContent = "Loading engine data…";
+    G.boot = await api.get("/api/boot");
+    G.static = G.boot.static;
+    if (G.boot.has_save) {
+      $("#splash-msg").textContent = "Loading career…";
+      await enterGame();
+    } else {
+      $("#splash").classList.add("hidden");
+      $("#app").classList.remove("hidden");
+      showStartScreen();
+    }
+  } catch (e) {
+    $("#splash-msg").innerHTML = `<span style="color:#ff9b9b">Failed to start: ${esc(e.message)}</span>`;
+  }
+}
+
+/* --------------------------------------------------------- new career flow */
+const NAV_START = [];
+function showStartScreen() {
+  renderNav(NAV_START);
+  $("#content").innerHTML = `
+    <div style="max-width:840px;margin:40px auto;text-align:center">
+      <h1 style="font-size:34px;letter-spacing:4px">TOUCHLINE</h1>
+      <p class="sub">A persistent, multi-season football management simulation.<br>
+      402 clubs · 21 leagues · Europe · South America. Every match simulated.</p>
+      <div class="row" style="justify-content:center;margin-top:26px">
+        <button class="btn primary" style="padding:12px 26px;font-size:15px" onclick="stepChooseClub()">NEW CAREER</button>
+      </div>
+      <p class="small muted" style="margin-top:10px">Starting a new career rebuilds the world and replaces any saved career.</p>
+      <div class="grid g3" style="margin-top:40px;text-align:left">
+        <div class="card"><h3>Manage everything</h3><div class="small muted">Tactics, roles and duties, training, contracts, scouting, transfers, staff, youth, finances, media and the board.</div></div>
+        <div class="card"><h3>A living world</h3><div class="small muted">Other clubs sack and appoint managers, buy and sell players, win and lose. Leagues, cups and Europe run without you.</div></div>
+        <div class="card"><h3>Your career</h3><div class="small muted">Get sacked and find a new job. Build a reputation. Trophy room, records and season reviews are kept forever.</div></div>
+      </div>
+    </div>`;
+}
+
+let CLUB_PICK = null;
+async function stepChooseClub() {
+  renderNav(NAV_START);
+  let countries = [];
+  try { countries = (await api.get("/api/clubs/countries")).countries; } catch (e) {}
+  $("#content").innerHTML = `
+    <h1>Choose your club</h1>
+    <p class="sub">Any club, any nation, any level — from Real Madrid to Wrexham to semi-league minnows.</p>
+    <div class="row" style="margin-bottom:12px">
+      <input id="cs-q" placeholder="Search club name…" style="width:260px" oninput="debounceSearch()">
+      <select id="cs-country" onchange="searchClubs()"><option value="">All nations</option>
+        ${countries.map(c => `<option value="${esc(c.country)}">${esc(c.country)} (${c.n})</option>`).join("")}</select>
+      <select id="cs-tier" onchange="searchClubs()">
+        <option value="0">All levels</option><option value="1">Top division</option>
+        <option value="2">2nd tier</option><option value="3">3rd tier</option>
+        <option value="4">4th tier</option><option value="5">5th tier</option></select>
+      <span class="spacer"></span><span class="muted small" id="cs-count"></span>
+    </div>
+    <div class="card" style="padding:0;max-height:60vh;overflow:auto">
+      <table><thead><tr><th>Club</th><th>Nation</th><th>League</th><th class="num">Rep</th>
+        <th class="num">Stadium</th><th class="num">Budget</th><th class="num">Wages</th><th></th></tr></thead>
+      <tbody id="cs-rows"></tbody></table>
+    </div>`;
+  searchClubs();
+}
+let SEARCH_T = null;
+function debounceSearch() { clearTimeout(SEARCH_T); SEARCH_T = setTimeout(searchClubs, 260); }
+async function searchClubs() {
+  const q = encodeURIComponent($("#cs-q")?.value || "");
+  const country = encodeURIComponent($("#cs-country")?.value || "");
+  const tier = $("#cs-tier")?.value || 0;
+  const j = await api.get(`/api/clubs/search?q=${q}&country=${country}&tier=${tier}`);
+  $("#cs-count").textContent = j.clubs.length + " clubs";
+  $("#cs-rows").innerHTML = j.clubs.map(c => `
+    <tr>
+      <td><b>${esc(c.name)}</b><div class="muted small">${esc(c.stadium)} · ${esc(c.vision || "")}</div></td>
+      <td>${esc(c.country)}</td>
+      <td>${esc(c.league_name || c.league)}<div class="muted small">Tier ${c.tier}</div></td>
+      <td class="num">${c.rep}</td>
+      <td class="num">${(c.capacity || 0).toLocaleString()}</td>
+      <td class="num">${money(c.transfer_budget)}</td>
+      <td class="num">${money(c.wage_budget)}</td>
+      <td><button class="btn sm primary" onclick='pickClub(${JSON.stringify(c).replace(/'/g, "&#39;")})'>SELECT</button></td>
+    </tr>`).join("");
+}
+function pickClub(c) { CLUB_PICK = c; stepManagerProfile(); }
+
+function stepManagerProfile() {
+  const c = CLUB_PICK;
+  const nations = G.static.nations || [];
+  $("#content").innerHTML = `
+    <h1>Create your manager</h1>
+    <p class="sub">You are about to take charge of <b>${esc(c.name)}</b> — ${esc(c.league_name || c.league)}, ${esc(c.country)}.</p>
+    <div class="grid g2" style="max-width:900px">
+      <div class="card">
+        <h3>Profile</h3>
+        <label>Manager name</label><input id="mp-name" style="width:100%" placeholder="e.g. Alex Ferguson" value="">
+        <div style="height:8px"></div>
+        <label>Nationality</label>
+        <select id="mp-nat" style="width:100%"><option>England</option>
+          ${nations.filter(n => n !== "England").map(n => `<option>${esc(n)}</option>`).join("")}</select>
+        <div style="height:8px"></div>
+        <div class="row"><div style="flex:1"><label>Age</label><input id="mp-age" type="number" value="38" min="24" max="75" style="width:100%"></div>
+        <div style="flex:1"><label>Reputation (1–95)</label><input id="mp-rep" type="number" value="${Math.max(3, Math.round(c.rep * 0.28))}" min="1" max="95" style="width:100%"></div></div>
+        <div style="height:8px"></div>
+        <label>Managerial style</label>
+        <select id="mp-style" style="width:100%">
+          ${["Balanced", "Possession", "High press", "Counter-attack", "Direct", "Defensive solidity", "Wing play", "Youth-focused"]
+            .map(s => `<option>${s}</option>`).join("")}</select>
+        <div style="height:8px"></div>
+        <label>Difficulty</label>
+        <select id="mp-diff" style="width:100%">
+          ${G.static.difficulties.map(d => `<option value="${d.id}" ${d.id === "realistic" ? "selected" : ""}>${d.name} — ${d.desc}</option>`).join("")}
+        </select>
+      </div>
+      <div class="card">
+        <h3>Coaching attributes</h3>
+        <p class="small muted">Points left: <b id="mp-left">0</b>. These shape training, man-management, scouting and how quickly players develop under you.</p>
+        <div id="mp-attrs"></div>
+      </div>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button class="btn" onclick="stepChooseClub()">◂ Back</button>
+      <button class="btn primary" id="mp-go" onclick="createCareer()">TAKE CHARGE ▸</button>
+    </div>`;
+  const keys = ["attacking", "defending", "fitness", "tactical", "mental", "technical", "youth", "man_mgmt", "motivation", "adaptability", "judging"];
+  const names = { attacking: "Attacking", defending: "Defending", fitness: "Fitness", tactical: "Tactical", mental: "Mental", technical: "Technical", youth: "Youth", man_mgmt: "Man management", motivation: "Motivation", adaptability: "Adaptability", judging: "Judging ability" };
+  const budget = 132;
+  $("#mp-attrs").innerHTML = keys.map(k => `
+    <div class="row" style="margin-bottom:4px">
+      <div style="width:130px" class="small">${names[k]}</div>
+      <input type="range" min="1" max="20" value="12" data-k="${k}" style="flex:1" oninput="attrChanged()">
+      <div class="small mono" style="width:22px;text-align:right" id="av-${k}">12</div>
+    </div>`).join("");
+  window._attrBudget = budget;
+  attrChanged();
+}
+function attrChanged() {
+  let used = 0;
+  $$('#mp-attrs input[type=range]').forEach(i => { used += +i.value; $("#av-" + i.dataset.k).textContent = i.value; });
+  const left = window._attrBudget - used;
+  $("#mp-left").textContent = left;
+  $("#mp-left").style.color = left < 0 ? "var(--bad)" : "var(--accent)";
+  $("#mp-go").disabled = left < 0;
+}
+async function createCareer() {
+  const attrs = {};
+  $$('#mp-attrs input[type=range]').forEach(i => attrs[i.dataset.k] = +i.value);
+  const body = {
+    club_code: CLUB_PICK.code,
+    difficulty: $("#mp-diff").value,
+    manager: { name: $("#mp-name").value.trim() || "The Manager", nat: $("#mp-nat").value,
+               age: +$("#mp-age").value, reputation: +$("#mp-rep").value,
+               style: $("#mp-style").value, attrs }
+  };
+  $("#mp-go").disabled = true; $("#mp-go").textContent = "Building world…";
+  try {
+    const j = await api.post("/api/career/new", body);
+    onboarding(j);
+  } catch (e) { toast("Could not create career: " + esc(e.message), 6000); $("#mp-go").disabled = false; $("#mp-go").textContent = "TAKE CHARGE ▸"; }
+}
+
+function onboarding(j) {
+  renderNav(NAV_START);
+  const m = j.meeting;
+  $("#content").innerHTML = `
+    <h1>${esc(j.club.name)}</h1>
+    <p class="sub">${esc(j.club.league)} · tier ${j.club.tier} · reputation ${j.club.rep}</p>
+    <div class="grid g2">
+      <div class="card">
+        <h3>Club load</h3>
+        <ul class="step-list">${j.steps.map((s, i) => `<li><span class="n">${i + 1}</span>
+          <div><b>${esc(s[0])}</b><div class="small muted">${esc(s[1])}</div></div></li>`).join("")}</ul>
+      </div>
+      <div class="card">
+        <h3>First management meeting</h3>
+        <p class="small">${esc(m.welcome)}</p>
+        <div class="kv"><span>Chairman</span><b>${esc(m.chairman)}</b></div>
+        <div class="kv"><span>Transfer budget</span><b>${money(m.budget.transfer)}</b></div>
+        <div class="kv"><span>Wage budget</span><b>${money(m.budget.wage)} (bill ${money(m.budget.wage_bill)})</b></div>
+        <div class="kv"><span>Cash</span><b>${money(m.budget.cash)}</b></div>
+        <div class="kv"><span>Debt</span><b>${money(m.budget.debt)}</b></div>
+        <div class="kv"><span>Transfer window</span><b>${fmtDate(m.window.opens)} → ${fmtDate(m.window.closes)}</b></div>
+        <h2 style="margin-top:14px">Board objectives</h2>
+        ${m.objectives.map(o => `<div class="obj"><div class="t">${esc(o.text)}</div>
+          <div class="small muted">${esc(o.comp || "")} ${o.target_pos ? "· target position " + o.target_pos : ""} ${o.critical ? "· <b style='color:var(--warn)'>CRITICAL</b>" : ""}</div></div>`).join("")}
+        <h2 style="margin-top:14px">Next fixtures</h2>
+        ${m.next_fixture.map(f => `<div class="kv"><span>${fmtDate(f.date)} · ${esc(f.comp)}</span>
+          <b>${esc(f.home)} v ${esc(f.away)}</b></div>`).join("") || '<div class="muted small">None scheduled</div>'}
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h3>Assistant manager's briefing</h3>
+      <div class="pre">${esc(m.assistant)}</div>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button class="btn primary" onclick="enterGame()">GO TO OFFICE ▸</button>
+    </div>`;
+}
+
+/* ------------------------------------------------------------------- the game */
+const NAV = [
+  ["home", "🏠", "Home"], ["inbox", "📥", "Inbox"], ["squad", "👥", "Squad"],
+  ["tactics", "📋", "Tactics"], ["training", "🏋", "Training"], ["match", "⚽", "Match Centre"],
+  ["sep"], ["transfers", "💶", "Transfers"], ["scouting", "🔭", "Scouting"],
+  ["finances", "🏦", "Finances"], ["staff", "🧑‍💼", "Staff"], ["youth", "🌱", "Academy"],
+  ["sep"], ["calendar", "📅", "Calendar"], ["table", "🏆", "League"], ["comps", "🌍", "Competitions"],
+  ["board", "🎯", "Board"], ["media", "📰", "Media"], ["career", "📈", "Career"],
+];
+function renderNav(items) {
+  $("#nav").innerHTML = items.map(n => n[0] === "sep" ? '<div class="sep"></div>' :
+    `<button data-s="${n[0]}" onclick="go('${n[0]}')"><span>${n[1]}</span>${n[2]}<span class="badge hidden" id="nb-${n[0]}"></span></button>`).join("");
+}
+async function enterGame() {
+  $("#splash").classList.add("hidden");
+  $("#app").classList.remove("hidden");
+  renderNav(NAV);
+  await go("home");
+}
+async function resumeMatch() {
+  const r = await api.post("/api/match/abandon", {});
+  if (r && r.ok) { G.pendingMatch = false; await refreshState(); showResult(r.result); }
+  else toast(esc((r && r.msg) || "No paused match."), 4000);
+}
+async function go(screen, sub) {
+  G.screen = screen; G.sub = sub || null;
+  $$("#nav button").forEach(b => b.classList.toggle("active", b.dataset.s === screen));
+  $("#content").innerHTML = '<p class="muted">Loading…</p>';
+  try {
+    if (screen === "home") await renderHome();
+    else if (screen === "inbox") await renderInbox();
+    else if (screen === "squad") await renderSquad();
+    else if (screen === "player") await renderPlayer(sub);
+    else if (screen === "tactics") await renderTactics();
+    else if (screen === "training") await renderTraining();
+    else if (screen === "match") await renderMatch();
+    else if (screen === "transfers") await renderTransfers();
+    else if (screen === "scouting") await renderScouting();
+    else if (screen === "finances") await renderFinances();
+    else if (screen === "staff") await renderStaff();
+    else if (screen === "youth") await renderYouth();
+    else if (screen === "calendar") await renderCalendar();
+    else if (screen === "table") await renderTable();
+    else if (screen === "comps") await renderComps();
+    else if (screen === "board") await renderBoard();
+    else if (screen === "media") await renderMedia();
+    else if (screen === "career") await renderCareer();
+    else if (screen === "jobs") await renderJobs();
+  } catch (e) {
+    $("#content").innerHTML = `<p style="color:var(--bad)">Error: ${esc(e.message)}</p>`;
+  }
+  refreshBadges();
+}
+async function refreshState() {
+  const j = await api.get("/api/state");
+  G.home = j.home;
+  const wasPending = G.pendingMatch;
+  G.pendingMatch = !!j.pending_match;
+  if (wasPending && !G.pendingMatch && G.halftimeState) {
+    G.halftimeState = null;
+    toast("The paused match was abandoned when the server restarted.");
+  }
+  paintTop();
+  return j;
+}
+function paintTop() {
+  const h = G.home; if (!h) return;
+  if (h.unemployed) {
+    $("#tb-club").innerHTML = `Unemployed<small>Available for appointment</small>`;
+    $("#tb-budget").textContent = "—"; $("#tb-board").textContent = "—";
+  } else {
+    $("#tb-club").innerHTML = `${esc(h.club.name)}<small>${esc(h.club.league)}</small>`;
+    $("#tb-budget").innerHTML = `Budget <b>${money(h.finances.transfer_budget)}</b>`;
+    $("#tb-board").innerHTML = `Board <b>${Math.round(h.board.confidence)}</b>/100`;
+  }
+  $("#tb-date").textContent = fmtDate(h.date);
+  const nf = h.next_fixture;
+  $("#tb-next").innerHTML = nf ? `Next: <b>${esc(nf.home_short)} v ${esc(nf.away_short)}</b> ${fmtDate(nf.date)}` : "No fixture";
+  $("#btn-continue").disabled = G.busy;
+}
+async function refreshBadges() {
+  try {
+    const j = await api.get("/api/inbox?unread=true");
+    const n = j.items.length;
+    const b = $("#nb-inbox");
+    if (b) { b.textContent = n; b.classList.toggle("hidden", !n); }
+  } catch (e) {}
+}
+
+/* ------------------------------------------------------------------- CONTINUE */
+$("#btn-continue").addEventListener("click", doContinue);
+async function doContinue() {
+  if (G.busy) return;
+  if (G.pendingMatch) {
+    toast("A match is paused at half-time — finish it first.", 4000);
+    go("match");
+    return;
+  }
+  G.busy = true; $("#btn-continue").disabled = true;
+  $("#btn-continue").textContent = "SIMULATING…";
+  try {
+    const j = await api.post("/api/continue", {});
+    await refreshState();
+    // anything flagged urgent has now been shown: mark it read so it does not halt us again
+    if ((j.urgent || []).length) {
+      await api.post("/api/inbox/read", { ids: j.urgent.map(u => u.id) }).catch(() => {});
+    }
+    showContinueModal(j);
+  } catch (e) { toast("Continue failed: " + esc(e.message), 6000); }
+  G.busy = false; $("#btn-continue").disabled = false; $("#btn-continue").textContent = "CONTINUE ▸";
+}
+function showContinueModal(j) {
+  const nf = j.next_fixture;
+  const items = j.log || [];
+  const urg = j.urgent || [];
+  modal(`
+    <h2>${fmtDate(j.date)} <span class="muted small">· season ${j.season}/${String(j.season + 1).slice(2)} · advanced ${j.days_advanced} day(s)</span></h2>
+    ${j.unemployed ? `<p class="sub">You are without a club. <a href="#" onclick="closeModal();go('jobs')">View vacancies →</a></p>` : ""}
+    ${nf ? `<div class="card tight" style="margin-bottom:10px">
+      <div class="row"><b>Next match:</b> ${esc(nf.home)} v ${esc(nf.away)}
+      <span class="muted small">${esc(nf.comp || "")} ${esc(nf.stage !== "league" ? nf.stage : "")} · ${fmtDate(nf.date)}</span>
+      <span class="spacer"></span>
+      <button class="btn primary sm" onclick="closeModal();go('match')">MATCH CENTRE ▸</button></div></div>` : ""}
+    ${urg.length ? `<h3>Urgent</h3>${urg.map(u => `<div class="list-item unread" onclick="closeModal();go('inbox')"><span class="tag URGENT">${esc(u.cat)}</span><div><b>${esc(u.subject)}</b></div></div>`).join("")}` : ""}
+    <h3>What happened</h3>
+    <div style="max-height:40vh;overflow:auto">
+      ${items.length ? items.slice().reverse().map(e => e.type === "match_scheduled"
+        ? `<div class="list-item"><span class="muted small">${esc(e.date)}</span><b>Match day: ${e.fixtures.map(f => `${esc(f.home)} v ${esc(f.away)}`).join(", ")}</b></div>`
+        : `<div class="list-item"><span class="muted small">${esc(e.date || "")}</span><div>${esc(e.text || "")}</div></div>`).join("")
+      : '<p class="muted">Nothing notable happened.</p>'}
+    </div>
+    <div class="row" style="margin-top:12px"><span class="spacer"></span>
+      <button class="btn" onclick="closeModal()">Close</button>
+      <button class="btn primary" onclick="closeModal();doContinue()">CONTINUE ▸</button></div>`, true);
+}
+
+/* --------------------------------------------------------------------- HOME */
+async function renderHome() {
+  await refreshState();
+  const h = G.home;
+  if (h.unemployed) return renderJobs();
+  const pos = h.position;
+  $("#content").innerHTML = `
+    <div class="grid g4">
+      <div class="card"><div class="stat-l">League position</div>
+        <div class="stat">${pos && pos.played ? pos.pos + "<span class='muted' style='font-size:14px'>/" + pos.size + "</span>" : "—"}</div>
+        <div class="small muted">${pos ? pos.pts + " pts from " + pos.played + " · GD " + (pos.gd > 0 ? "+" : "") + pos.gd : ""}</div></div>
+      <div class="card"><div class="stat-l">Board confidence</div>
+        <div class="stat">${Math.round(h.board.confidence)}<span class="muted" style="font-size:14px">/100</span></div>
+        ${bar(h.board.confidence, h.board.confidence < 30 ? "red" : h.board.confidence < 55 ? "amber" : "")}</div>
+      <div class="card"><div class="stat-l">Fan sentiment</div>
+        <div class="stat">${Math.round(h.fans.sentiment)}<span class="muted" style="font-size:14px">/100</span></div>
+        ${bar(h.fans.sentiment, h.fans.sentiment < 30 ? "red" : "")}</div>
+      <div class="card"><div class="stat-l">Finances</div>
+        <div class="stat small">${money(h.finances.cash)} <span class="muted">cash</span></div>
+        <div class="small muted">Budget ${money(h.finances.transfer_budget)} · wages ${money(h.finances.wage_bill)}/${money(h.finances.wage_budget)}</div></div>
+    </div>
+
+    <div class="grid g2" style="margin-top:12px">
+      <div class="card">
+        <h3>Next match</h3>
+        ${h.next_fixture ? `
+          <div class="scoreboard" style="margin-bottom:10px">
+            <div class="team">${esc(h.next_fixture.home)}</div>
+            <div class="score">v</div>
+            <div class="team">${esc(h.next_fixture.away)}</div>
+          </div>
+          <div class="kv"><span>Competition</span><b>${esc(h.next_fixture.comp || "—")} ${h.next_fixture.stage !== "league" ? esc(h.next_fixture.stage) : ""}</b></div>
+          <div class="kv"><span>Date</span><b>${fmtDate(h.next_fixture.date)}</b></div>
+          <div class="kv"><span>Venue</span><b>${esc(h.next_fixture.venue)}</b></div>
+          <div class="row" style="margin-top:10px">
+            <button class="btn primary" onclick="go('match')">MATCH CENTRE ▸</button>
+            <button class="btn" onclick="quickPlay()">Play match now</button>
+          </div>` : '<p class="muted">No fixtures scheduled.</p>'}
+        <h3 style="margin-top:14px">Recent form</h3>
+        <div class="row">${(h.form || []).map(f => `<span class="tag ${f.res}" title="${esc(f.date)}">${f.res} ${f.score}</span>`).join("") || '<span class="muted small">No matches yet</span>'}</div>
+        <h3 style="margin-top:14px">Last result</h3>
+        ${h.last_result && h.last_result.result ? `<div class="row"><span class="tag ${h.last_result.result}">${h.last_result.result}</span>
+          <b>${esc(h.last_result.home)} ${h.last_result.hg}–${h.last_result.ag} ${esc(h.last_result.away)}</b>
+          <span class="muted small">${esc(h.last_result.comp || "")} · xG ${h.last_result.xg}–${h.last_result.xga}</span></div>`
+        : '<p class="muted small">No result yet.</p>'}
+      </div>
+
+      <div class="card">
+        <h3>Objectives</h3>
+        ${h.board.objectives.map(o => `<div class="obj"><div class="t">${esc(o.text)} ${o.critical ? '<span class="tag URGENT">CRITICAL</span>' : ""}</div>
+          <div class="small muted">${esc(o.comp || o.status || "")} ${o.target_pos ? "· target " + o.target_pos + "th" : ""}</div></div>`).join("")}
+        <h3 style="margin-top:14px">Squad</h3>
+        <div class="grid g4" style="gap:8px">
+          <div><div class="stat-l">Injured</div><div class="stat small">${h.squad_summary.injured}</div></div>
+          <div><div class="stat-l">Unfit</div><div class="stat small">${h.squad_summary.unfit}</div></div>
+          <div><div class="stat-l">Suspended</div><div class="stat small">${h.squad_summary.suspended}</div></div>
+          <div><div class="stat-l">Seniors</div><div class="stat small">${(h.squad_summary.groups.find(g => g.squad === "First Team") || { n: 0 }).n}</div></div>
+        </div>
+        <h3 style="margin-top:14px">Assistant</h3>
+        <div class="pre small" style="max-height:180px;overflow:auto">${esc(typeof h.assistant === "string" ? h.assistant : JSON.stringify(h.assistant))}</div>
+      </div>
+    </div>
+
+    <div class="grid g2" style="margin-top:12px">
+      <div class="card" style="padding:0">
+        <h3 style="padding:12px 14px 0">${esc(h.club.league)} table</h3>
+        <div style="max-height:330px;overflow:auto">
+        <table><thead><tr><th class="num">#</th><th>Club</th><th class="num">P</th><th class="num">W</th>
+          <th class="num">D</th><th class="num">L</th><th class="num">GD</th><th class="num">Pts</th></tr></thead>
+        <tbody>${(h.table || []).map(r => `<tr class="${r.club_id === h.club.id ? "me" : ""}">
+          <td class="num">${r.pos}</td><td>${esc(r.name)}</td><td class="num">${r.p}</td><td class="num">${r.w}</td>
+          <td class="num">${r.d}</td><td class="num">${r.l}</td><td class="num">${r.gf - r.ga > 0 ? "+" : ""}${r.gf - r.ga}</td>
+          <td class="num"><b>${r.pts}</b></td></tr>`).join("")}</tbody></table></div>
+      </div>
+      <div class="card" style="padding:0">
+        <h3 style="padding:12px 14px 0">Inbox <span class="muted small">(${h.unread} unread)</span></h3>
+        <div style="max-height:330px;overflow:auto" id="home-inbox"></div>
+        <div style="padding:8px 12px"><button class="btn sm" onclick="go('inbox')">Open inbox</button></div>
+      </div>
+    </div>`;
+  const ib = await api.get("/api/inbox");
+  $("#home-inbox").innerHTML = ib.items.slice(0, 12).map(m => `
+    <div class="list-item ${m.read ? "" : "unread"}" onclick="openMail(${m.id})">
+      <span class="tag ${m.priority}">${esc(m.priority[0])}</span>
+      <div style="flex:1"><b>${esc(m.subject)}</b><div class="small muted">${esc(m.cat)} · ${esc(m.date)}</div></div>
+    </div>`).join("") || '<p class="muted small" style="padding:10px">Empty</p>';
+}
+async function quickPlay() {
+  await playMatch("instant");
+}
+
+/* -------------------------------------------------------------------- INBOX */
+let INBOX_CAT = "";
+async function renderInbox() {
+  await refreshState();
+  const j = await api.get("/api/inbox" + (INBOX_CAT ? "?cat=" + INBOX_CAT : ""));
+  $("#content").innerHTML = `
+    <h1>Inbox</h1>
+    <div class="tabs">
+      <button class="${!INBOX_CAT ? "active" : ""}" onclick="INBOX_CAT='';renderInbox()">All</button>
+      ${j.cats.map(c => `<button class="${INBOX_CAT === c ? "active" : ""}" onclick="INBOX_CAT='${c}';renderInbox()">${c}${j.unread_by_cat[c] ? " (" + j.unread_by_cat[c] + ")" : ""}</button>`).join("")}
+      <span class="spacer"></span>
+      <button class="btn sm" onclick="markAllRead()">Mark all read</button>
+    </div>
+    <div class="card" style="padding:0">
+      ${j.items.map(m => `
+        <div class="list-item ${m.read ? "" : "unread"}" onclick="openMail(${m.id})">
+          <span class="tag ${m.priority}">${esc(m.priority)}</span>
+          <div style="flex:1"><b>${esc(m.subject)}</b>
+            <div class="small muted">${esc(m.cat)} · ${fmtDate(m.date)}</div></div>
+          ${m.read ? "" : '<span class="tag">NEW</span>'}
+        </div>`).join("") || '<p class="muted" style="padding:12px">No mail.</p>'}
+    </div>`;
+}
+async function markAllRead() { await api.post("/api/inbox/read", { all: true }); renderInbox(); refreshBadges(); }
+async function openMail(id) {
+  const j = await api.get("/api/inbox");
+  const m = j.items.find(x => x.id === id);
+  if (!m) return;
+  await api.post("/api/inbox/read", { ids: [id] });
+  const p = m.payload || {};
+  modal(`<span class="tag ${m.priority}">${esc(m.priority)}</span> <span class="tag">${esc(m.cat)}</span>
+    <h2>${esc(m.subject)}</h2>
+    <div class="small muted">${fmtDate(m.date)}</div>
+    <div class="pre" style="margin-top:10px">${esc(m.body)}</div>
+    <div class="row" style="margin-top:14px"><span class="spacer"></span>
+      ${p.screen ? `<button class="btn" onclick="closeModal();go('${esc(p.screen)}'${p.pid ? ",'" + p.pid + "'" : ""})">Open ${esc(p.screen)}</button>` : ""}
+      <button class="btn primary" onclick="closeModal();renderInbox()">Close</button></div>`, true);
+  refreshBadges();
+}
+
+/* -------------------------------------------------------------------- SQUAD */
+let SQUAD_FILTER = "First Team", SQUAD_SORT = "ca";
+async function renderSquad() {
+  await refreshState();
+  const j = await api.get("/api/screen/squad");
+  const players = j.players.filter(p => SQUAD_FILTER === "All" || p.squad === SQUAD_FILTER);
+  const groups = ["All", "First Team", "Reserve", "U21", "Youth"];
+  const sortFn = {
+    ca: (a, b) => b.ca - a.ca, pos: (a, b) => a.pos.localeCompare(b.pos) || b.ca - a.ca,
+    age: (a, b) => a.age - b.age, value: (a, b) => b.value - a.value, wage: (a, b) => b.wage - a.wage,
+    goals: (a, b) => b.goals - a.goals, condition: (a, b) => b.condition - a.condition,
+    name: (a, b) => a.name.localeCompare(b.name)
+  }[SQUAD_SORT];
+  players.sort(sortFn);
+  $("#content").innerHTML = `
+    <h1>Squad</h1>
+    <p class="sub">${G.home.club.name} · ${players.length} players shown · wage bill ${money(G.home.finances.wage_bill)}/yr</p>
+    <div class="tabs">
+      ${groups.map(g => `<button class="${SQUAD_FILTER === g ? "active" : ""}" onclick="SQUAD_FILTER='${g}';renderSquad()">${g}</button>`).join("")}
+      <span class="spacer"></span>
+      <select onchange="SQUAD_SORT=this.value;renderSquad()">
+        ${[["ca", "Ability"], ["pos", "Position"], ["age", "Age"], ["value", "Value"], ["wage", "Wage"],
+           ["goals", "Goals"], ["condition", "Condition"], ["name", "Name"]]
+          .map(o => `<option value="${o[0]}" ${SQUAD_SORT === o[0] ? "selected" : ""}>Sort: ${o[1]}</option>`).join("")}
+      </select>
+    </div>
+    <div class="card" style="padding:0;overflow:auto">
+      <table><thead><tr>
+        <th>Pos</th><th>Name</th><th class="num">Age</th><th class="num">Nat</th>
+        <th class="num">Stars</th><th class="num">CA</th><th class="num">PA</th>
+        <th class="num">Cond</th><th class="num">Fit</th><th class="num">Fat</th>
+        <th class="num">Morale</th><th class="num">Form</th>
+        <th class="num">Apps</th><th class="num">G</th><th class="num">A</th><th class="num">Rating</th>
+        <th class="num">Value</th><th class="num">Wage</th><th>Status</th></tr></thead>
+      <tbody>${players.map(p => `<tr onclick="go('player',${p.id})" style="cursor:pointer">
+        <td><span class="pos">${esc(p.pos)}</span>${p.pos2 ? '<span class="muted small">/' + esc(p.pos2) + "</span>" : ""}</td>
+        <td><b>${esc(p.name)}</b>${p.injured ? ' <span class="tag L">' + esc(p.injury) + "</span>" : ""}${p.suspended ? ' <span class="tag L">susp</span>' : ""}</td>
+        <td class="num">${p.age}</td><td class="num small">${esc(p.nat)}</td>
+        <td class="num">${stars(p.stars)}</td><td class="num mono">${p.ca.toFixed(1)}</td>
+        <td class="num mono muted">${p.pa.toFixed(1)}</td>
+        <td class="num"><span class="tag ${condClass(p.condition)}">${p.condition.toFixed(2)}</span></td>
+        <td class="num">${Math.round(p.fitness)}</td><td class="num">${Math.round(p.fatigue)}</td>
+        <td class="num">${Math.round(p.morale)}</td><td class="num">${p.form > 0 ? "+" : ""}${p.form.toFixed(1)}</td>
+        <td class="num">${p.apps}</td><td class="num">${p.goals}</td><td class="num">${p.assists}</td>
+        <td class="num">${p.avg_rating ? p.avg_rating.toFixed(2) : "—"}</td>
+        <td class="num">${money(p.value)}</td><td class="num small">${wk(p.wage)}</td>
+        <td class="small muted">${esc(p.promise)}</td></tr>`).join("")}</tbody></table>
+    </div>`;
+}
+
+/* ------------------------------------------------------------------- PLAYER */
+async function renderPlayer(pid) {
+  const p = await api.get("/api/player/" + pid);
+  await refreshState();
+  const groups = p.attr_groups || null;
+  $("#content").innerHTML = `
+    <div class="row"><button class="btn sm" onclick="history.back?go('squad'):go('squad')">◂ Squad</button>
+      <h1 style="margin:0">${esc(p.name)}</h1>
+      <span class="pos">${esc(p.pos)}</span>${p.pos2 ? '<span class="muted">/' + esc(p.pos2) + "</span>" : ""}
+      <span class="tag">${esc(p.nat)}</span><span class="spacer"></span>
+      ${p.mine ? "" : `<button class="btn primary sm" onclick="openOffer(${p.id},'${esc(p.name).replace(/'/g, "\\'")}',${p.asking || 0},${p.wage || 0})">Make offer</button>`}
+    </div>
+    <p class="sub">${esc(p.club)} · ${p.age} years old · ${esc(p.personality)} · value ${money(p.value)} · ${wk(p.wage)} until ${esc(p.contract_end)}</p>
+    <div class="grid g4">
+      <div class="card"><div class="stat-l">Condition</div><div class="stat">${p.condition.toFixed(2)}</div>
+        <div class="small muted">Fit ${Math.round(p.fitness)} · Sharp ${Math.round(p.sharpness)} · Fatigue ${Math.round(p.fatigue)}</div></div>
+      <div class="card"><div class="stat-l">Ability</div><div class="stat">${p.ca != null ? p.ca.toFixed(1) : "?"}</div>
+        <div class="small">${p.stars != null ? stars(p.stars) : '<span class="muted">unscouted</span>'}</div></div>
+      <div class="card"><div class="stat-l">Potential</div><div class="stat">${p.pa != null ? p.pa.toFixed(1) : "?"}</div>
+        <div class="small muted">${p.age < 24 ? "developing" : p.age > 30 ? "declining phase" : "peak years"}</div></div>
+      <div class="card"><div class="stat-l">Season</div><div class="stat small">${p.goals}G ${p.assists}A</div>
+        <div class="small muted">${p.apps} apps · ${p.minutes} mins · avg ${p.avg_rating ? p.avg_rating.toFixed(2) : "—"}</div></div>
+    </div>
+    ${p.injury ? `<div class="card" style="margin-top:12px;border-color:#5b2b2b"><b style="color:var(--bad)">Injured:</b> ${esc(p.injury)} — expected back ${fmtDate(p.return_date)}</div>` : ""}
+    ${p.suspended ? `<div class="card" style="margin-top:8px;border-color:#6b5522"><b style="color:var(--warn)">Suspended</b> for ${p.suspended} match(es).</div>` : ""}
+    ${groups ? `
+      <div class="grid g2" style="margin-top:12px">
+        ${Object.entries(groups).filter(([g, a]) => a.length).map(([g, a]) => `
+          <div class="card"><h3>${g}</h3><div class="attr-grid">
+            ${a.map(x => `<div><span>${esc(x.k.replace(/_/g, " "))}</span><b class="${x.c}">${x.v}</b></div>`).join("")}
+          </div></div>`).join("")}
+      </div>` : (p.scout ? `<div class="card" style="margin-top:12px"><h3>Scout report</h3>
+        <div class="pre">${esc(typeof p.scout === "string" ? p.scout : JSON.stringify(p.scout, null, 2))}</div>
+        <div class="small muted" style="margin-top:8px">Knowledge ${p.known}% — assign a scout to learn more.</div></div>`
+      : `<div class="card" style="margin-top:12px"><h3>Scouting</h3>
+        <div class="small muted">Knowledge of this player: ${p.known}%. Attributes are hidden until you scout him.</div>
+        <div class="row" style="margin-top:8px"><button class="btn sm" onclick="assignScout(${p.id})">Assign scout</button></div></div>`)}
+    ${p.mine ? `
+      <div class="grid g2" style="margin-top:12px">
+        <div class="card"><h3>Contract & status</h3>
+          <div class="kv"><span>Promise</span><b>${esc(p.promise)}</b></div>
+          <div class="kv"><span>Morale</span><b>${Math.round(p.morale)}</b></div>
+          <div class="kv"><span>Happiness</span><b>${Math.round(p.happiness)}</b></div>
+          <div class="kv"><span>Form</span><b>${p.form > 0 ? "+" : ""}${p.form.toFixed(1)}</b></div>
+          <div class="kv"><span>Listed</span><b>${p.listed ? "Yes" : "No"}</b></div>
+          <div class="row" style="margin-top:10px">
+            <button class="btn sm" onclick="talkTo(${p.id},'praise')">Praise</button>
+            <button class="btn sm" onclick="talkTo(${p.id},'criticise')">Criticise</button>
+            <button class="btn sm" onclick="talkTo(${p.id},'chat')">Chat</button>
+            <button class="btn sm" onclick="openPromise(${p.id},'${esc(p.name).replace(/'/g, "\\'")}','${esc(p.promise)}')">Playing time</button>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <button class="btn sm" onclick="renewTalk(${p.id},'${esc(p.name).replace(/'/g, "\\'")},${p.wage})">Offer new contract</button>
+            <button class="btn sm" onclick="toggleList(${p.id},${!p.listed})">${p.listed ? "Unlist" : "List for transfer"}</button>
+            <button class="btn sm danger" onclick="releasePlayer(${p.id},'${esc(p.name).replace(/'/g, "\\'")}')">Release</button>
+          </div>
+        </div>
+        <div class="card"><h3>Record</h3>
+          <div class="kv"><span>International caps</span><b>${p.int_apps} (${p.int_goals} goals)</b></div>
+          <div class="kv"><span>Reputation</span><b>${Math.round(p.reputation)}</b></div>
+          <div class="kv"><span>Preferred foot</span><b>${esc(p.foot)}</b></div>
+          <div class="kv"><span>Height</span><b>${p.height} cm</b></div>
+        </div>
+      </div>` : ""}`;
+}
+async function talkTo(pid, kind) {
+  const r = await api.post("/api/squad/talk", { pid, kind });
+  toast(esc(r.msg || "Done")); go("player", pid);
+}
+async function openPromise(pid, name, cur) {
+  const opts = G.static.promises;
+  modal(`<h2>Playing time — ${esc(name)}</h2>
+    <p class="small muted">Current promise: <b>${esc(cur)}</b>. Promises affect morale, happiness and how players react when they are not selected. Breaking one damages trust.</p>
+    <div class="row" style="margin-top:10px">
+      ${opts.map(o => `<button class="btn" onclick="setPromise(${pid},'${esc(o)}')">${esc(o)}</button>`).join("")}
+    </div>
+    <div class="row" style="margin-top:14px"><span class="spacer"></span><button class="btn" onclick="closeModal()">Cancel</button></div>`);
+}
+async function setPromise(pid, promise) {
+  const r = await api.post("/api/squad/promise", { pid, promise });
+  closeModal(); toast(esc(r.msg || "Promise updated")); go("player", pid);
+}
+async function renewTalk(pid, name, wage) {
+  const w = prompt(`New weekly wage for ${name} (current €${wage}k/week):`, Math.round(wage * 1.15));
+  if (!w) return;
+  const y = prompt("Contract length in years:", "2"); if (!y) return;
+  const promise = prompt("Playing-time promise:", "Regular Starter"); if (!promise) return;
+  const r = await api.post("/api/contract/renew", { pid, wage: +w, years: +y, promise });
+  toast(esc(r.msg || (r.ok ? "Contract agreed" : "Negotiation failed")), 5000); go("player", pid);
+}
+async function toggleList(pid, listed) { const r = await api.post("/api/squad/list", { pid, listed }); toast(esc(r.msg || "Done")); go("player", pid); }
+async function releasePlayer(pid, name) {
+  if (!confirm(`Release ${name}? He will leave immediately and become a free agent.`)) return;
+  const r = await api.post("/api/squad/release", { pid }); toast(esc(r.msg || "Released")); go("squad");
+}
+async function assignScout(pid) { const r = await api.post("/api/scout/assign", { pid }); toast(esc(r.msg || "Scout assigned")); }
+
+/* ------------------------------------------------------------------ TACTICS */
+const POS_COORDS = {
+  GK: [50, 92], DC: [35, 74], DL: [14, 70], DR: [86, 70], DM: [50, 60], MC: [38, 48],
+  AMC: [50, 36], AML: [14, 38], AMR: [86, 38], ST: [50, 18]
+};
+function pitchHTML(xi, clickable) {
+  const byPos = {};
+  xi.forEach((x, i) => (byPos[x.pos] = byPos[x.pos] || []).push(i));
+  return `<div class="pitch"><div class="lines"></div>${xi.map((x, i) => {
+    const c = POS_COORDS[x.pos] || [50, 50];
+    const off = byPos[x.pos].indexOf(i) - (byPos[x.pos].length - 1) / 2;
+    const left = Math.max(7, Math.min(93, c[0] + off * 15));
+    const p = x.player;
+    return `<div class="slot ${p ? "" : "empty"}" style="left:${left}%;top:${c[1]}%"
+      ${clickable ? `onclick="pickSlot(${i},'${x.pos}')"` : ""}>
+      <div class="dot">${esc(x.pos)}</div>
+      <div class="nm">${p ? esc(p.name.split(" ").slice(-1)[0]) + " " + p.ca.toFixed(1) : "empty"}</div>
+      ${p ? `<div class="nm muted" style="font-size:9.5px">${Math.round(p.condition * 100)}%${p.injured ? " INJ" : ""}${p.suspended ? " SUS" : ""}</div>` : ""}
+      ${p && x.role ? `<div class="nm muted" style="font-size:9px">${esc(x.role.split(" ").map(w => w[0]).join(""))} ${esc(x.duty || "")}${x.auto ? " ·auto" : ""}</div>` : ""}
+    </div>`;
+  }).join("")}</div>`;
+}
+async function renderTactics() {
+  const t = await api.get("/api/screen/tactics");
+  await refreshState();
+  if (t.error) { $("#content").innerHTML = `<h1>Tactics</h1><p class="muted">${esc(t.error)}</p>`; return; }
+  window._tactics = t;
+  const IOPT = G.static.instruction_options || {};
+  const instr = t.tactic.instr || {};
+  $("#content").innerHTML = `
+    <h1>Tactics</h1>
+    <p class="sub">Familiarity <b>${Math.round(t.tactic.familiarity)}%</b> · attack ${t.rating.attack} ·
+      defence ${t.rating.defence} · condition ${t.rating.condition} · press ${t.rating.press} ·
+      tempo ${t.rating.tempo} · width ${t.rating.width}</p>
+    <div class="grid" style="grid-template-columns:1.1fr .9fr;gap:12px">
+      <div>
+        <div class="card">
+          <h3>Shape & mentality</h3>
+          <div class="row">
+            <select id="tac-formation" onchange="changeFormation(this.value)">
+              ${G.static.formations.map(f => `<option ${f === t.tactic.formation ? "selected" : ""}>${f}</option>`).join("")}
+            </select>
+            <select id="tac-mentality" onchange="saveTactics()">
+              ${G.static.mentalities.map(m => `<option ${m === t.tactic.mentality ? "selected" : ""}>${m}</option>`).join("")}
+            </select>
+            <span class="spacer"></span>
+            <button class="btn sm" onclick="autoPickXI()">Assistant picks XI</button>
+          </div>
+          <div class="small muted" style="margin-top:6px">Changing shape or mentality costs familiarity — the team needs matches to learn it.
+            Slots marked <b>auto</b> are the assistant's pick: click any slot on the pitch to choose your own XI.</div>
+        </div>
+        ${pitchHTML(t.xi, true)}
+        <div class="card tight"><h3>Bench <span class="muted small">(click to fill an empty slot)</span></h3>
+          <div class="row">${t.bench.map(b => `<button class="btn sm" onclick="swapIn(${b.id})"
+            title="${esc(b.name)} · CA ${b.ca} · ${esc(b.pos)}">${esc(b.name.split(" ").slice(-1)[0])}
+            <span class="muted">${esc(b.pos)} ${b.ca.toFixed(1)}</span></button>`).join("")}</div>
+        </div>
+      </div>
+      <div>
+        <div class="card"><h3>Roles & duties</h3>
+          ${t.xi.map((x, i) => `
+            <div class="row" style="margin-bottom:4px">
+              <div style="width:40px"><span class="pos">${esc(x.pos)}</span></div>
+              <div style="flex:1" class="small">${x.player ? esc(x.player.name) : '<span class="muted">empty</span>'}</div>
+              <select data-slot="${i}" data-kind="role" class="rd-sel" style="width:150px" onchange="saveTactics()">
+                ${(G.static.roles[x.pos] || []).map(r => `<option ${x.role === r ? "selected" : ""}>${r}</option>`).join("")}
+              </select>
+              <select data-slot="${i}" data-kind="duty" class="rd-sel" style="width:88px" onchange="saveTactics()">
+                ${(G.static.duties[x.pos] || []).map(d => `<option ${x.duty === d ? "selected" : ""}>${d}</option>`).join("")}
+              </select>
+            </div>`).join("")}
+        </div>
+        <div class="card" style="margin-top:12px"><h3>Team instructions</h3>
+          ${Object.keys(IOPT).map(k => {
+            const opts = IOPT[k] || [];
+            const cur = instr[k];
+            const label = k.replace(/_/g, " ");
+            if (opts.length === 2 && (opts[0] === false || opts[0] === true))
+              return `<div class="row" style="margin-bottom:5px">
+                <div style="flex:1" class="small">${esc(label)}</div>
+                <label class="row" style="margin:0"><input type="checkbox" data-i="${k}" class="instr-c"
+                  ${cur ? "checked" : ""} onchange="saveTactics()"> on</label></div>`;
+            return `<div class="row" style="margin-bottom:5px">
+              <div style="width:140px" class="small">${esc(label)}</div>
+              <select data-i="${k}" class="instr-s" style="flex:1" onchange="saveTactics()">
+                ${opts.map(o => `<option ${cur === o ? "selected" : ""}>${o}</option>`).join("")}
+              </select></div>`;
+          }).join("")}
+          <div class="row" style="margin-top:8px"><button class="btn sm" onclick="resetInstructions()">Reset to default</button></div>
+        </div>
+      </div>
+    </div>`;
+}
+async function changeFormation(f) { const r = await saveTactics({ formation: f }); if (r && r.msg) toast(esc(r.msg)); renderTactics(); }
+async function resetInstructions() { const r = await saveTactics({ reset_instr: true }); if (r && r.msg) toast(esc(r.msg)); renderTactics(); }
+async function saveTactics(extra) {
+  const t = window._tactics || {};
+  const roles = {};
+  $$(".rd-sel").forEach(s => {
+    const i = s.dataset.slot;
+    roles[i] = roles[i] || [(t.xi[i] || {}).role, (t.xi[i] || {}).duty];
+    roles[i][s.dataset.kind === "role" ? 0 : 1] = s.value;
+  });
+  const instr = {};
+  $$(".instr-s").forEach(i => instr[i.dataset.i] = i.value);
+  $$(".instr-c").forEach(i => instr[i.dataset.i] = i.checked);
+  const body = { roles: Object.keys(roles).length ? roles : null,
+                 instr: Object.keys(instr).length ? instr : null, ...(extra || {}) };
+  if (body.reset_instr) body.instr = null;
+  if ($("#tac-formation") && !body.formation) body.formation = $("#tac-formation").value;
+  if ($("#tac-mentality") && !body.mentality) body.mentality = $("#tac-mentality").value;
+  try {
+    const r = await api.post("/api/tactics", body);
+    if (r && r.ok === false) toast(esc(r.msg || "Could not save tactics"), 4000);
+    return r;
+  } catch (e) { toast("Tactics error: " + esc(e.message), 5000); }
+}
+async function autoPickXI() {
+  const r = await api.post("/api/match/auto", {});
+  toast(esc(r.msg || "Done")); renderTactics();
+}
+let PICK_SLOT = null;
+function pickSlot(i, pos) { PICK_SLOT = { i, pos }; showSlotPicker(pos); }
+async function showSlotPicker(pos) {
+  const j = await api.get("/api/screen/squad");
+  const t = window._tactics;
+  const used = new Set(t.xi.filter(x => x.player).map(x => x.player.id));
+  const rank = p => p.pos === pos ? 0 : (p.pos2 === pos ? 1 : 2);
+  const cands = j.players.filter(p => p.squad !== "Youth" && !used.has(p.id))
+    .sort((a, b) => rank(a) - rank(b) || b.ca - a.ca).slice(0, 22);
+  modal(`<h2>Pick a player for ${esc(pos)}</h2>
+    <div class="card" style="padding:0;max-height:52vh;overflow:auto">
+    <table><thead><tr><th>Pos</th><th>Name</th><th class="num">CA</th><th class="num">Stars</th>
+      <th class="num">Cond</th><th class="num">Fit</th><th>Status</th><th></th></tr></thead>
+    <tbody>${cands.map(p => `<tr><td><span class="pos">${esc(p.pos)}</span>${p.pos2 ? '<span class="muted small">/' + esc(p.pos2) + "</span>" : ""}</td>
+      <td><b>${esc(p.name)}</b></td>
+      <td class="num">${p.ca.toFixed(1)}</td><td class="num">${stars(p.stars)}</td>
+      <td class="num">${p.condition.toFixed(2)}</td><td class="num">${Math.round(p.fitness)}</td>
+      <td class="small">${p.injured ? '<span class="tag L">' + esc(p.injury) + "</span>" : p.suspended ? '<span class="tag L">susp</span>' : '<span class="tag W">fit</span>'}</td>
+      <td><button class="btn sm primary" onclick="applySlot(${p.id})">Select</button></td></tr>`).join("")}</tbody></table></div>`, true);
+}
+async function applySlot(pid) {
+  const t = window._tactics;
+  const ids = t.xi.map(x => x.player ? x.player.id : 0);
+  const at = ids.indexOf(pid);
+  if (at >= 0) ids[at] = ids[PICK_SLOT.i];
+  ids[PICK_SLOT.i] = pid;
+  const clean = ids.filter(x => x);
+  if (clean.length !== 11) { toast(`Fill all 11 slots first (${clean.length}/11).`, 4000); return; }
+  try {
+    const r = await api.post("/api/match/select", { ids: clean });
+    closeModal();
+    toast(esc(r.msg || (r.ok ? "Team selected" : "Failed")), 4000);
+    renderTactics();
+  } catch (e) { closeModal(); toast(esc(e.message), 5000); }
+}
+function swapIn(pid) {
+  const empty = window._tactics.xi.findIndex(x => !x.player);
+  if (empty >= 0) { PICK_SLOT = { i: empty, pos: window._tactics.xi[empty].pos }; applySlot(pid); }
+  else toast("All slots are filled — click a slot on the pitch to replace that player.", 4000);
+}
+
+/* ----------------------------------------------------------------- TRAINING */
+async function renderTraining() {
+  const t = await api.get("/api/screen/training");
+  await refreshState();
+  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  $("#content").innerHTML = `
+    <h1>Training</h1>
+    <p class="sub">Squad load — fatigue ${t.squad_load.fatigue} · fitness ${t.squad_load.fitness} · sharpness ${t.squad_load.sharpness} · ${t.squad_load.injured} injured</p>
+    <div class="card" style="padding:0;overflow:auto">
+      <table><thead><tr><th>Day</th><th>Session</th><th>Focus position</th>
+        <th class="num">Fatigue</th><th class="num">Fitness</th><th class="num">Sharpness</th><th>Attributes</th></tr></thead>
+      <tbody>${t.week.map(w => {
+        const s = t.sessions.find(x => x.name === w.session) || {};
+        return `<tr><td><b>${days[w.day]}</b></td>
+        <td><select onchange="setTraining(${w.day},this.value,'${esc(w.focus || "")}')">
+          ${t.sessions.map(x => `<option ${x.name === w.session ? "selected" : ""}>${x.name}</option>`).join("")}</select></td>
+        <td><select onchange="setTraining(${w.day},'${esc(w.session)}',this.value)">
+          <option value="">— none —</option>
+          ${t.focus_options.map(p => `<option ${w.focus === p ? "selected" : ""}>${p}</option>`).join("")}</select></td>
+        <td class="num">${s.fatigue != null ? (s.fatigue > 0 ? "+" : "") + s.fatigue : "—"}</td>
+        <td class="num">${s.fitness != null ? (s.fitness > 0 ? "+" : "") + s.fitness : "—"}</td>
+        <td class="num">${s.sharpness != null ? (s.sharpness > 0 ? "+" : "") + s.sharpness : "—"}</td>
+        <td class="small muted">${(s.attrs || []).slice(0, 4).join(", ")}</td></tr>`;
+      }).join("")}</tbody></table>
+    </div>
+    <div class="grid g2" style="margin-top:12px">
+      <div class="card"><h3>Coaching staff</h3>
+        <table><thead><tr><th>Role</th><th class="num">n</th><th class="num">Att</th><th class="num">Def</th>
+          <th class="num">Fit</th><th class="num">Tac</th><th class="num">Tec</th><th class="num">Wages</th></tr></thead>
+        <tbody>${t.coaching.map(c => `<tr><td>${esc(c.role)}</td><td class="num">${c.n}</td>
+          <td class="num">${Math.round(c.att || 0)}</td><td class="num">${Math.round(c.dfn || 0)}</td>
+          <td class="num">${Math.round(c.fit || 0)}</td><td class="num">${Math.round(c.tac || 0)}</td>
+          <td class="num">${Math.round(c.tec || 0)}</td><td class="num small">${wk(c.wage)}</td></tr>`).join("")}</tbody></table>
+      </div>
+      <div class="card"><h3>How training works</h3>
+        <div class="small muted pre">Sessions add fatigue and sharpness, build fitness, and give a daily chance to improve specific attributes — weighted by your coaching quality and facilities.
+
+Match Preparation the day before a game and Recovery the day after are applied automatically. During international breaks the squad rests.
+
+High fatigue raises injury risk and lowers match condition. Young players develop fastest with match minutes.</div>
+      </div>
+    </div>`;
+}
+async function setTraining(day, session, focus) {
+  const r = await api.post("/api/training", { day, session, focus });
+  if (r && r.ok === false) toast(esc(r.msg || "Failed"));
+  else renderTraining();
+}
+
+/* -------------------------------------------------------------------- MATCH */
+let MATCH = null;
+async function renderMatch() {
+  await refreshState();
+  if (G.pendingMatch) { showHalftime(G.halftimeState); return; }
+  const j = await api.get("/api/match/next");
+  if (!j.ok) { $("#content").innerHTML = `<h1>Match Centre</h1><p class="muted">${esc(j.msg)}</p>`; return; }
+  MATCH = j;
+  const p = j.preview, f = p.fixture;
+  $("#content").innerHTML = `
+    <h1>Match Centre</h1>
+    <p class="sub">${esc(f.comp || "Friendly")}${f.stage && f.stage !== "league" ? " · " + esc(f.stage) : ""} · ${fmtDate(f.date)} · ${esc(f.venue)}</p>
+    <div class="scoreboard">
+      <div class="team">${esc(f.home)}${f.is_home ? ' <span class="tag">you</span>' : ""}</div>
+      <div class="score">v</div>
+      <div class="team">${esc(f.away)}${!f.is_home ? ' <span class="tag">you</span>' : ""}</div>
+    </div>
+    <div class="grid g3" style="margin-top:12px">
+      <div class="card"><h3>Your team</h3>
+        <div class="kv"><span>Squad strength</span><b>${p.my.ca.toFixed(1)}</b></div>
+        <div class="kv"><span>Attack</span><b>${p.my.attack}</b></div>
+        <div class="kv"><span>Defence</span><b>${p.my.defence}</b></div>
+        <div class="kv"><span>Condition</span><b>${p.my.condition}</b></div>
+        <div class="kv"><span>Tactic</span><b>${esc(p.tactic.formation)} / ${esc(p.tactic.mentality)}</b></div>
+        <div class="row" style="margin-top:6px">${(p.my.form || []).map(x => `<span class="tag ${x.res}">${x.res} ${x.score}</span>`).join("") || '<span class="muted small">no form</span>'}</div>
+      </div>
+      <div class="card"><h3>Opposition</h3>
+        <div class="kv"><span>${esc(p.opp.name)}</span><b>${p.opp.ca ? p.opp.ca.toFixed(1) : "unknown"}</b></div>
+        <div class="kv"><span>Reputation</span><b>${p.opp.rep}</b></div>
+        <div class="kv"><span>League</span><b>${esc(p.opp.league)}</b></div>
+        <div class="row" style="margin-top:6px">${(p.opp.form || []).map(x => `<span class="tag ${x.res}">${x.res} ${x.score}</span>`).join("")}</div>
+        <h3 style="margin-top:12px">Scouting report</h3>
+        <div class="small muted">Knowledge: ${p.opposition_report.known}%</div>
+        ${p.opposition_report.key_players.length ? `<div style="margin-top:6px">${p.opposition_report.key_players.map(k =>
+          `<div class="kv"><span>${esc(k.name)} (${esc(k.pos)}, ${k.age})</span><b>${k.goals} goals${k.ca ? " · CA " + k.ca : ""}</b></div>`).join("")}</div>`
+        : '<div class="small muted" style="margin-top:6px">No report — you have not scouted this opponent.</div>'}
+      </div>
+      <div class="card"><h3>Kick off</h3>
+        <p class="small muted">The simulation is identical in every mode — only how much you watch changes.
+          In <b>full</b> and <b>key moments</b> mode the match pauses at half-time for your team talk and substitutions.</p>
+        <div class="row" style="flex-direction:column;align-items:stretch">
+          <button class="btn primary" onclick="playMatch('full')">Watch full match</button>
+          <button class="btn" onclick="playMatch('key')">Key moments (pause at HT)</button>
+          <button class="btn" onclick="playMatch('instant')">Instant result</button>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button class="btn sm" onclick="go('tactics')">Tactics & team</button>
+          <button class="btn sm" onclick="renderMatch()">Refresh</button>
+        </div>
+      </div>
+    </div>
+    <div class="grid g2" style="margin-top:12px">
+      <div class="card"><h3>Selected XI</h3>${pitchHTML(p.xi, false)}</div>
+      <div class="card"><h3>Bench</h3>
+        <table><thead><tr><th>Pos</th><th>Name</th><th class="num">CA</th><th class="num">Cond</th>
+          <th class="num">Fit</th><th class="num">Fat</th></tr></thead>
+        <tbody>${p.bench.map(b => `<tr><td><span class="pos">${esc(b.pos)}</span></td><td>${esc(b.name)}</td>
+          <td class="num">${b.ca.toFixed(1)}</td><td class="num">${b.condition.toFixed(2)}</td>
+          <td class="num">${Math.round(b.fitness)}</td><td class="num">${Math.round(b.fatigue)}</td></tr>`).join("")}</tbody></table>
+      </div>
+    </div>`;
+}
+async function playMatch(mode) {
+  G.busy = true;
+  try {
+    const j = await api.post("/api/match/play", { mode });
+    if (!j.ok) { toast(esc(j.msg || "Could not play the match"), 5000); G.busy = false; return; }
+    if (j.halftime) {
+      G.pendingMatch = true; G.halftimeState = j.state; G.matchFixture = j.fixture;
+      showHalftime(j.state);
+    } else {
+      await refreshState();
+      showResult(j.result);
+    }
+  } catch (e) { toast("Match failed: " + esc(e.message), 6000); }
+  G.busy = false;
+}
+function showHalftime(st) {
+  if (!st) return;
+  $("#content").innerHTML = `
+    <h1>Half-time</h1>
+    <div class="scoreboard">
+      <div class="team">${esc(st.home_name)}${st.is_home ? ' <span class="tag">you</span>' : ""}</div>
+      <div><div class="score">${st.score.home} – ${st.score.away}</div><div class="min">45'</div></div>
+      <div class="team">${esc(st.away_name)}${!st.is_home ? ' <span class="tag">you</span>' : ""}</div>
+    </div>
+    <div class="grid g2" style="margin-top:12px">
+      <div class="card">
+        <h3>Half-time statistics</h3>
+        <table><tbody>
+          ${[["Possession %", "poss"], ["Shots", "shots"], ["On target", "sot"], ["xG", "xg"], ["Corners", "corners"], ["Fouls", "fouls"]]
+            .map(([label, k]) => `<tr><td class="num"><b>${k === "xg" ? Number(st.stats.me[k]).toFixed(2) : st.stats.me[k]}</b></td>
+              <td class="muted small" style="text-align:center">${label}</td>
+              <td class="num"><b>${k === "xg" ? Number(st.stats.opp[k]).toFixed(2) : st.stats.opp[k]}</b></td></tr>`).join("")}
+        </tbody></table>
+        <h3 style="margin-top:12px">First-half incidents</h3>
+        <div class="commentary" style="max-height:180px">
+          ${st.events.length ? st.events.map(e => `<div class="${e.type}"><span class="m">${e.minute}'</span>
+            <span class="${e.type === "goal" ? "goal" : e.type === "red" ? "red" : e.type === "injury" ? "inj" : ""}">${esc(e.text || e.type)}</span></div>`).join("")
+          : '<div class="muted">A quiet first half.</div>'}
+        </div>
+      </div>
+      <div class="card">
+        <h3>Team talk</h3>
+        <select id="ht-talk" style="width:100%">
+          ${st.talks.map(t => `<option value="${t}" ${t === "neutral" ? "selected" : ""}>${esc(t[0].toUpperCase() + t.slice(1))}</option>`).join("")}
+        </select>
+        <div class="small muted" style="margin-top:6px" id="ht-hint">${esc(talkHint("neutral", st))}</div>
+        <h3 style="margin-top:14px">Substitutions <span class="muted small">(up to 3)</span></h3>
+        <div id="ht-subs"></div>
+        <div class="row" style="margin-top:8px"><button class="btn sm" onclick="addSubRow()">+ Add substitution</button></div>
+        <div class="row" style="margin-top:14px">
+          <button class="btn primary" onclick="submitHalftime()">Send them back out ▸</button>
+          <button class="btn" onclick="submitHalftime(true)">No changes</button>
+        </div>
+      </div>
+    </div>
+    <div class="grid g2" style="margin-top:12px">
+      <div class="card"><h3>Your players at the break</h3>
+        <table><thead><tr><th>Pos</th><th>Name</th><th class="num">Rating</th><th class="num">Fatigue</th></tr></thead>
+        <tbody>${st.xi.map(p => `<tr><td><span class="pos">${esc(p.pos)}</span></td><td>${esc(p.name)}</td>
+          <td class="num"><b>${p.rating.toFixed(2)}</b></td><td class="num">${Math.round(p.fatigue)}</td></tr>`).join("")}</tbody></table>
+      </div>
+      <div class="card"><h3>Bench</h3>
+        <table><thead><tr><th>Pos</th><th>Name</th><th class="num">CA</th></tr></thead>
+        <tbody>${st.bench.map(b => `<tr><td><span class="pos">${esc(b.pos)}</span></td><td>${esc(b.name)}</td>
+          <td class="num">${b.ca.toFixed(1)}</td></tr>`).join("")}</tbody></table>
+      </div>
+    </div>`;
+  window._ht = st;
+  $("#ht-talk").addEventListener("change", e => $("#ht-hint").textContent = talkHint(e.target.value, st));
+  addSubRow();
+}
+function talkHint(talk, st) {
+  const diff = st.my_score - st.opp_score;
+  const notes = {
+    praise: "Lifts morale. Works best when the team is already on top.",
+    encourage: "Steady morale boost and a small attacking lift.",
+    neutral: "No effect on morale or tactics.",
+    firm: "Sharper reaction when you are behind; can unsettle players who are already winning.",
+    aggressive: "Biggest push — more pressing and attacking intent, more fatigue and card risk.",
+    defensive: "Drops the line and eases the press. Protects a lead.",
+    attacking: "Raises the tempo and pushes the line up. Chases a goal."
+  };
+  let s = notes[talk] || "";
+  if (diff < 0 && (talk === "praise")) s += " You are losing — praise may read as complacency.";
+  if (diff > 0 && (talk === "firm" || talk === "aggressive")) s += " You are winning — harsh words can dent confidence.";
+  return s;
+}
+let SUB_ROWS = 0;
+function addSubRow() {
+  const st = window._ht; if (!st) return;
+  if (SUB_ROWS >= 3) { toast("Maximum three substitutions at half-time."); return; }
+  SUB_ROWS++;
+  const wrap = document.createElement("div");
+  wrap.className = "row ht-sub";
+  wrap.style.marginBottom = "6px";
+  wrap.innerHTML = `
+    <select class="sub-off" style="flex:1"><option value="">Off…</option>
+      ${st.xi.map(p => `<option value="${p.pid}">${esc(p.name)} (${esc(p.pos)} ${p.rating.toFixed(2)})</option>`).join("")}</select>
+    <select class="sub-on" style="flex:1"><option value="">On…</option>
+      ${st.bench.map(b => `<option value="${b.pid}">${esc(b.name)} (${esc(b.pos)} ${b.ca.toFixed(1)})</option>`).join("")}</select>
+    <button class="btn sm" onclick="this.parentNode.remove()">✕</button>`;
+  $("#ht-subs").appendChild(wrap);
+}
+async function submitHalftime(noChange) {
+  const talk = noChange ? null : ($("#ht-talk") ? $("#ht-talk").value : null);
+  const subs = noChange ? [] : $$(".ht-sub").map(r => {
+    const off = $(".sub-off", r).value, on = $(".sub-on", r).value;
+    return off && on ? [+off, +on] : null;
+  }).filter(x => x);
+  G.busy = true;
+  try {
+    const j = await api.post("/api/match/halftime", { talk, subs });
+    G.pendingMatch = false; G.halftimeState = null; SUB_ROWS = 0;
+    if (!j.ok) { toast(esc(j.msg || "Could not resume the match"), 5000); G.busy = false; return; }
+    await refreshState();
+    showResult(j.result);
+  } catch (e) { toast("Match failed: " + esc(e.message), 6000); }
+  G.busy = false;
+}
+function showResult(r) {
+  const isH = r.is_home;
+  const my = isH ? r.hg : r.ag, opp = isH ? r.ag : r.hg;
+  const res = r.result || (my > opp ? "W" : my === opp ? "D" : "L");
+  const mySide = isH ? "H" : "A";
+  const all = r.events || [];
+  const relevant = all.filter(e => e.type === "goal" || e.type === "red" || e.type === "injury" ||
+    e.type === "sub" || e.type === "halftime" || e.type === "kickoff" || e.type === "team_talk" ||
+    e.type === "penalties" || e.side === mySide);
+  const shown = r.mode === "instant" ? all.filter(e => ["goal", "red", "penalties", "halftime", "kickoff"].includes(e.type))
+    : r.mode === "key" ? relevant.filter(e => ["goal", "red", "injury", "sub", "halftime", "kickoff", "team_talk", "penalties"].includes(e.type))
+    : relevant;
+  const statRows = [["Possession %", "possession"], ["Shots", "shots"], ["On target", "sot"],
+    ["Big chances", "big"], ["xG", "xg"], ["Corners", "corners"], ["Fouls", "fouls"],
+    ["Yellow", "yellow"], ["Red", "red"], ["Saves", "saves"]];
+  modal(`
+    <div class="scoreboard">
+      <div class="team">${esc(r.home)}${isH ? ' <span class="tag">you</span>' : ""}</div>
+      <div><div class="score">${r.hg} – ${r.ag}</div>
+        <div class="min"><span class="tag ${res}">${res === "W" ? "WIN" : res === "D" ? "DRAW" : "LOSS"}</span>
+        ${esc(r.comp || "")} · ${fmtDate(r.date)}</div></div>
+      <div class="team">${esc(r.away)}${!isH ? ' <span class="tag">you</span>' : ""}</div>
+    </div>
+    ${r.penalties ? `<p class="small" style="text-align:center;margin-top:8px">Won ${esc(String(r.penalties.winner || ""))} on penalties — ${esc(JSON.stringify(r.penalties.home || ""))} / ${esc(JSON.stringify(r.penalties.away || ""))}</p>` : ""}
+    <div class="grid g2" style="margin-top:12px">
+      <div>
+        <h3>Commentary <span class="muted small">(${esc(r.mode)} view)</span></h3>
+        <div class="commentary">
+          ${shown.map(e => `<div class="${e.type}"><span class="m">${e.minute}'</span>
+            <span class="${e.type === "goal" ? "goal" : e.type === "yellow" ? "card" : e.type === "red" ? "red" : e.type === "injury" ? "inj" : ""}">${esc(e.text || e.type)}</span></div>`).join("")}
+        </div>
+        <h3 style="margin-top:12px">Statistics</h3>
+        <table><tbody>${statRows.map(([label, k]) => `<tr>
+          <td class="num"><b>${fmtStat(r.stats.home[k], k)}</b></td>
+          <td class="muted small" style="text-align:center">${label}</td>
+          <td class="num"><b>${fmtStat(r.stats.away[k], k)}</b></td></tr>`).join("")}</tbody></table>
+      </div>
+      <div>
+        <h3>Your players</h3>
+        <div style="max-height:340px;overflow:auto">
+        <table><thead><tr><th>Pos</th><th>Name</th><th class="num">Min</th><th class="num">G</th>
+          <th class="num">A</th><th class="num">Sh</th><th class="num">xG</th><th class="num">Rating</th></tr></thead>
+        <tbody>${r.players.map(p => `<tr class="${p.pid === r.motm ? "me" : ""}">
+          <td><span class="pos">${esc(p.pos)}</span></td>
+          <td>${esc(p.name)}${p.pid === r.motm ? ' <span class="tag" style="color:var(--gold)">MOTM</span>' : ""}</td>
+          <td class="num">${p.mins}</td><td class="num">${p.goals || ""}</td><td class="num">${p.assists || ""}</td>
+          <td class="num">${p.shots || ""}</td><td class="num">${p.xg || ""}</td>
+          <td class="num"><b>${p.rating.toFixed(2)}</b></td></tr>`).join("")}</tbody></table></div>
+        ${r.injuries && r.injuries.length ? `<h3 style="margin-top:12px">Injuries</h3>
+          ${r.injuries.map(i => `<div class="small" style="color:#ff9b9b">${esc(i.name)} — ${esc(i.injury)}, out ${i.days} days</div>`).join("")}` : ""}
+        <div class="kv" style="margin-top:10px"><span>Board confidence</span><b>${r.board_confidence}</b></div>
+        <div class="kv"><span>Fan sentiment</span><b>${r.fan_sentiment}</b></div>
+        <div class="small muted" style="margin-top:6px">${esc(r.weather || "")} · referee ${esc(r.referee || "")}</div>
+      </div>
+    </div>
+    <div class="row" style="margin-top:14px"><span class="spacer"></span>
+      <button class="btn" onclick="closeModal();go('match')">Next fixture</button>
+      <button class="btn primary" onclick="closeModal();go('home')">Back to office</button></div>`, true);
+}
+function fmtStat(v, k) {
+  if (v == null) return "—";
+  return k === "xg" ? Number(v).toFixed(2) : v;
+}
+
+/* ---------------------------------------------------------------- TRANSFERS */
+let TR = { pos: "", q: "", max_fee: 0, age_max: 0, free: false, aff: true };
+async function renderTransfers() {
+  await refreshState();
+  const j = await api.get("/api/screen/transfers");
+  const shortlisted = new Set(j.shortlist_ids || []);
+  const s = await api.get(`/api/transfer/search?pos=${TR.pos}&q=${encodeURIComponent(TR.q)}&max_fee=${TR.max_fee}&age_max=${TR.age_max}&free=${TR.free}&affordable=${TR.aff !== false}`);
+  $("#content").innerHTML = `
+    <h1>Transfers</h1>
+    <p class="sub">Window: <b>${j.window && j.window !== "closed" ? j.window.toUpperCase() + " — OPEN" : "CLOSED"}</b> · budget ${money(j.budget)} · summer ${fmtDate(j.windows.open)} → ${fmtDate(j.windows.close)}, winter ${fmtDate(j.windows.winter[0])} → ${fmtDate(j.windows.winter[1])}</p>
+    ${j.offers.length ? `<div class="card" style="margin-bottom:12px;border-color:#6b5522"><h3>Incoming bids</h3>
+      <table><thead><tr><th>Player</th><th>From</th><th class="num">Fee</th><th class="num">Value</th><th class="num">Wage offered</th><th></th></tr></thead>
+      <tbody>${j.offers.map(o => `<tr><td><b>${esc(o.player)}</b> <span class="muted small">${esc(o.pos)}, ${o.age}</span></td>
+        <td>${esc(o.from_club || "—")}</td><td class="num">${money(o.fee)}</td><td class="num">${money(o.value)}</td>
+        <td class="num">${wk(o.wage)}</td>
+        <td class="row"><button class="btn sm primary" onclick="bid(${o.id},'accept')">Accept</button>
+        <button class="btn sm" onclick="bid(${o.id},'reject')">Reject</button>
+        <button class="btn sm" onclick="bidCounter(${o.id},${o.fee})">Counter</button></td></tr>`).join("")}</tbody></table></div>` : ""}
+    ${(j.my_offers || []).length ? `<div class="card" style="margin-bottom:12px"><h3>Negotiations</h3>
+      <table><thead><tr><th>Player</th><th>Dir</th><th>Clubs</th><th class="num">Fee</th><th class="num">Wage</th>
+        <th>Status</th><th class="small">Note</th><th></th></tr></thead><tbody>
+      ${j.my_offers.map(o => `<tr>
+        <td><a href="#" onclick="go('player',${o.player_id});return false"><b>${esc(o.player)}</b></a>
+            <span class="muted small">${esc(o.pos)}, ${o.age}</span></td>
+        <td>${o.direction === "in" ? '<span class="tag">IN</span>' : '<span class="tag">OUT</span>'}</td>
+        <td class="small">${esc(o.from_club || "—")} → ${esc(o.to_club || "—")}</td>
+        <td class="num">${money(o.fee)}</td><td class="num small">${wk(o.wage)}</td>
+        <td><span class="tag ${o.awaiting_you ? "warn" : ""}">${esc(o.status)}</span>${o.round > 1 ? ' <span class="muted small">r' + o.round + "</span>" : ""}</td>
+        <td class="small muted">${esc(o.note || "")}</td>
+        <td class="row">${o.direction === "out" && o.status === "counter" ? `
+            <button class="btn sm primary" onclick="respondCounter(${o.id},true,${o.fee})">Accept</button>
+            <button class="btn sm" onclick="respondCounter(${o.id},false)">Walk away</button>
+            <button class="btn sm" onclick="respondCounterNew(${o.id},${o.fee})">Re-bid</button>`
+          : (o.direction === "in" && o.status === "pending" ? `
+            <button class="btn sm primary" onclick="bid(${o.id},'accept')">Accept</button>
+            <button class="btn sm" onclick="bid(${o.id},'reject')">Reject</button>` : "")}</td>
+      </tr>`).join("")}</tbody></table></div>` : ""}
+    <div class="card">
+      <div class="row">
+        <div><label>Search</label><input id="tr-q" placeholder="Player name" value="${esc(TR.q)}" style="width:200px"></div>
+        <div><label>Position</label><select id="tr-pos">
+          <option value="">Any</option>${G.static.positions.map(p => `<option ${TR.pos === p ? "selected" : ""}>${p}</option>`).join("")}</select></div>
+        <div><label>Max value (€m)</label><input id="tr-fee" type="number" value="${TR.max_fee || ""}" style="width:120px"></div>
+        <div><label>Max age</label><input id="tr-age" type="number" value="${TR.age_max || ""}" style="width:90px"></div>
+        <div><label>Free agents</label><select id="tr-free"><option value="false" ${!TR.free ? "selected" : ""}>No</option><option value="true" ${TR.free ? "selected" : ""}>Yes</option></select></div>
+        <div><label>Affordable only</label><select id="tr-aff"><option value="true" ${TR.aff !== false ? "selected" : ""}>Yes</option><option value="false" ${TR.aff === false ? "selected" : ""}>No</option></select></div>
+        <div style="align-self:flex-end"><button class="btn primary" onclick="doSearch()">Search</button></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px;padding:0;overflow:auto">
+      <table><thead><tr><th>Pos</th><th>Name</th><th class="num">Age</th><th>Club</th>
+        <th class="num">Stars</th><th class="num">Value</th><th class="num">Wage</th><th class="num">Contract</th><th class="num">Asking</th><th></th></tr></thead>
+      <div class="small muted" style="padding:8px 12px;border-bottom:1px solid var(--line)">
+        Showing players valued up to <b>${money(s.cap)}</b> (your budget is ${money(s.budget)}).
+        Clear the "Max value" box and untick affordable to search the whole world.</div>
+      <tbody>${s.players.map(p => `<tr>
+        <td><span class="pos">${esc(p.pos)}</span></td>
+        <td><a href="#" onclick="go('player',${p.id});return false"><b>${esc(p.name)}</b></a>${p.known < 60 ? ' <span class="tag">scout ' + p.known + "%</span>" : ""}</td>
+        <td class="num">${p.age}</td><td class="small">${esc(p.club || "Free agent")}</td>
+        <td class="num">${stars(p.stars)}</td><td class="num">${money(p.value)}</td>
+        <td class="num small">${wk(p.wage)}</td><td class="num small">${esc(p.contract_end || "—")}</td>
+        <td class="num">${p.asking ? money(p.asking) : '<span class="muted">free</span>'}</td>
+        <td class="row"><button class="btn sm primary" onclick='openOffer(${p.id}, ${JSON.stringify(p.name)}, ${p.asking || 0}, ${p.wage || 0})'>Bid</button>
+        <button class="btn sm ${shortlisted.has(p.id) ? "active" : ""}" title="Toggle shortlist"
+          onclick="toggleShortlist(${p.id})">${shortlisted.has(p.id) ? "★" : "☆"}</button></td>
+      </tr>`).join("")}</tbody></table>
+    </div>`;
+}
+function doSearch() {
+  TR = { pos: $("#tr-pos").value, q: $("#tr-q").value, max_fee: +$("#tr-fee").value || 0,
+         age_max: +$("#tr-age").value || 0, free: $("#tr-free").value === "true",
+         aff: $("#tr-aff").value === "true" };
+  renderTransfers();
+}
+function openOffer(pid, name, asking, wage) {
+  modal(`<h2>Make an offer — ${esc(name)}</h2>
+    <div class="grid g2">
+      <div><label>Transfer fee (€m)</label><input id="of-fee" type="number" step="0.1" value="${Math.max(0, (asking || 0)).toFixed(1)}" style="width:100%"></div>
+      <div><label>Weekly wage (€k)</label><input id="of-wage" type="number" step="0.1" value="${Math.max(0.1, (wage || 1) * 1.1).toFixed(1)}" style="width:100%"></div>
+      <div><label>Contract years</label><input id="of-years" type="number" value="3" min="1" max="6" style="width:100%"></div>
+      <div><label>Playing-time promise</label><select id="of-promise" style="width:100%">
+        ${G.static.promises.map(p => `<option ${p === "Squad Rotation" ? "selected" : ""}>${p}</option>`).join("")}</select></div>
+    </div>
+    <label class="row" style="margin-top:10px"><input type="checkbox" id="of-loan"> Loan deal instead</label>
+    <div class="row" style="margin-top:14px"><span class="spacer"></span>
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn primary" onclick="submitOffer(${pid})">Submit offer</button></div>`);
+}
+async function submitOffer(pid) {
+  const body = { pid, fee: +$("#of-fee").value, wage: +$("#of-wage").value, years: +$("#of-years").value,
+                 promise: $("#of-promise").value, is_loan: $("#of-loan").checked };
+  closeModal();
+  const r = await api.post("/api/transfer/offer", body);
+  toast(esc(r.msg || (r.ok ? "Offer submitted" : "Offer rejected")), 5000);
+  if (G.screen === "transfers") renderTransfers();
+}
+async function toggleShortlist(pid) {
+  const r = await api.post("/api/scout/shortlist", { pid });
+  toast(r.added ? "Added to shortlist" : "Removed from shortlist", 2200);
+  if (G.screen === "transfers") renderTransfers(); else if (G.screen === "scouting") renderScouting();
+}
+async function respondCounter(id, accept, fee) {
+  const r = await api.post("/api/transfer/respond", { offer_id: id, accept });
+  toast(esc(r.msg || "Done"), 5000); renderTransfers();
+}
+async function respondCounterNew(id, fee) {
+  const v = prompt("Your new fee (€m):", (fee * 0.9).toFixed(1));
+  if (!v) return;
+  const r = await api.post("/api/transfer/respond", { offer_id: id, accept: false, new_fee: +v });
+  toast(esc(r.msg || "Done"), 5000); renderTransfers();
+}
+async function bid(id, decision) {
+  const r = await api.post("/api/transfer/bid", { offer_id: id, decision });
+  toast(esc(r.msg || "Done"), 4500); renderTransfers();
+}
+async function bidCounter(id, fee) {
+  const v = prompt("Counter-offer fee (€m):", (fee * 1.25).toFixed(1));
+  if (!v) return;
+  const r = await api.post("/api/transfer/bid", { offer_id: id, decision: "counter", counter_fee: +v });
+  toast(esc(r.msg || "Done"), 4500); renderTransfers();
+}
+
+/* ----------------------------------------------------------------- SCOUTING */
+async function renderScouting() {
+  const j = await api.get("/api/screen/scouting");
+  await refreshState();
+  $("#content").innerHTML = `
+    <h1>Scouting</h1>
+    <p class="sub">Knowledge accumulates over time. Assign scouts to regions or individual players to reduce uncertainty — estimated attributes and values come with error bars until knowledge is high.</p>
+    <div class="grid g2">
+      <div class="card"><h3>Scouts</h3>
+        <table><thead><tr><th>Name</th><th>Role</th><th class="num">Judging</th><th class="num">Potential</th><th class="num">Wage</th></tr></thead>
+        <tbody>${j.scouts.map(s => `<tr><td>${esc(s.name)}</td><td>${esc(s.role)}</td>
+          <td class="num">${s.judging}</td><td class="num">${s.judging_pot}</td><td class="num small">${wk(s.wage)}</td></tr>`).join("")
+          || '<tr><td colspan="5" class="muted">No scouts employed.</td></tr>'}</tbody></table>
+        <div class="row" style="margin-top:10px">
+          <input id="sc-region" placeholder="Region or nation, e.g. Brazil" style="flex:1">
+          <button class="btn sm primary" onclick="assignRegion()">Assign scout</button>
+        </div>
+      </div>
+      <div class="card"><h3>Knowledge by region</h3>
+        ${Object.keys(j.knowledge || {}).length ? Object.entries(j.knowledge).map(([k, v]) =>
+          `<div class="kv"><span>${esc(k)}</span><b>${Math.round(v)}%</b></div>${bar(v)}`).join("")
+        : '<p class="muted small">No regions scouted yet.</p>'}
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px"><h3>Shortlist</h3>
+      ${j.targets.length ? `<table><thead><tr><th>Name</th><th class="num">Age</th><th>Pos</th><th>Club</th>
+        <th class="num">Known</th><th class="num">Value</th><th></th></tr></thead><tbody>
+        ${j.targets.map(t => `<tr><td><a href="#" onclick="go('player',${t.id});return false"><b>${esc(t.name)}</b></a></td>
+          <td class="num">${t.age}</td><td><span class="pos">${esc(t.pos)}</span></td><td>${esc(t.club)}</td>
+          <td class="num">${Math.round(t.known || 0)}%</td><td class="num">${money(t.value)}</td>
+          <td><button class="btn sm" onclick="openOffer(${t.id},'${esc(t.name).replace(/'/g, "\\'")}',${t.value},${t.wage || 1})">Bid</button></td></tr>`).join("")}
+        </tbody></table>` : '<p class="muted small">No players shortlisted. Add players from the transfer search.</p>'}
+    </div>
+    <div class="card" style="margin-top:12px"><h3>Active offers & negotiations</h3>
+      ${j.offers.length ? `<table><thead><tr><th>Player</th><th>Direction</th><th class="num">Fee</th>
+        <th class="num">Wage</th><th>Status</th><th class="small">Note</th></tr></thead><tbody>
+        ${j.offers.map(o => `<tr><td><b>${esc(o.player)}</b></td><td>${o.to_id === G.home.club.id ? "In" : "Out"}</td>
+          <td class="num">${money(o.fee)}</td><td class="num small">${wk(o.wage)}</td>
+          <td><span class="tag">${esc(o.status)}</span></td><td class="small muted">${esc(o.note || "")}</td></tr>`).join("")}
+        </tbody></table>` : '<p class="muted small">No offers in progress.</p>'}
+    </div>`;
+}
+async function assignRegion() {
+  const region = $("#sc-region").value.trim();
+  if (!region) return;
+  const r = await api.post("/api/scout/assign", { region });
+  toast(esc(r.msg || "Scout assigned")); renderScouting();
+}
+
+/* ----------------------------------------------------------------- FINANCES */
+async function renderFinances() {
+  const f = await api.get("/api/screen/finances");
+  await refreshState();
+  const c = f.club;
+  $("#content").innerHTML = `
+    <h1>Finances</h1>
+    <div class="grid g4">
+      <div class="card"><div class="stat-l">Cash</div><div class="stat ${c.cash < 0 ? "" : ""}" style="${c.cash < 0 ? "color:var(--bad)" : ""}">${money(c.cash)}</div></div>
+      <div class="card"><div class="stat-l">Balance (season)</div><div class="stat small" style="${c.balance < 0 ? "color:var(--bad)" : ""}">${money(c.balance)}</div></div>
+      <div class="card"><div class="stat-l">Debt</div><div class="stat small">${money(c.debt)}</div></div>
+      <div class="card"><div class="stat-l">Transfer budget</div><div class="stat small">${money(c.transfer_budget)}</div></div>
+    </div>
+    <div class="grid g2" style="margin-top:12px">
+      <div class="card"><h3>Monthly accounts</h3>
+        <div class="kv"><span>Revenue</span><b>${money(f.monthly.revenue)}</b></div>
+        <div class="kv"><span>Wages (players + staff)</span><b style="color:#ff9b9b">-${money(f.monthly.wages)}</b></div>
+        <div class="kv"><span>Running costs</span><b style="color:#ff9b9b">-${money(f.monthly.running)}</b></div>
+        <div class="kv"><span>Interest</span><b style="color:#ff9b9b">-${money(f.monthly.interest)}</b></div>
+        <div class="kv" style="border-top:1px solid var(--line);margin-top:6px;padding-top:6px"><span>Net per month</span>
+          <b style="color:${f.monthly.revenue - f.monthly.wages - f.monthly.running - f.monthly.interest < 0 ? "var(--bad)" : "var(--good)"}">
+          ${money(f.monthly.revenue - f.monthly.wages - f.monthly.running - f.monthly.interest)}</b></div>
+        <h3 style="margin-top:14px">Season</h3>
+        <div class="kv"><span>Projected revenue</span><b>${money(c.season_income)}</b></div>
+        <div class="kv"><span>Annual wage bill</span><b>${money(f.annual_wages)}</b></div>
+        <div class="kv"><span>Projected net</span><b style="color:${f.projected_net < 0 ? "var(--bad)" : "var(--good)"}">${money(f.projected_net)}</b></div>
+        <div class="kv"><span>Wage budget</span><b>${money(c.wage_budget)}</b></div>
+        <div class="kv"><span>Stadium capacity</span><b>${(c.capacity || 0).toLocaleString()}</b></div>
+      </div>
+      <div class="card"><h3>Top earners</h3>
+        <table><thead><tr><th>Name</th><th>Pos</th><th class="num">Age</th><th class="num">Wage</th><th class="num">Contract</th></tr></thead>
+        <tbody>${f.top_earners.map(p => `<tr><td>${esc(p.name)}</td><td><span class="pos">${esc(p.pos)}</span></td>
+          <td class="num">${p.age}</td><td class="num small">${wk(p.wage)}</td><td class="num small">${esc(p.contract_end)}</td></tr>`).join("")}</tbody></table>
+        <div class="kv" style="margin-top:10px"><span>Gate receipts booked this season</span><b>${money(f.matchday_income || 0)}</b></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px"><h3>Ledger — last ${(f.history || []).length} months</h3>
+      ${cashSpark(f.history || [])}
+      ${(f.history || []).length ? `<table style="margin-top:10px"><thead><tr><th>Month</th>
+        <th class="num">Revenue</th><th class="num">Wages</th><th class="num">Running</th>
+        <th class="num">Interest</th><th class="num">Net</th><th class="num">Cash</th></tr></thead>
+        <tbody>${f.history.slice().reverse().map(h => `<tr><td>${esc(h.month)}</td>
+          <td class="num">${money(h.income)}</td><td class="num" style="color:#ff9b9b">-${money(h.wages)}</td>
+          <td class="num" style="color:#ff9b9b">-${money(h.other)}</td>
+          <td class="num" style="color:#ff9b9b">-${money(h.interest || 0)}</td>
+          <td class="num" style="color:${h.net < 0 ? "var(--bad)" : "var(--good)"}">${h.net >= 0 ? "+" : ""}${money(h.net)}</td>
+          <td class="num">${money(h.cash)}</td></tr>`).join("")}</tbody></table>`
+        : '<p class="muted small">No accounts yet — the first statement arrives on the 1st of next month.</p>'}
+    </div>`;
+}
+function cashSpark(hist) {
+  if (!hist || hist.length < 2) return "";
+  const w = 720, h = 64, pad = 4;
+  const vals = hist.map(x => x.cash);
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const span = (max - min) || 1;
+  const pts = vals.map((v, i) => {
+    const x = pad + (w - pad * 2) * (i / (vals.length - 1));
+    const y = h - pad - (h - pad * 2) * ((v - min) / span);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px" preserveAspectRatio="none">
+    <polyline points="${pts}" fill="none" stroke="#39d98a" stroke-width="2"/>
+    <text x="${pad}" y="12" fill="#8a93a6" font-size="10">cash ${money(max)} … ${money(min)}</text></svg>`;
+}
+
+/* -------------------------------------------------------------------- STAFF */
+async function renderStaff() {
+  const j = await api.get("/api/screen/staff");
+  await refreshState();
+  $("#content").innerHTML = `
+    <h1>Staff</h1>
+    <p class="sub">Coaching quality drives training gains. Scouting quality drives knowledge. Physios reduce injury time.</p>
+    <div class="card" style="padding:0;overflow:auto">
+      <table><thead><tr><th>Name</th><th>Role</th><th class="num">Age</th><th class="num">Att</th>
+        <th class="num">Def</th><th class="num">Fit</th><th class="num">Tac</th><th class="num">Tec</th>
+        <th class="num">Men</th><th class="num">Youth</th><th class="num">Man mgmt</th>
+        <th class="num">Judge</th><th class="num">Judge pot</th><th class="num">Wage</th><th class="num">Contract</th></tr></thead>
+      <tbody>${j.map(s => `<tr><td><b>${esc(s.name)}</b><div class="muted small">${esc(s.nat)}</div></td>
+        <td>${esc(s.role)}</td><td class="num">${s.age}</td>
+        ${["attacking", "defending", "fitness", "tactical", "technical", "mental", "youth", "man_mgmt", "judging"]
+          .map(k => `<td class="num">${Math.round(s[k] || 0)}</td>`).join("")}
+        <td class="num">${Math.round(s.judging_pot || 0)}</td>
+        <td class="num small">${wk(s.wage)}</td><td class="num small">${esc(s.contract_end)}</td></tr>`).join("")}</tbody></table>
+    </div>`;
+}
+
+/* -------------------------------------------------------------------- YOUTH */
+async function renderYouth() {
+  const j = await api.get("/api/screen/youth");
+  await refreshState();
+  $("#content").innerHTML = `
+    <h1>Academy</h1>
+    <p class="sub">Youth recruitment ${j.rating}/20 · facilities ${j.facilities}/20. A new intake signs each summer; the best prospects are listed first.</p>
+    <div class="card" style="padding:0;overflow:auto">
+      <table><thead><tr><th>Name</th><th class="num">Age</th><th>Pos</th><th class="num">CA</th>
+        <th class="num">PA</th><th class="num">Now</th><th class="num">Potential</th><th>Personality</th><th></th></tr></thead>
+      <tbody>${j.players.map(p => `<tr><td><b>${esc(p.name)}</b></td><td class="num">${p.age}</td>
+        <td><span class="pos">${esc(p.pos)}</span></td><td class="num">${p.ca.toFixed(1)}</td>
+        <td class="num muted">${p.pa.toFixed(1)}</td><td class="num">${stars(p.stars)}</td>
+        <td class="num">${stars(p.stars_pa)}</td><td class="small">${esc(p.personality)}</td>
+        <td><button class="btn sm" onclick="go('player',${p.id})">View</button></td></tr>`).join("")
+        || '<tr><td colspan="9" class="muted">No academy players.</td></tr>'}</tbody></table>
+    </div>`;
+}
+
+/* ----------------------------------------------------------------- CALENDAR */
+async function renderCalendar() {
+  const j = await api.get("/api/screen/calendar");
+  await refreshState();
+  $("#content").innerHTML = `
+    <h1>Calendar</h1>
+    <p class="sub">Season ${G.home.season_label} · all your fixtures, played and upcoming.</p>
+    <div class="card" style="padding:0;overflow:auto">
+      <table><thead><tr><th>Date</th><th>Competition</th><th>Home</th><th class="num">Score</th><th>Away</th><th>Venue</th><th></th></tr></thead>
+      <tbody>${j.fixtures.map(f => `<tr class="${!f.played && f.date >= G.home.date ? "me" : ""}">
+        <td>${fmtDate(f.date)}</td><td class="small">${esc(f.comp || "Friendly")}${f.stage && f.stage !== "league" ? " " + esc(f.stage) : ""}</td>
+        <td>${esc(f.home)}</td>
+        <td class="num"><b>${f.played ? (f.hg != null ? f.hg + "–" + f.aw : "—") : "v"}</b>
+          ${f.res ? ` <span class="tag ${f.res}">${f.res}</span>` : ""}</td>
+        <td>${esc(f.away)}</td><td class="small muted">${esc(f.venue || "")}</td>
+        <td class="small">${!f.played && f.date === (G.home.next_fixture || {}).date ? '<b class="muted">next</b>' : ""}</td></tr>`).join("")}</tbody></table>
+    </div>`;
+}
+
+/* -------------------------------------------------------------------- TABLE */
+async function renderTable() {
+  const j = await api.get("/api/screen/table");
+  await refreshState();
+  if (!j.comp) { $("#content").innerHTML = "<h1>League</h1><p class='muted'>No league.</p>"; return; }
+  $("#content").innerHTML = `
+    <h1>${esc(j.comp.name)}</h1>
+    <p class="sub">Season ${G.home.season_label} · ${j.prom_spots} promotion place(s), ${j.rel_spots} relegation place(s)</p>
+    <div class="card" style="padding:0;overflow:auto">
+      <table><thead><tr><th class="num">#</th><th>Club</th><th class="num">P</th><th class="num">W</th>
+        <th class="num">D</th><th class="num">L</th><th class="num">GF</th><th class="num">GA</th>
+        <th class="num">GD</th><th class="num">Pts</th><th>Form</th></tr></thead>
+      <tbody>${j.rows.map(r => `<tr class="${r.club_id === j.my_club ? "me" : ""}">
+        <td class="num">${r.pos}${r.zone === "promotion" ? ' <span style="color:var(--good)">▲</span>' : r.zone === "relegation" ? ' <span style="color:var(--bad)">▼</span>' : ""}</td>
+        <td>${esc(r.name)} <span class="muted small">(${r.rep})</span></td>
+        <td class="num">${r.p}</td><td class="num">${r.w}</td><td class="num">${r.d}</td><td class="num">${r.l}</td>
+        <td class="num">${r.gf}</td><td class="num">${r.ga}</td>
+        <td class="num">${r.gf - r.ga > 0 ? "+" : ""}${r.gf - r.ga}</td><td class="num"><b>${r.pts}</b></td>
+        <td class="small">${(r.form || "").split("").map(x => `<span class="tag ${x}">${x}</span>`).join(" ")}</td></tr>`).join("")}</tbody></table>
+    </div>`;
+}
+
+/* -------------------------------------------------------------------- COMPS */
+async function renderComps() {
+  const j = await api.get("/api/screen/comps");
+  await refreshState();
+  $("#content").innerHTML = `
+    <h1>Competitions</h1>
+    <p class="sub">Every competition you are registered in this season.</p>
+    <div class="grid g2">
+      ${j.comps.map(c => `<div class="card"><h3>${esc(c.comp.name)} <span class="tag">${esc(c.comp.ctype)}</span></h3>
+        ${c.table.length ? `<table><thead><tr><th class="num">#</th><th>Club</th><th class="num">P</th>
+          <th class="num">W</th><th class="num">D</th><th class="num">L</th><th class="num">Pts</th></tr></thead>
+          <tbody>${c.table.map(r => `<tr class="${r.club_id === G.home.club?.id ? "me" : ""}"><td class="num">${r.pos}</td>
+            <td>${esc(r.name)}</td><td class="num">${r.p}</td><td class="num">${r.w}</td>
+            <td class="num">${r.d}</td><td class="num">${r.l}</td><td class="num"><b>${r.pts}</b></td></tr>`).join("")}</tbody></table>`
+          : '<p class="muted small">Knockout competition — no table.</p>'}
+      </div>`).join("")}
+    </div>`;
+}
+
+/* -------------------------------------------------------------------- BOARD */
+async function renderBoard() {
+  const j = await api.get("/api/screen/board");
+  await refreshState();
+  if (j.unemployed) return renderJobs();
+  $("#content").innerHTML = `
+    <h1>Board</h1>
+    <p class="sub">Job security: <b>${esc(j.job_security)}</b></p>
+    <div class="grid g2">
+      <div class="card"><h3>Confidence</h3>
+        <div class="stat">${Math.round(j.confidence)}<span class="muted" style="font-size:14px">/100</span></div>
+        ${bar(j.confidence, j.confidence < 30 ? "red" : j.confidence < 55 ? "amber" : "")}
+        <div class="kv" style="margin-top:10px"><span>Chairman</span><b>${esc(j.chairman)}</b></div>
+        <div class="kv"><span>Board patience</span><b>${j.patience}</b></div>
+        <div class="kv"><span>Club vision</span><b>${esc(j.vision)}</b></div>
+        ${j.warning ? '<div class="card tight" style="margin-top:10px;border-color:#6b2b2b"><b style="color:var(--bad)">You are on an official warning.</b></div>' : ""}
+        ${j.sack_risk > 0 ? `<div class="small muted" style="margin-top:8px">Sack risk: ${Math.round(j.sack_risk)}</div>` : ""}
+      </div>
+      <div class="card"><h3>Fans & media</h3>
+        <div class="kv"><span>Fan sentiment</span><b>${Math.round(j.fans.sentiment)}</b></div>${bar(j.fans.sentiment)}
+        <div class="kv" style="margin-top:8px"><span>Support level</span><b>${Math.round(j.fans.support)}</b></div>${bar(j.fans.support)}
+        <div class="kv" style="margin-top:8px"><span>Media pressure</span><b>${Math.round(j.media.pressure || 0)}</b></div>${bar(j.media.pressure || 0, "amber")}
+        <div class="kv" style="margin-top:8px"><span>Narrative</span><b>${esc(j.media.narrative || "—")}</b></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px"><h3>Objectives</h3>
+      ${j.objectives.map(o => `<div class="obj"><div class="t">${esc(o.text)} ${o.critical ? '<span class="tag URGENT">CRITICAL</span>' : ""}</div>
+        <div class="small muted">${esc(o.comp || "")} ${o.target_pos ? "· target " + o.target_pos + "th place" : ""} · ${esc(o.status)}</div></div>`).join("")}
+    </div>
+    <div class="card" style="margin-top:12px"><h3>Position</h3>
+      ${j.position ? `<div class="kv"><span>League</span><b>${j.position.pos} of ${j.position.size}</b></div>
+        <div class="kv"><span>Points</span><b>${j.position.pts} from ${j.position.played}</b></div>
+        <div class="kv"><span>Goal difference</span><b>${j.position.gd > 0 ? "+" : ""}${j.position.gd}</b></div>`
+      : '<p class="muted small">No league record yet.</p>'}
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn danger" onclick="resignJob()">Resign from the club</button>
+    </div>`;
+}
+async function resignJob() {
+  if (!confirm("Resign? You will become unemployed and must find a new job.")) return;
+  const r = await api.post("/api/career/resign", {});
+  toast(esc(r.msg || "Resigned")); await refreshState(); go("jobs");
+}
+
+/* -------------------------------------------------------------------- MEDIA */
+async function renderMedia() {
+  const j = await api.get("/api/screen/media");
+  await refreshState();
+  $("#content").innerHTML = `
+    <h1>Media</h1>
+    <p class="sub">Narrative: <b>${esc(j.narrative || "—")}</b> · pressure ${Math.round(j.pressure || 0)}/100</p>
+    <div class="card" style="margin-bottom:12px"><h3>Press conference</h3>
+      <p class="small muted">Your answers move board confidence, fan sentiment and media pressure.</p>
+      <div class="row">
+        <button class="btn" onclick="press('confident')">Back the players publicly</button>
+        <button class="btn" onclick="press('balanced')">Stay balanced</button>
+        <button class="btn" onclick="press('defensive')">Deflect questions</button>
+        <button class="btn danger" onclick="press('critical')">Be critical of the squad</button>
+      </div>
+    </div>
+    <div class="card" style="padding:0"><h3 style="padding:12px 14px 0">News feed</h3>
+      <div style="max-height:60vh;overflow:auto">
+      ${j.news.map(n => `<div class="list-item"><span class="tag">${esc(n.cat)}</span>
+        <div style="flex:1">${esc(n.text)}<div class="small muted">${fmtDate(n.date)}</div></div></div>`).join("")}
+      </div>
+    </div>`;
+}
+async function press(answer) {
+  const r = await api.post("/api/media/press", { answer });
+  toast(`Board ${r.board} · Fans ${r.fans} · Media pressure ${r.media_pressure}`, 4500);
+  renderMedia();
+}
+
+/* ------------------------------------------------------------------- CAREER */
+async function renderCareer() {
+  const j = await api.get("/api/screen/career");
+  await refreshState();
+  $("#content").innerHTML = `
+    <h1>Career</h1>
+    <p class="sub">${esc(j.manager.name)} · ${esc(j.manager.nat)} · reputation ${j.reputation}/95 · ${esc(j.difficulty)} difficulty</p>
+    <div class="grid g3">
+      <div class="card"><div class="stat-l">Current club</div>
+        <div class="stat small">${j.club ? esc(j.club.name) : "Unemployed"}</div>
+        <div class="small muted">${j.club ? esc(j.club.league) : "Available for appointment"}</div></div>
+      <div class="card"><div class="stat-l">Trophies</div><div class="stat">${j.trophies.length}</div>
+        <div class="small muted">${j.trophies.slice(0, 3).map(t => esc(t.comp)).join(", ") || "none yet"}</div></div>
+      <div class="card"><div class="stat-l">Seasons managed</div><div class="stat">${j.season - 2026 + 1}</div>
+        <div class="small muted">since ${fmtDate(j.created)}</div></div>
+    </div>
+    <div class="grid g2" style="margin-top:12px">
+      <div class="card"><h3>Club history</h3>
+        <table><thead><tr><th>Club</th><th>From</th><th>To</th><th>Reason</th></tr></thead>
+        <tbody>${j.clubs.map(c => `<tr><td><b>${esc(c.name)}</b></td><td>${fmtDate(c.from)}</td>
+          <td>${c.to ? fmtDate(c.to) : "—"}</td><td class="small muted">${esc(c.reason || "")}</td></tr>`).join("")}</tbody></table>
+        ${j.unemployed ? `<div class="row" style="margin-top:10px"><button class="btn primary" onclick="go('jobs')">Find a job</button></div>` : ""}
+      </div>
+      <div class="card"><h3>Trophy room</h3>
+        ${j.trophies.length ? j.trophies.map(t => `<div class="obj"><div class="t" style="color:var(--gold)">🏆 ${esc(t.comp)}</div>
+          <div class="small muted">${t.season}/${String(t.season + 1).slice(2)} · ${esc(t.type || "")}</div></div>`).join("")
+        : '<p class="muted small">No trophies yet.</p>'}
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px"><h3>Season-by-season record</h3>
+      <table><thead><tr><th class="num">Season</th><th>Competition</th><th>Club</th><th class="num">Pos</th><th>Note</th></tr></thead>
+      <tbody>${j.history.map(h => `<tr><td class="num">${h.season}</td><td>${esc(h.comp || "")}</td>
+        <td>${esc(h.club || "")}</td><td class="num">${h.pos || ""}</td><td class="small">${esc(h.note || "")}
+        ${h.trophy ? ' <span style="color:var(--gold)">🏆</span>' : ""}</td></tr>`).join("")
+        || '<tr><td colspan="5" class="muted">No history yet.</td></tr>'}</tbody></table>
+    </div>`;
+}
+
+/* --------------------------------------------------------------------- JOBS */
+async function renderJobs() {
+  const j = await api.get("/api/career/jobs");
+  await refreshState();
+  $("#content").innerHTML = `
+    <h1>Managerial job market</h1>
+    <p class="sub">You are unemployed. Offers may arrive in your inbox, or you can apply directly — your reputation determines how likely clubs are to say yes.</p>
+    ${j.offers.length ? `<div class="card" style="margin-bottom:12px;border-color:#1d5a45"><h3>Offers received</h3>
+      ${j.offers.map(o => `<div class="list-item"><div style="flex:1"><b>${esc(o.name)}</b>
+        <div class="small muted">${esc(o.league)} · tier ${o.tier} · rep ${Math.round(o.rep)} · offered ${fmtDate(o.date)}</div></div>
+        <button class="btn primary sm" onclick="acceptJob(${o.club_id})">Accept</button></div>`).join("")}</div>` : ""}
+    <div class="card" style="padding:0;overflow:auto">
+      <table><thead><tr><th>Club</th><th>League</th><th class="num">Tier</th><th class="num">Rep</th>
+        <th class="num">Income</th><th>Interest</th><th class="num">Your chance</th><th></th></tr></thead>
+      <tbody>${j.jobs.map(v => `<tr><td><b>${esc(v.name)}</b></td><td>${esc(v.league)}</td>
+        <td class="num">${v.tier}</td><td class="num">${Math.round(v.rep)}</td>
+        <td class="num">${money(v.season_income || 0)}</td>
+        <td><span class="tag ${v.interest === "high" ? "W" : v.interest === "medium" ? "D" : "L"}">${esc(v.interest)}</span></td>
+        <td class="num">${Math.round(v.chance * 100)}%</td>
+        <td><button class="btn sm" onclick="acceptJob(${v.id})">Apply</button></td></tr>`).join("")
+        || '<tr><td colspan="8" class="muted">No vacancies right now. Keep advancing time.</td></tr>'}</tbody></table>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="btn primary" onclick="doContinue()">Advance time ▸</button></div>`;
+}
+async function acceptJob(clubId) {
+  const r = await api.post("/api/career/apply", { club_id: clubId });
+  toast(esc(r.msg || (r.ok ? "Appointed!" : "Rejected")), 5000);
+  if (r.ok) { await refreshState(); go("home"); }
+}
+
+/* -------------------------------------------------------------- global keys */
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") closeModal();
+  if (e.key === " " && !$("#modal").classList.contains("open") &&
+      !["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) {
+    e.preventDefault(); doContinue();
+  }
+});
+
+boot();

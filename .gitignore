@@ -1,0 +1,32 @@
+# --- secrets: never commit credentials ---
+uploads/
+*.token
+token.txt
+.env
+.netrc
+
+# --- generated world database & saves (rebuilt on first career) ---
+data/world.db
+data/world.db-wal
+data/world.db-shm
+data/saves/
+
+# --- python ---
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.pytest_cache/
+
+# --- android build artifacts ---
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+*.apk.idsig
+*.keystore
+*.jks
+
+# --- misc ---
+*.log
+.DS_Store
