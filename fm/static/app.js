@@ -5,7 +5,8 @@ const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
 const api = {
   async get(p) {
-    const r = await fetch(p);
+    let r;
+    try { r = await fetch(p); } catch (e) { deadScreen(); throw e; }
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
       const e = new Error(j.error || j.detail || ("HTTP " + r.status));
@@ -14,13 +15,22 @@ const api = {
     return r.json();
   },
   async post(p, b) {
-    const r = await fetch(p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b || {}) });
+    let r;
+    try {
+      r = await fetch(p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b || {}) });
+    } catch (e) { deadScreen(); throw e; }
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.detail || j.error || r.status);
     return j;
   }
 };
 
+const VERSION = "1.3";
+let DEAD = false;
+function deadScreen() {
+  if (DEAD) return; DEAD = true;
+  const d = $("#dead"); if (d) d.classList.remove("hidden");
+}
 const G = { boot: null, home: null, screen: "home", sub: null, static: null, busy: false };
 
 /* ------------------------------------------------------------------ helpers */
@@ -67,6 +77,7 @@ const bar = (v, cls) => `<div class="bar ${cls || ""}"><i style="width:${pct(v)}
 /* --------------------------------------------------------------------- boot */
 async function boot() {
   try {
+    const v = $("#ver"); if (v) v.textContent = "v" + VERSION;
     $("#splash-msg").textContent = "Loading engine data…";
     G.boot = await api.get("/api/boot");
     G.static = G.boot.static;

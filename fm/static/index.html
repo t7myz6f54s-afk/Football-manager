@@ -15,6 +15,7 @@
   <p>A football management simulation</p>
   <div class="loader"><i></i></div>
   <p id="splash-msg" class="smsg">Loading…</p>
+  <p id="ver" class="smsg" style="opacity:.55"></p>
 </div>
 
 <div id="app" class="hidden">
@@ -39,6 +40,12 @@
 </div>
 
 <div id="busybar"><i></i></div>
+<div id="dead" class="hidden"><div class="dead-box">
+  <div class="dead-ic"><svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18" stroke="currentColor" stroke-width="0"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" fill="none"/><path d="M12 7v6M12 16.5v.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></div>
+  <h2>Connection to the engine lost</h2>
+  <p>The game server stopped answering. Your save is untouched.</p>
+  <button class="btn primary" onclick="location.reload()">RECONNECT ▸</button>
+</div></div>
 <div id="modal"><div class="box" id="modal-box"></div></div>
 <div id="toast-wrap"></div>
 

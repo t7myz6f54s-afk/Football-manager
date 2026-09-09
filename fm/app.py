@@ -7,6 +7,7 @@ router, so the game has no third-party dependencies.
 import json
 import os
 import random
+import shutil
 import sys
 import traceback
 
@@ -17,6 +18,22 @@ from fm import engine as E
 from fm import view as V
 from fm.mini import HTTPError, MiniApp, serve
 from fm.world import DB_PATH, build_world, connect
+
+# Optional pristine world shipped with the app (Android assets). Copying a
+# prebuilt database is instant; building from scratch is the fallback.
+SEED_DB = os.environ.get("FM_SEED_DB", "")
+
+
+def seed_or_build():
+    if SEED_DB and os.path.exists(SEED_DB):
+        for suffix in ("", "-wal", "-shm"):
+            p = DB_PATH + suffix
+            if os.path.exists(p):
+                os.remove(p)
+        shutil.copyfile(SEED_DB, DB_PATH)
+        return True
+    build_world()
+    return False
 
 # All three can be overridden by environment variables so the same code runs
 # unchanged on a desktop and inside the Android WebView wrapper (see android/).
@@ -44,7 +61,7 @@ S = {"con": None, "save": None, "rng": random.Random(), "pending_match": None, "
 def con():
     if S["con"] is None:
         if not os.path.exists(DB_PATH):
-            build_world()
+            seed_or_build()
         S["con"] = connect()
     return S["con"]
 
@@ -155,7 +172,7 @@ def api_career_new(payload: dict = Body(...)):
                 os.remove(p)
         if os.path.exists(SAVE_PATH):
             os.remove(SAVE_PATH)
-        build_world()
+        seed_or_build()
         S["con"] = connect()
         S["seed"] = random.randrange(1, 10 ** 9)
         S["rng"] = random.Random(S["seed"])
@@ -690,7 +707,7 @@ def main():
     os.makedirs(SAVE_DIR, exist_ok=True)
     if not os.path.exists(DB_PATH):
         print("Building the world database (first run)…", flush=True)
-        build_world()
+        seed_or_build()
     port = int(os.environ.get("PORT", 8000))
     serve(app, host=HOST, port=port)
 

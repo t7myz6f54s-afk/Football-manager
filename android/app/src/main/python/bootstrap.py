@@ -24,7 +24,14 @@ def start(files_dir, www_dir, port=8000):
     os.makedirs(saves, exist_ok=True)
 
     # must be set before fm.world / fm.app are imported (they read env at import)
-    os.environ["FM_DB"] = os.path.join(data, "world.db")
+    db = os.path.join(data, "world.db")
+    os.environ["FM_DB"] = db
+    seed = os.path.join(www_dir, "world.seed.db")
+    os.environ["FM_SEED_DB"] = seed
+    # first launch: drop in the pristine world that ships in the assets
+    if os.path.exists(seed) and not os.path.exists(db):
+        import shutil
+        shutil.copyfile(seed, db)
     os.environ["FM_SAVE_DIR"] = saves
     os.environ["FM_SAVE"] = os.path.join(saves, "career1.json")
     os.environ["FM_STATIC"] = www_dir

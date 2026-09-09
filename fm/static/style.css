@@ -337,6 +337,16 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .icn svg{width:100%;height:100%;stroke:currentColor;fill:none;stroke-width:1.9;
   stroke-linecap:round;stroke-linejoin:round}
 
+/* ============================== dead screen ============================== */
+#dead{position:fixed;inset:0;z-index:120;background:rgba(6,9,13,.94);display:flex;
+  align-items:center;justify-content:center;padding:24px}
+#dead.hidden{display:none}
+.dead-box{text-align:center;max-width:340px}
+.dead-ic{width:56px;height:56px;color:var(--bad);margin:0 auto 12px}
+.dead-ic svg{width:100%;height:100%}
+.dead-box h2{margin:0 0 6px}
+.dead-box p{color:var(--dim);font-size:13px;margin:0 0 18px}
+
 /* ============================== splash ============================== */
 #splash{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:100;
   flex-direction:column;gap:14px;
