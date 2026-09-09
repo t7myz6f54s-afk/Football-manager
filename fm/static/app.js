@@ -60,6 +60,7 @@ function modal(html, wide) {
   $("#modal").classList.add("open");
 }
 function closeModal() { $("#modal").classList.remove("open"); }
+function setBusy(on) { const b = $("#busybar"); if (b) b.classList.toggle("on", !!on); }
 $("#modal").addEventListener("click", e => { if (e.target.id === "modal") closeModal(); });
 const bar = (v, cls) => `<div class="bar ${cls || ""}"><i style="width:${pct(v)}%"></i></div>`;
 
@@ -121,22 +122,37 @@ async function stepChooseClub() {
         <option value="4">4th tier</option><option value="5">5th tier</option></select>
       <span class="spacer"></span><span class="muted small" id="cs-count"></span>
     </div>
-    <div class="card" style="padding:0;max-height:60vh;overflow:auto">
-      <table><thead><tr><th>Club</th><th>Nation</th><th>League</th><th class="num">Rep</th>
-        <th class="num">Stadium</th><th class="num">Budget</th><th class="num">Wages</th><th></th></tr></thead>
-      <tbody id="cs-rows"></tbody></table>
-    </div>`;
+    <div class="card" id="cs-host" style="padding:10px;max-height:62vh;overflow:auto"></div>`;
   searchClubs();
 }
-let SEARCH_T = null;
-function debounceSearch() { clearTimeout(SEARCH_T); SEARCH_T = setTimeout(searchClubs, 260); }
+
 async function searchClubs() {
   const q = encodeURIComponent($("#cs-q")?.value || "");
   const country = encodeURIComponent($("#cs-country")?.value || "");
   const tier = $("#cs-tier")?.value || 0;
   const j = await api.get(`/api/clubs/search?q=${q}&country=${country}&tier=${tier}`);
   $("#cs-count").textContent = j.clubs.length + " clubs";
-  $("#cs-rows").innerHTML = j.clubs.map(c => `
+  const pick = c => `pickClub(${JSON.stringify(c).replace(/'/g, "&#39;")})`;
+  if (window.innerWidth < 900) {
+    $("#cs-host").innerHTML = j.clubs.length ? `<div class="cards">` + j.clubs.map(c => `
+      <div class="tcard">
+        <div class="tcard-h"><b>${esc(c.name)}</b><span class="tag">${esc(c.country)} · T${c.tier}</span></div>
+        <div class="tcard-g">
+          <div class="tcell"><span class="tl">League</span><span class="tv">${esc(c.league_name || c.league)}</span></div>
+          <div class="tcell"><span class="tl">Rep</span><span class="tv">${c.rep}</span></div>
+          <div class="tcell"><span class="tl">Stadium</span><span class="tv">${(c.capacity || 0).toLocaleString()}</span></div>
+          <div class="tcell"><span class="tl">Budget</span><span class="tv">${money(c.transfer_budget)}</span></div>
+          <div class="tcell"><span class="tl">Wages</span><span class="tv">${money(c.wage_budget)}</span></div>
+        </div>
+        <div class="small muted" style="margin:6px 0 8px">${esc(c.stadium)} · ${esc(c.vision || "")}</div>
+        <button class="btn sm primary" onclick='${pick(c)}'>SELECT ▸</button>
+      </div>`).join("") + `</div>`
+      : `<div class="tmsg">No clubs match — try a different search.</div>`;
+    return;
+  }
+  $("#cs-host").innerHTML = `<div class="tw"><table><thead><tr><th>Club</th><th>Nation</th><th>League</th><th class="num">Rep</th>
+    <th class="num">Stadium</th><th class="num">Budget</th><th class="num">Wages</th><th></th></tr></thead>
+    <tbody id="cs-rows">` + j.clubs.map(c => `
     <tr>
       <td><b>${esc(c.name)}</b><div class="muted small">${esc(c.stadium)} · ${esc(c.vision || "")}</div></td>
       <td>${esc(c.country)}</td>
@@ -145,10 +161,12 @@ async function searchClubs() {
       <td class="num">${(c.capacity || 0).toLocaleString()}</td>
       <td class="num">${money(c.transfer_budget)}</td>
       <td class="num">${money(c.wage_budget)}</td>
-      <td><button class="btn sm primary" onclick='pickClub(${JSON.stringify(c).replace(/'/g, "&#39;")})'>SELECT</button></td>
-    </tr>`).join("");
-  polish($("#content"));
+      <td><button class="btn sm primary" onclick='${pick(c)}'>SELECT</button></td>
+    </tr>`).join("") + `</tbody></table></div>`;
 }
+
+let SEARCH_T = null;
+function debounceSearch() { clearTimeout(SEARCH_T); SEARCH_T = setTimeout(searchClubs, 260); }
 function pickClub(c) { CLUB_PICK = c; stepManagerProfile(); }
 
 function stepManagerProfile() {
@@ -219,11 +237,13 @@ async function createCareer() {
                age: +$("#mp-age").value, reputation: +$("#mp-rep").value,
                style: $("#mp-style").value, attrs }
   };
-  $("#mp-go").disabled = true; $("#mp-go").textContent = "Building world…";
+  $("#mp-go").disabled = true; $("#mp-go").textContent = "Building world…"; setBusy(true);
   try {
     const j = await api.post("/api/career/new", body);
+    if (!j.ok) throw new Error(j.error || "The engine refused to start this career.");
     onboarding(j);
   } catch (e) { toast("Could not create career: " + esc(e.message), 6000); $("#mp-go").disabled = false; $("#mp-go").textContent = "TAKE CHARGE ▸"; }
+  setBusy(false);
 }
 
 function onboarding(j) {
@@ -343,8 +363,14 @@ async function refreshState() {
   paintTop();
   return j;
 }
+function continueLabel() {
+  const nf = G.home && G.home.next_fixture;
+  if (G.pendingMatch || (nf && G.home && nf.date === G.home.date)) return "MATCH DAY";
+  return "CONTINUE";
+}
 function paintTop() {
   const h = G.home; if (!h) return;
+  const _pl0 = $("#btn-continue .pl"); if (_pl0 && !G.busy) _pl0.textContent = continueLabel();
   if (h.unemployed) {
     $("#tb-club").innerHTML = `Unemployed<small>Available for appointment</small>`;
     $("#tb-budget").textContent = "—"; $("#tb-board").textContent = "—";
@@ -383,8 +409,8 @@ async function doContinue() {
     go("match");
     return;
   }
-  G.busy = true; $("#btn-continue").disabled = true;
-  $("#btn-continue").textContent = "SIMULATING…";
+  G.busy = true; $("#btn-continue").disabled = true; setBusy(true);
+  const _pl = $("#btn-continue .pl"); if (_pl) _pl.textContent = "SIMULATING…";
   try {
     const j = await api.post("/api/continue", {});
     await refreshState();
@@ -394,7 +420,8 @@ async function doContinue() {
     }
     showContinueModal(j);
   } catch (e) { toast("Continue failed: " + esc(e.message), 6000); }
-  G.busy = false; $("#btn-continue").disabled = false; $("#btn-continue").textContent = "CONTINUE ▸";
+  G.busy = false; $("#btn-continue").disabled = false; setBusy(false);
+  const _pl2 = $("#btn-continue .pl"); if (_pl2) _pl2.textContent = continueLabel();
 }
 function showContinueModal(j) {
   const nf = j.next_fixture;
@@ -973,7 +1000,7 @@ async function renderMatch() {
     </div>`;
 }
 async function playMatch(mode) {
-  G.busy = true;
+  G.busy = true; setBusy(true);
   try {
     const j = await api.post("/api/match/play", { mode });
     if (!j.ok) { toast(esc(j.msg || "Could not play the match"), 5000); G.busy = false; return; }
@@ -985,6 +1012,7 @@ async function playMatch(mode) {
       showResult(j.result);
     }
   } catch (e) { toast("Match failed: " + esc(e.message), 6000); }
+  G.busy = false; setBusy(false);
   G.busy = false;
 }
 function showHalftime(st) {
@@ -1590,7 +1618,7 @@ async function renderCareer() {
         ${j.unemployed ? `<div class="row" style="margin-top:10px"><button class="btn primary" onclick="go('jobs')">Find a job</button></div>` : ""}
       </div>
       <div class="card"><h3>Trophy room</h3>
-        ${j.trophies.length ? j.trophies.map(t => `<div class="obj"><div class="t" style="color:var(--gold)">🏆 ${esc(t.comp)}</div>
+        ${j.trophies.length ? j.trophies.map(t => `<div class="obj"><div class="t" style="color:var(--gold);display:flex;align-items:center;gap:6px"><span class="icn">${svg("table")}</span>${esc(t.comp)}</div>
           <div class="small muted">${t.season}/${String(t.season + 1).slice(2)} · ${esc(t.type || "")}</div></div>`).join("")
         : '<p class="muted small">No trophies yet.</p>'}
       </div>
@@ -1599,9 +1627,32 @@ async function renderCareer() {
       <table><thead><tr><th class="num">Season</th><th>Competition</th><th>Club</th><th class="num">Pos</th><th>Note</th></tr></thead>
       <tbody>${j.history.map(h => `<tr><td class="num">${h.season}</td><td>${esc(h.comp || "")}</td>
         <td>${esc(h.club || "")}</td><td class="num">${h.pos || ""}</td><td class="small">${esc(h.note || "")}
-        ${h.trophy ? ' <span style="color:var(--gold)">🏆</span>' : ""}</td></tr>`).join("")
+        ${h.trophy ? ` <span class="icn" style="color:var(--gold)">${svg("table")}</span>` : ""}</td></tr>`).join("")
         || '<tr><td colspan="5" class="muted">No history yet.</td></tr>'}</tbody></table>
+    </div>
+    <div class="card" style="margin-top:12px;border-color:#5b2b2b">
+      <h3 style="color:var(--bad)">Danger zone</h3>
+      <p class="small muted">Starting a new career rebuilds the world and permanently replaces this save.</p>
+      <button class="btn danger" onclick="confirmNewCareer()">Start a new career</button>
     </div>`;
+}
+function confirmNewCareer() {
+  modal(`<h2>Start a new career?</h2>
+    <p class="sub">Your current career — every season, trophy and record in this save — will be
+    permanently deleted. The world is rebuilt from scratch.</p>
+    <div class="row"><button class="btn danger" onclick="doResetCareer()">Yes, erase and start over</button>
+    <button class="btn" onclick="closeModal()">Cancel</button></div>`);
+}
+async function doResetCareer() {
+  closeModal(); setBusy(true);
+  try {
+    await api.post("/api/career/reset", {});
+    G.home = null; G.boot.has_save = false; G.pendingMatch = false;
+    $("#crest").textContent = "TL";
+    showStartScreen();
+    toast("Save erased. Build a new career.");
+  } catch (e) { toast("Reset failed: " + esc(e.message), 6000); }
+  setBusy(false);
 }
 
 /* --------------------------------------------------------------------- JOBS */
@@ -1764,6 +1815,7 @@ function polish(root) {
   if (window.innerWidth >= 900) { tables.forEach(wrapTw); return; }
   tables.forEach(t => {
     if (t.closest(".tw")) return;
+    if (t.querySelector("tbody[id]")) { wrapTw(t); return; }   // live-updated tables stay tables
     const cols = t.querySelectorAll("thead th").length;
     if (cols >= 4) tableToCards(t); else wrapTw(t);
   });
