@@ -167,6 +167,32 @@ def player_card(con, save, pid):
         out["attr_groups"] = {g: [{"k": k, "v": out["attrs"].get(k, 0),
                                   "c": _attr_colour(out["attrs"].get(k, 0))} for k in keys
                                   if k in out["attrs"]] for g, keys in ATTR_GROUPS.items()}
+    out["yellow"] = p["yellow"]; out["red"] = p["red"]
+    recent = []
+    if p["club_id"] and p["club_id"] > 0:
+        rows = con.execute("""SELECT f.match_date, f.hg, f.aw, f.home_id, f.away_id, f.report,
+                k.name AS comp FROM fixtures f LEFT JOIN competitions k ON k.id=f.comp_id
+                WHERE f.played=1 AND f.season=? AND (f.home_id=? OR f.away_id=?) AND f.report IS NOT NULL
+                ORDER BY f.match_date DESC LIMIT 6""",
+            (save["season"], p["club_id"], p["club_id"])).fetchall()
+        for r in rows:
+            try:
+                rep = json.loads(r["report"])
+            except Exception:
+                continue
+            pl = [x for x in (rep.get("players") or []) if x.get("pid") == pid]
+            if not pl:
+                continue
+            pl = pl[0]
+            opp_id = r["away_id"] if r["home_id"] == p["club_id"] else r["home_id"]
+            oc = con.execute("SELECT short FROM clubs WHERE id=?", (opp_id,)).fetchone()
+            recent.append({"date": r["match_date"], "comp": r["comp"] or "",
+                           "opp": oc["short"] if oc else "?",
+                           "home": r["home_id"] == p["club_id"],
+                           "score": f"{r['hg']}-{r['aw']}",
+                           "rating": round(pl.get("rating", 0), 2), "mins": pl.get("mins", 0),
+                           "goals": pl.get("goals", 0), "assists": pl.get("assists", 0)})
+    out["recent"] = recent
     return out
 
 
@@ -194,6 +220,7 @@ def home(con, save):
         "club": {"id": c["id"], "name": c["name"], "short": c["short"], "code": c["code"],
                  "league": lg["name"] if lg else c["league"], "league_code": c["league"],
                  "tier": c["tier"], "rep": c["rep"], "stadium": c["stadium"],
+                 "capacity": c["capacity"],
                  "capacity": c["capacity"], "vision": c["vision"], "chairman": c["chairman"],
                  "facilities": c["facilities"], "coaching": c["coaching"], "youth": c["youth"],
                  "scouting": c["scouting"]},
@@ -354,6 +381,34 @@ def comps(con, save):
     for r in rows:
         tbl = E.table(con, save, r["id"], limit=6) if r["ctype"] in ("league", "continental") else []
         out.append({"comp": dict(r), "table": tbl})
+    return out
+
+
+def comp_detail(con, save, comp_id):
+    k = con.execute("SELECT * FROM competitions WHERE id=?", (comp_id,)).fetchone()
+    if not k:
+        return {"error": "not found"}
+    out = {"comp": dict(k)}
+    cid = save["club_id"]
+    if k["ctype"] in ("league", "continental"):
+        out["table"] = E.table(con, save, comp_id, limit=0)
+    rows = con.execute("""SELECT f.* FROM fixtures f WHERE f.comp_id=? AND f.season=?
+        AND (? = 0 OR f.home_id=? OR f.away_id=?) ORDER BY f.match_date""",
+        (comp_id, save["season"], cid or 0, cid or 0, cid or 0)).fetchall()
+    fx = []
+    for r in rows:
+        b = _fixture_brief(con, save, dict(r))
+        b.update({"played": r["played"], "hg": r["hg"], "ag": r["aw"]})
+        fx.append(b)
+    out["fixtures"] = fx
+    ko = [f for f in fx if f.get("stage") not in ("league", None, "")]
+    order = ["R64", "R32", "R16", "QF", "SF", "F", "R1", "R2", "R3", "R4", "R5", "R6", "R7"]
+    stages = []
+    for f in ko:
+        if f["stage"] not in stages:
+            stages.append(f["stage"])
+    stages.sort(key=lambda x: order.index(x) if x in order else 99)
+    out["ko"] = [{"stage": st, "ties": [f for f in ko if f["stage"] == st]} for st in stages]
     return out
 
 

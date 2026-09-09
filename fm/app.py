@@ -248,7 +248,7 @@ def api_state():
 
 
 @app.get("/api/screen/{name}")
-def api_screen(name: str):
+def api_screen(name: str, id: int = 0):
     s = need_save()
     c = con()
     if name in ("home", "dashboard"):
@@ -286,6 +286,8 @@ def api_screen(name: str):
         return {"fixtures": V.fixtures_screen(c, s), "upcoming": V.upcoming(c, s, 12)}
     if name == "comps":
         return {"comps": V.comps(c, s)}
+    if name == "comp":
+        return V.comp_detail(c, s, id) if id else {"error": "no comp"}
     if name == "table":
         return V.league_table(c, s) or {"rows": []}
     if name == "inbox":

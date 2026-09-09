@@ -31,3 +31,11 @@ Phase 0 → 1: inspect UI code, then design-system rewrite.
 
 ## Next priority
 Design tokens in style.css; nav restructure (bottom bar: Home/Squad/Tactics/Match/More + bell inbox).
+
+## Update 2026-09-10 ~00:40 UTC
+- Phase 1 DONE: style.css rewritten as token design system (all legacy classes kept + aliases).
+- Phase 2 DONE: procedural crest system (crest(code)) w/ real colours for 96+ clubs, fallback initials; wired topbar/home/table/matchday. engine.table + view._fixture_brief now carry club codes.
+- Phase 3 DONE: dashboard = command centre (match hero, status strip, readiness/board, mini table+inbox).
+- Phase 4 DONE: matchday premium: pre-match hero (comp band/crests/form/venue/XI/bench), animated live clock w/ event feed + skip, HT (stats duo, incidents, talk, subs), FT full-screen (score hero, MOTM, stats, events, player ratings, aftermath).
+- Bugs fixed: stroke icons, topbar <small>, g2 mobile stacking, HT/FT stat key aliases (poss/possession).
+- Next: Phase 5 competition identities + hubs.

@@ -71,8 +71,11 @@ p { margin: 0; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #topbar .club small { display: block; font-size: 11px; color: var(--tx3); letter-spacing: .06em;
   text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#tabbar button svg, #nav button svg, #sheet-grid button svg, .coach-t svg, #splash .slogo {
-  fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.ic, #splash .slogo { fill: none; stroke: currentColor; stroke-width: 1.7;
+  stroke-linecap: round; stroke-linejoin: round; }
+#tabbar button .ic, #nav button .ic, #sheet-grid button .ic { width: 21px; height: 21px; }
+#nav button .ic { width: 18px; height: 18px; flex: none; }
+.card > .row .ic, button.card .ic { width: 17px; height: 17px; color: var(--acc); }
 #statusbar { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 8px 14px;
   background: var(--sf); border-bottom: 1px solid var(--line); flex: none; }
 #statusbar::-webkit-scrollbar { display: none; }
@@ -463,3 +466,18 @@ tbody tr.tap { cursor: pointer; } tbody tr.tap:active td { background: var(--sf2
 .st-v { font-size: 16px; font-weight: 750; display: flex; gap: 4px; align-items: center; }
 .st-v i { font-style: normal; font-size: 11px; color: var(--tx3); font-weight: 600; }
 .good { color: var(--acc); } .bad { color: var(--red); } .warn { color: var(--amber); }
+
+/* squad compact list (phones) */
+.sq-list { display: flex; flex-direction: column; background: var(--sf);
+  border: 1px solid var(--line); border-radius: var(--r-m); overflow: hidden; }
+.sqr { display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  border-bottom: 1px solid var(--line); text-align: left; min-height: 48px; }
+.sqr:last-child { border-bottom: 0; }
+.sqr:active { background: var(--sf2); }
+.sqr-n { flex: 1; min-width: 0; }
+.sqr-n b { display: block; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sqr-n i { font-style: normal; font-size: 11px; color: var(--tx3); }
+.sqr-r { display: flex; align-items: center; gap: 8px; flex: none; }
+.sqr-r b { font-size: 12.5px; min-width: 30px; text-align: right; }
+@media (min-width: 900px) { .sq-list { display: none; } }
+@media (max-width: 899px) { .sq-table { display: none !important; } }

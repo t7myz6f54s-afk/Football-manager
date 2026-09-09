@@ -297,12 +297,12 @@ function onboarding(j) {
 
 /* ------------------------------------------------------------------- the game */
 const NAV = [
-  ["home", "🏠", "Home"], ["inbox", "📥", "Inbox"], ["squad", "👥", "Squad"],
-  ["tactics", "📋", "Tactics"], ["training", "🏋", "Training"], ["match", "⚽", "Match Centre"],
-  ["sep"], ["transfers", "💶", "Transfers"], ["scouting", "🔭", "Scouting"],
-  ["finances", "🏦", "Finances"], ["staff", "🧑‍💼", "Staff"], ["youth", "🌱", "Academy"],
-  ["sep"], ["calendar", "📅", "Calendar"], ["table", "🏆", "League"], ["comps", "🌍", "Competitions"],
-  ["board", "🎯", "Board"], ["media", "📰", "Media"], ["career", "📈", "Career"],
+  ["home", "", "Dashboard"], ["squad", "", "Squad"], ["tactics", "", "Tactics"],
+  ["match", "", "Matches"], ["comps", "", "Competitions"],
+  ["sep"], ["transfers", "", "Transfers"], ["scouting", "", "Scouting"],
+  ["finances", "", "Finances"], ["inbox", "", "News"],
+  ["sep"], ["club", "", "Club"], ["calendar", "", "Calendar"], ["table", "", "League Table"],
+  ["training", "", "Training"], ["career", "", "Career"],
 ];
 function renderNav(items) {
   const real = items.filter(n => n[0] !== "sep");
@@ -364,6 +364,7 @@ async function go(screen, sub) {
     else if (screen === "calendar") await renderCalendar();
     else if (screen === "table") await renderTable();
     else if (screen === "comps") await renderComps();
+    else if (screen === "club") await renderClub();
     else if (screen === "board") await renderBoard();
     else if (screen === "media") await renderMedia();
     else if (screen === "career") await renderCareer();
@@ -511,12 +512,12 @@ async function renderHome() {
   const mine = tbl.find(r => r.club_id === h.club.id);
   const top = tbl.slice(0, 8);
   const rowHtml = r => `<tr class="${r.club_id === h.club.id ? "me" : ""}">
-      <td class="num muted">${r.pos}</td>
+      <td class="num muted">${r.pos || "–"}</td>
       <td><span class="cellclub">${crest(r.code)}<span>${esc(r.name)}</span></span></td>
       <td class="num muted">${r.p}</td><td class="num"><b>${r.pts}</b></td></tr>`;
   $("#content").innerHTML = `
     ${f ? `<div class="mhero" style="--comp:${compColor(f.code)}">
-      <div class="mhero-top"><span class="comp-dot"></span><span>${esc(f.comp || "Match")}${f.stage !== "league" ? " · " + esc(f.stage) : ""}</span><span class="spacer"></span><span>${fmtDate(f.date)}</span></div>
+      <div class="mhero-top"><span class="comp-dot"></span><span>${esc(compLabel(f))}${f.stage && f.stage !== "league" && f.comp ? " · " + esc(f.stage) : ""}</span><span class="spacer"></span><span>${fmtDate(f.date)}</span></div>
       <div class="mhero-body">
         <div class="mhero-club">${crest(f.home_code, "xl")}<div class="nm">${esc(f.home)}</div></div>
         <div class="mhero-mid"><div class="vs">VS</div><div class="when">${f.is_home ? "HOME" : "AWAY"}</div><div class="venue">${esc(f.venue || "")}</div></div>
@@ -660,9 +661,39 @@ async function renderSquad() {
     name: (a, b) => a.name.localeCompare(b.name)
   }[SQUAD_SORT];
   players.sort(sortFn);
+  const all = j.players;
+  const injured = all.filter(p => p.injured), susp = all.filter(p => p.suspended > 0);
+  const unfit = all.filter(p => !p.injured && !p.suspended && p.condition < 0.9);
+  const fit = all.filter(p => !p.injured && !p.suspended && p.condition >= 0.9);
+  const inForm = fit.slice().sort((a, b) => b.form - a.form).slice(0, 3);
+  const bucket = p => p.pos === "GK" ? "GK" : /DC|LD|RD|WB|LB|RB/.test(p.pos) ? "DEF" : /DM|MC|AM|WL|WR|W/.test(p.pos) ? "MID" : "ATT";
+  const buckets = {};
+  fit.forEach(p => { (buckets[bucket(p)] = buckets[bucket(p)] || []).push(p.ca); });
+  const weak = Object.entries(buckets).map(([k, v]) => [k, v.reduce((a, b) => a + b, 0) / v.length])
+    .sort((a, b) => a[1] - b[1])[0];
   $("#content").innerHTML = `
-    <h1>Squad</h1>
-    <p class="sub">${G.home.club.name} · ${players.length} players shown · wage bill ${money(G.home.finances.wage_bill)}/yr</p>
+    <div class="sec-h"><h3>Squad</h3><span class="spacer"></span>
+      <span class="hint">${G.home.club.name} · wage ${money(G.home.finances.wage_bill)}/yr</span></div>
+    <div class="strip">
+      <div class="st"><span class="st-l">Fit</span><span class="st-v good">${fit.length}</span></div>
+      <div class="st"><span class="st-l">Injured</span><span class="st-v ${injured.length ? "bad" : ""}">${injured.length}</span></div>
+      <div class="st"><span class="st-l">Suspended</span><span class="st-v ${susp.length ? "bad" : ""}">${susp.length}</span></div>
+      <div class="st"><span class="st-l">Unfit</span><span class="st-v ${unfit.length ? "warn" : ""}">${unfit.length}</span></div>
+      <div class="st"><span class="st-l">Avg age</span><span class="st-v">${(all.reduce((a, b) => a + b.age, 0) / (all.length || 1)).toFixed(1)}</span></div>
+    </div>
+    <div class="grid g2">
+      <div class="card tight">
+        <div class="sec-h"><h3>Unavailable</h3></div>
+        ${injured.map(p => `<div class="kv"><span class="bad">${esc(p.name)}</span><b class="small muted">${esc(p.injury)} · ${p.return_date ? fmtDate(p.return_date) : "—"}</b></div>`).join("")
+          + susp.map(p => `<div class="kv"><span class="warn">${esc(p.name)}</span><b class="small muted">suspended ${p.suspended}</b></div>`).join("")
+          || '<p class="muted small">Everyone is available.</p>'}
+      </div>
+      <div class="card tight">
+        <div class="sec-h"><h3>Form &amp; balance</h3></div>
+        ${inForm.map(p => `<div class="kv"><span>${esc(p.name)} <i class="muted small">${esc(p.pos)}</i></span><b class="good">+${p.form.toFixed(1)}</b></div>`).join("")}
+        ${weak ? `<div class="kv"><span>Weakest area (fit)</span><b class="warn">${weak[0]} · ${weak[1].toFixed(1)}</b></div>` : ""}
+      </div>
+    </div>
     <div class="tabs">
       ${groups.map(g => `<button class="${SQUAD_FILTER === g ? "active" : ""}" onclick="SQUAD_FILTER='${g}';renderSquad()">${g}</button>`).join("")}
       <span class="spacer"></span>
@@ -672,7 +703,14 @@ async function renderSquad() {
           .map(o => `<option value="${o[0]}" ${SQUAD_SORT === o[0] ? "selected" : ""}>Sort: ${o[1]}</option>`).join("")}
       </select>
     </div>
-    <div class="card" style="padding:0;overflow:auto">
+    <div class="sq-list" style="margin-top:10px">${players.map(p => `<button class="sqr" onclick="go('player',${p.id})">
+      <span class="pos">${esc(p.pos)}</span>
+      <span class="sqr-n"><b>${esc(p.name)}</b>${p.injured ? ` <span class="tag L">${esc(p.injury)}</span>` : p.suspended ? ' <span class="tag L">susp</span>' : ""}
+        <i>${stars(p.stars)} · ${p.age}y · ${p.ca.toFixed(1)}</i></span>
+      <span class="sqr-r"><span class="tag ${condClass(p.condition)}">${p.condition.toFixed(2)}</span>
+        <b class="${p.form > 0.5 ? "good" : p.form < -0.5 ? "bad" : "muted"}">${p.form > 0 ? "+" : ""}${p.form.toFixed(1)}</b></span>
+    </button>`).join("")}</div>
+    <div class="card sq-table" style="padding:0;overflow:auto">
       <table><thead><tr>
         <th>Pos</th><th>Name</th><th class="num">Age</th><th class="num">Nat</th>
         <th class="num">Stars</th><th class="num">CA</th><th class="num">PA</th>
@@ -701,65 +739,94 @@ async function renderPlayer(pid) {
   const p = await api.get("/api/player/" + pid);
   await refreshState();
   const groups = p.attr_groups || null;
+  const ini = String(p.name).split(/\s+/).map(w => w[0]).slice(0, 2).join("").toUpperCase();
+  const ratingCls = r => r >= 7.5 ? "good" : r >= 6.8 ? "" : r >= 6.2 ? "warn" : "bad";
   $("#content").innerHTML = `
-    <div class="row"><button class="btn sm" onclick="history.back?go('squad'):go('squad')">◂ Squad</button>
-      <h1 style="margin:0">${esc(p.name)}</h1>
-      <span class="pos">${esc(p.pos)}</span>${p.pos2 ? '<span class="muted">/' + esc(p.pos2) + "</span>" : ""}
-      <span class="tag">${esc(p.nat)}</span><span class="spacer"></span>
-      ${p.mine ? "" : `<button class="btn primary sm" onclick="openOffer(${p.id},'${esc(p.name).replace(/'/g, "\\'")}',${p.asking || 0},${p.wage || 0})">Make offer</button>`}
+    <div class="card tight">
+      <div class="p-head">
+        <div class="p-ava">${ini}</div>
+        <div style="min-width:0;flex:1">
+          <h2 style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.name)}</h2>
+          <p class="small muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+            ${esc(p.club)} · ${esc(p.nat)} · ${p.age}y · ${esc(p.foot)} · ${p.height}cm</p>
+        </div>
+        <span class="pos">${esc(p.pos)}</span>${p.pos2 ? `<span class="pos" style="opacity:.6">${esc(p.pos2)}</span>` : ""}
+      </div>
+      <div class="strip" style="margin:12px -10px -10px;border-radius:0;border-left:0;border-right:0;border-bottom:0">
+        <div class="st"><span class="st-l">Ability</span><span class="st-v">${p.ca != null ? p.ca.toFixed(1) : "?"}</span>
+          ${p.stars != null ? `<div class="small">${stars(p.stars)}</div>` : '<div class="small muted">unscouted</div>'}</div>
+        <div class="st"><span class="st-l">Potential</span><span class="st-v">${p.pa != null ? p.pa.toFixed(1) : "?"}</span>
+          <div class="small muted">${p.age < 24 ? "developing" : p.age > 30 ? "declining" : "peak"}</div></div>
+        <div class="st"><span class="st-l">Condition</span><span class="st-v">${p.condition.toFixed(2)}</span>
+          <div class="small muted">fit ${Math.round(p.fitness)}</div></div>
+        <div class="st"><span class="st-l">Form</span><span class="st-v ${p.form > 0.5 ? "good" : p.form < -0.5 ? "bad" : ""}">${p.form > 0 ? "+" : ""}${p.form.toFixed(1)}</span>
+          <div class="small muted">morale ${Math.round(p.morale)}</div></div>
+        <div class="st"><span class="st-l">Value</span><span class="st-v small" style="font-size:14px">${money(p.value)}</span>
+          <div class="small muted">${wk(p.wage)}</div></div>
+      </div>
     </div>
-    <p class="sub">${esc(p.club)} · ${p.age} years old · ${esc(p.personality)} · value ${money(p.value)} · ${wk(p.wage)} until ${esc(p.contract_end)}</p>
-    <div class="grid g4">
-      <div class="card"><div class="stat-l">Condition</div><div class="stat">${p.condition.toFixed(2)}</div>
-        <div class="small muted">Fit ${Math.round(p.fitness)} · Sharp ${Math.round(p.sharpness)} · Fatigue ${Math.round(p.fatigue)}</div></div>
-      <div class="card"><div class="stat-l">Ability</div><div class="stat">${p.ca != null ? p.ca.toFixed(1) : "?"}</div>
-        <div class="small">${p.stars != null ? stars(p.stars) : '<span class="muted">unscouted</span>'}</div></div>
-      <div class="card"><div class="stat-l">Potential</div><div class="stat">${p.pa != null ? p.pa.toFixed(1) : "?"}</div>
-        <div class="small muted">${p.age < 24 ? "developing" : p.age > 30 ? "declining phase" : "peak years"}</div></div>
-      <div class="card"><div class="stat-l">Season</div><div class="stat small">${p.goals}G ${p.assists}A</div>
-        <div class="small muted">${p.apps} apps · ${p.minutes} mins · avg ${p.avg_rating ? p.avg_rating.toFixed(2) : "—"}</div></div>
+    ${p.injury ? `<div class="card tight" style="margin-top:10px;border-color:#5b2b2b"><b class="bad">Injured:</b> <span class="small">${esc(p.injury)} — back ${fmtDate(p.return_date)}</span></div>` : ""}
+    ${p.suspended ? `<div class="card tight" style="margin-top:10px;border-color:#6b5522"><b class="warn">Suspended</b> <span class="small">${p.suspended} match(es)</span></div>` : ""}
+
+    ${groups ? `<div class="card tight" style="margin-top:10px">
+      <div class="sec-h"><h3>Attributes</h3></div>
+      ${Object.entries(groups).filter(([g, a]) => a.length).map(([g, a]) => `<div class="attr-g">
+        <h4>${esc(g)}</h4>
+        ${a.map(x => `<div class="attr-r"><span class="k">${esc(x.k.replace(/_/g, " "))}</span>
+          <span class="b"><i style="width:${Math.min(100, x.v / 20 * 100)}%;background:${x.c === "good" || x.v >= 15 ? "var(--acc)" : x.v >= 11 ? "var(--blue)" : x.v >= 8 ? "var(--amber)" : "var(--red)"}"></i></span>
+          <span class="v">${x.v}</span></div>`).join("")}</div>`).join("")}
+    </div>` : (p.scout ? `<div class="card tight" style="margin-top:10px"><div class="sec-h"><h3>Scout report</h3><span class="spacer"></span><span class="small muted">${p.known}% known</span></div>
+        <div class="pre">${esc(typeof p.scout === "string" ? p.scout : JSON.stringify(p.scout, null, 2))}</div></div>`
+      : `<div class="card tight" style="margin-top:10px"><div class="sec-h"><h3>Scouting</h3></div>
+        <p class="small muted">Knowledge of this player: ${p.known}%. Attributes stay hidden until scouted.</p>
+        <button class="btn sm" style="margin-top:8px" onclick="assignScout(${p.id})">Assign scout</button></div>`)}
+
+    <div class="grid g2" style="margin-top:10px">
+      <div class="card tight">
+        <div class="sec-h"><h3>Season record</h3></div>
+        <div class="kv"><span>Apps · mins</span><b>${p.apps} · ${p.minutes}</b></div>
+        <div class="kv"><span>Goals · assists</span><b>${p.goals} · ${p.assists}</b></div>
+        <div class="kv"><span>Yellow · red</span><b>${p.yellow} · ${p.red}</b></div>
+        <div class="kv"><span>Avg rating</span><b>${p.avg_rating ? p.avg_rating.toFixed(2) : "—"}</b></div>
+        <div class="kv"><span>Intl caps</span><b>${p.int_apps} (${p.int_goals}g)</b></div>
+      </div>
+      <div class="card tight">
+        <div class="sec-h"><h3>Recent performances</h3></div>
+        ${(p.recent || []).length ? (p.recent || []).map(r => `<div class="kv">
+            <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${fmtDate(r.date)} · ${r.home ? "v" : "@"} ${esc(r.opp)} <i class="muted small">${r.score}</i></span>
+            <b class="${ratingCls(r.rating)}">${r.rating.toFixed(2)} <i class="muted small" style="font-style:normal">${r.mins}'${r.goals ? " · " + r.goals + "g" : ""}${r.assists ? " · " + r.assists + "a" : ""}</i></b>
+          </div>`).join("") : '<p class="muted small">No matches yet this season.</p>'}
+      </div>
     </div>
-    ${p.injury ? `<div class="card" style="margin-top:12px;border-color:#5b2b2b"><b style="color:var(--bad)">Injured:</b> ${esc(p.injury)} — expected back ${fmtDate(p.return_date)}</div>` : ""}
-    ${p.suspended ? `<div class="card" style="margin-top:8px;border-color:#6b5522"><b style="color:var(--warn)">Suspended</b> for ${p.suspended} match(es).</div>` : ""}
-    ${groups ? `
-      <div class="grid g2" style="margin-top:12px">
-        ${Object.entries(groups).filter(([g, a]) => a.length).map(([g, a]) => `
-          <div class="card"><h3>${g}</h3><div class="attr-grid">
-            ${a.map(x => `<div><span>${esc(x.k.replace(/_/g, " "))}</span><b class="${x.c}">${x.v}</b></div>`).join("")}
-          </div></div>`).join("")}
-      </div>` : (p.scout ? `<div class="card" style="margin-top:12px"><h3>Scout report</h3>
-        <div class="pre">${esc(typeof p.scout === "string" ? p.scout : JSON.stringify(p.scout, null, 2))}</div>
-        <div class="small muted" style="margin-top:8px">Knowledge ${p.known}% — assign a scout to learn more.</div></div>`
-      : `<div class="card" style="margin-top:12px"><h3>Scouting</h3>
-        <div class="small muted">Knowledge of this player: ${p.known}%. Attributes are hidden until you scout him.</div>
-        <div class="row" style="margin-top:8px"><button class="btn sm" onclick="assignScout(${p.id})">Assign scout</button></div></div>`)}
+
     ${p.mine ? `
-      <div class="grid g2" style="margin-top:12px">
-        <div class="card"><h3>Contract & status</h3>
+      <div class="grid g2" style="margin-top:10px">
+        <div class="card tight">
+          <div class="sec-h"><h3>Contract</h3></div>
+          <div class="kv"><span>Wage</span><b>${wk(p.wage)}</b></div>
+          <div class="kv"><span>Expires</span><b>${esc(p.contract_end)}</b></div>
           <div class="kv"><span>Promise</span><b>${esc(p.promise)}</b></div>
-          <div class="kv"><span>Morale</span><b>${Math.round(p.morale)}</b></div>
           <div class="kv"><span>Happiness</span><b>${Math.round(p.happiness)}</b></div>
-          <div class="kv"><span>Form</span><b>${p.form > 0 ? "+" : ""}${p.form.toFixed(1)}</b></div>
           <div class="kv"><span>Listed</span><b>${p.listed ? "Yes" : "No"}</b></div>
+          <div class="row" style="margin-top:10px">
+            <button class="btn sm" onclick="renewTalk(${p.id},'${esc(p.name).replace(/'/g, "\\'")}',${p.wage})">New contract</button>
+            <button class="btn sm" onclick="toggleList(${p.id},${!p.listed})">${p.listed ? "Unlist" : "List"}</button>
+            <button class="btn sm danger" onclick="releasePlayer(${p.id},'${esc(p.name).replace(/'/g, "\\'")}')">Release</button>
+          </div>
+        </div>
+        <div class="card tight">
+          <div class="sec-h"><h3>Man-management</h3></div>
+          <p class="small muted">Morale ${Math.round(p.morale)} · happiness ${Math.round(p.happiness)} · ${esc(p.personality)}</p>
           <div class="row" style="margin-top:10px">
             <button class="btn sm" onclick="talkTo(${p.id},'praise')">Praise</button>
             <button class="btn sm" onclick="talkTo(${p.id},'criticise')">Criticise</button>
             <button class="btn sm" onclick="talkTo(${p.id},'chat')">Chat</button>
             <button class="btn sm" onclick="openPromise(${p.id},'${esc(p.name).replace(/'/g, "\\'")}','${esc(p.promise)}')">Playing time</button>
           </div>
-          <div class="row" style="margin-top:8px">
-            <button class="btn sm" onclick="renewTalk(${p.id},'${esc(p.name).replace(/'/g, "\\'")},${p.wage})">Offer new contract</button>
-            <button class="btn sm" onclick="toggleList(${p.id},${!p.listed})">${p.listed ? "Unlist" : "List for transfer"}</button>
-            <button class="btn sm danger" onclick="releasePlayer(${p.id},'${esc(p.name).replace(/'/g, "\\'")}')">Release</button>
-          </div>
         </div>
-        <div class="card"><h3>Record</h3>
-          <div class="kv"><span>International caps</span><b>${p.int_apps} (${p.int_goals} goals)</b></div>
-          <div class="kv"><span>Reputation</span><b>${Math.round(p.reputation)}</b></div>
-          <div class="kv"><span>Preferred foot</span><b>${esc(p.foot)}</b></div>
-          <div class="kv"><span>Height</span><b>${p.height} cm</b></div>
-        </div>
-      </div>` : ""}`;
+      </div>` : `<div class="row" style="margin-top:10px"><span class="spacer"></span>
+        <button class="btn primary" onclick="openOffer(${p.id},'${esc(p.name).replace(/'/g, "\\'")}',${p.asking || 0},${p.wage || 0})">Make offer · asking ${money(p.asking || 0)}</button></div>`}
+    <div class="row" style="margin-top:10px"><button class="btn sm" onclick="go('squad')">◂ Squad</button></div>`;
 }
 async function talkTo(pid, kind) {
   const r = await api.post("/api/squad/talk", { pid, kind });
@@ -1654,24 +1721,120 @@ async function renderTable() {
 }
 
 /* -------------------------------------------------------------------- COMPS */
+function compMono(code) {
+  const m = { UCL: "UCL", UEL: "UEL", UECL: "UECL", ENG1: "PL", ESP1: "LaL", ITA1: "SA",
+    GER1: "BL", FRA1: "L1", FACUP: "FA", EFLCUP: "EFL", COPADELREY: "CdR", COPPAITALIA: "CI",
+    DFBPOKAL: "DFB", COUPEDEFRANCE: "CdF" };
+  if (m[code]) return m[code];
+  return String(code || "?").slice(0, 3);
+}
+function compBand(c, right) {
+  return `<div class="comp-band" style="--comp:${compColor(c.code)}">
+    <span class="ci">${esc(compMono(c.code))}</span>
+    <span style="min-width:0"><b>${esc(c.name)}</b><br><span class="sub">${esc(c.ctype === "continental" ? "Europe" : c.ctype === "cup" ? "Knockout cup" : "League")}${c.tier ? " · tier " + c.tier : ""}</span></span>
+    <span class="spacer"></span>${right || ""}</div>`;
+}
 async function renderComps() {
   const j = await api.get("/api/screen/comps");
   await refreshState();
+  const my = G.home && G.home.club ? G.home.club.id : 0;
   $("#content").innerHTML = `
-    <h1>Competitions</h1>
-    <p class="sub">Every competition you are registered in this season.</p>
-    <div class="grid g2">
-      ${j.comps.map(c => `<div class="card"><h3>${esc(c.comp.name)} <span class="tag">${esc(c.comp.ctype)}</span></h3>
-        ${c.table.length ? `<table><thead><tr><th class="num">#</th><th>Club</th><th class="num">P</th>
-          <th class="num">W</th><th class="num">D</th><th class="num">L</th><th class="num">Pts</th></tr></thead>
-          <tbody>${c.table.map(r => `<tr class="${r.club_id === G.home.club?.id ? "me" : ""}"><td class="num">${r.pos}</td>
-            <td>${esc(r.name)}</td><td class="num">${r.p}</td><td class="num">${r.w}</td>
-            <td class="num">${r.d}</td><td class="num">${r.l}</td><td class="num"><b>${r.pts}</b></td></tr>`).join("")}</tbody></table>`
-          : '<p class="muted small">Knockout competition — no table.</p>'}
-      </div>`).join("")}
+    <div class="sec-h"><h3>Competitions</h3><span class="spacer"></span><span class="hint">season ${G.home ? G.home.season_label : ""}</span></div>
+    <div style="display:grid;gap:8px">
+    ${j.comps.map(c => {
+      let status = "";
+      if (c.table && c.table.length) {
+        const r = c.table.find(x => x.club_id === my);
+        status = r && r.pos ? `<span class="tag">${r.pos}${ord(r.pos)}</span>` : "";
+      } else status = '<span class="tag">KO</span>';
+      return `<button class="comp-head" style="text-align:left;width:100%" onclick="renderCompHub(${c.comp.id})">
+        ${compBand(c.comp, status + '<span class="muted" style="font-size:16px"> ▸</span>')}</button>`;
+    }).join("")}
     </div>`;
 }
-
+function ord(n) {
+  if (n % 100 >= 11 && n % 100 <= 13) return "th";
+  return ["th", "st", "nd", "rd"][n % 10] || "th";
+}
+async function renderCompHub(id) {
+  const j = await api.get("/api/screen/comp?id=" + id);
+  if (!j || j.error) { toast("Competition not found"); return; }
+  const k = j.comp, my = G.home && G.home.club ? G.home.club.id : 0;
+  const tbl = j.table || [];
+  const me = tbl.find(r => r.club_id === my);
+  const played = j.fixtures.filter(f => f.played), todo = j.fixtures.filter(f => !f.played);
+  const rowHtml = r => `<tr class="${r.club_id === my ? "me" : ""}">
+      <td class="num muted">${r.pos || "–"}</td>
+      <td><span class="cellclub">${crest(r.code)}<span>${esc(r.name)}</span></span></td>
+      <td class="num">${r.p}</td><td class="num">${r.w}</td><td class="num">${r.d}</td><td class="num">${r.l}</td>
+      <td class="num">${r.gf - r.ga > 0 ? "+" : ""}${r.gf - r.ga}</td><td class="num"><b>${r.pts}</b></td></tr>`;
+  const fxRow = f => {
+    const myW = f.played && ((f.home_id === my && f.hg > f.ag) || (f.away_id === my && f.ag > f.hg));
+    const myD = f.played && f.hg === f.ag;
+    return `<div class="kv"><span class="cellclub" style="flex:1;min-width:0">${f.played
+      ? `<span class="tag ${myW ? "W" : myD ? "D" : "L"}">${f.hg}–${f.ag}</span>`
+      : `<span class="muted small">${fmtDate(f.date)}</span>`}
+      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${crest(f.home_code)}&nbsp;${esc(f.home_short || f.home)} v ${esc(f.away_short || f.away)}&nbsp;${crest(f.away_code)}</span></span>
+      <b class="small muted">${f.stage !== "league" ? esc(f.stage) : ""}</b></div>`;
+  };
+  $("#content").innerHTML = `
+    <button class="btn sm" onclick="renderComps()" style="margin-bottom:10px">◂ All competitions</button>
+    <div class="comp-head">${compBand(k, me && me.pos ? `<span class="tag">${me.pos}${ord(me.pos)}</span>` : "")}</div>
+    ${tbl.length ? `<div class="card tight" style="padding:0;margin-top:10px">
+      <div class="sec-h" style="padding:10px 12px 4px"><h3>${k.ctype === "continental" ? "League phase" : "Standings"}</h3>
+        <span class="spacer"></span>${k.code === (G.home.club && G.home.club.league_code) ? '<button class="btn sm" onclick="go(\'table\')">Full</button>' : ""}</div>
+      <div class="tw"><table><thead><tr><th class="num">#</th><th>Club</th><th class="num">P</th><th class="num">W</th>
+        <th class="num">D</th><th class="num">L</th><th class="num">GD</th><th class="num">Pts</th></tr></thead>
+        <tbody>${tbl.map(rowHtml).join("")}</tbody></table></div>
+    </div>` : ""}
+    ${(j.ko || []).length ? `<div class="card tight" style="margin-top:10px">
+      <div class="sec-h"><h3>Knockout progression</h3></div>
+      <div class="brk">${j.ko.map(r => `<div class="brk-r">
+        <div class="stat-l">${esc(r.stage === "F" ? "Final" : r.stage === "SF" ? "Semi-finals" : r.stage === "QF" ? "Quarter-finals" : r.stage === "R16" ? "Round of 16" : r.stage === "R32" ? "Round of 32" : r.stage)}</div>
+        ${r.ties.map(t => {
+          const hw = t.played && t.hg > t.ag, aw = t.played && t.ag > t.hg;
+          return `<div class="brk-m"><span class="${hw ? "w" : ""}">${crest(t.home_code)} ${esc(t.home_short || t.home)}</span>
+            <span class="sc">${t.played ? t.hg + "–" + t.ag : fmtDate(t.date)}</span>
+            <span class="${aw ? "w" : ""}" style="text-align:right">${esc(t.away_short || t.away)} ${crest(t.away_code)}</span></div>`;
+        }).join("")}</div>`).join("")}</div>
+    </div>` : ""}
+    <div class="grid g2" style="margin-top:10px">
+      <div class="card tight">
+        <div class="sec-h"><h3>Results</h3></div>
+        ${played.length ? played.slice().reverse().slice(0, 8).map(fxRow).join("") : '<p class="muted small">No results yet.</p>'}
+      </div>
+      <div class="card tight">
+        <div class="sec-h"><h3>Fixtures</h3></div>
+        ${todo.length ? todo.slice(0, 8).map(fxRow).join("") : '<p class="muted small">No fixtures left.</p>'}
+      </div>
+    </div>`;
+}
+async function renderClub() {
+  await refreshState();
+  const c = G.home.club;
+  $("#content").innerHTML = `
+    <div class="card tight">
+      <div class="p-head">${crest(c.code, "xl")}
+        <div style="min-width:0"><h2>${esc(c.name)}</h2>
+          <p class="small muted">${esc(c.league)} · tier ${c.tier} · reputation ${c.rep}</p></div>
+      </div>
+      <div class="divider"></div>
+      <div class="kv"><span>Stadium</span><b>${esc(c.stadium)}</b></div>
+      <div class="kv"><span>Capacity</span><b>${(c.capacity || 0).toLocaleString()}</b></div>
+      <div class="kv"><span>Season</span><b>${G.home.season_label}</b></div>
+    </div>
+    <div class="grid g2" style="margin-top:10px">
+      ${[["board", "Board & objectives", "Confidence, warnings and what the hierarchy expects."],
+         ["media", "Media", "Press conferences and headlines."],
+         ["staff", "Backroom staff", "Coaches, scouts, medical — roles and wages."],
+         ["youth", "Academy", "Intake, prospects and development."],
+         ["career", "Career & trophies", "Your record, honours and history."],
+         ["finances", "Finances", "Budgets, wages, commercial and matchday."]]
+        .map(([id, t, d]) => `<button class="card tight" style="text-align:left" onclick="go('${id}')">
+          <div class="row" style="gap:8px">${svg(id)}<b style="font-size:13.5px">${t}</b></div>
+          <p class="small muted" style="margin-top:4px">${d}</p></button>`).join("")}
+    </div>`;
+}
 /* -------------------------------------------------------------------- BOARD */
 async function renderBoard() {
   const j = await api.get("/api/screen/board");
@@ -1870,17 +2033,19 @@ const ICONS = {
   media: '<rect x="3" y="5" width="15" height="15" rx="2"/><path d="M18 9h3v9a2 2 0 0 1-2 2H5"/><path d="M6.5 9h8M6.5 12.5h8M6.5 16h5"/>',
   career: '<path d="M4 20V6M4 20h16"/><path d="M7 16l4-5 3 3 5-7"/><path d="M16 7h3v3"/>',
   more: '<circle cx="6" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18" cy="12" r="1.6"/>',
+  club: '<path d="M4 20V9l4-3 4 3 4-3 4 3v11"/><path d="M4 20h16"/><path d="M9 20v-5h6v5"/><path d="M12 6V3"/>',
 };
 function svg(id) {
-  return `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[id] || ICONS.more}</svg>`;
+  return `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICONS[id] || ICONS.more}</svg>`;
 }
-const TAB_IDS = ["home", "inbox", "squad", "tactics", "match"];
+const TAB_IDS = ["home", "inbox", "squad", "match", "comps"];
 
+const TAB_LABEL = { home: "Home", inbox: "News", squad: "Squad", match: "Match", comps: "Comps" };
 function renderTabbar(items) {
   const el = $("#tabbar"); if (!el) return;
   const tabs = TAB_IDS.map(id => items.find(i => i[0] === id)).filter(Boolean);
   el.innerHTML = tabs.map(n =>
-    `<button data-s="${n[0]}" onclick="go('${n[0]}')">${svg(n[0])}<span>${n[2].split(" ")[0]}</span>` +
+    `<button data-s="${n[0]}" onclick="go('${n[0]}')">${svg(n[0])}<span>${TAB_LABEL[n[0]] || n[2].split(" ")[0]}</span>` +
     `<span class="tbadge hidden" data-badge="${n[0]}"></span></button>`).join("") +
     `<button data-s="__more" onclick="openSheet()">${svg("more")}<span>More</span></button>`;
 }
