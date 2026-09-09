@@ -882,6 +882,15 @@ function pitchHTML(xi, clickable) {
     </div>`;
   }).join("")}</div>`;
 }
+const MENTALITY_NOTE = {
+  "Very Defensive": "Deep block, low line, counter-attacks only — concedes little, creates little.",
+  "Defensive": "Compact and cautious: fewer chances at both ends, protects leads.",
+  "Cautious": "Slightly reserved: solid shape, measured build-up.",
+  "Balanced": "Even risk: neither suppresses nor boosts chance quality.",
+  "Positive": "Higher line and tempo: more chances created and conceded.",
+  "Attacking": "Commits bodies forward: clear scoring edge, exposure at the back.",
+  "All-Out Attack": "Everything forward: maximum chance volume, fragile defensively.",
+};
 async function renderTactics() {
   const t = await api.get("/api/screen/tactics");
   await refreshState();
@@ -908,7 +917,8 @@ async function renderTactics() {
             <span class="spacer"></span>
             <button class="btn sm" onclick="autoPickXI()">Assistant picks XI</button>
           </div>
-          <div class="small muted" style="margin-top:6px">Changing shape or mentality costs familiarity — the team needs matches to learn it.
+          <div class="small" style="margin-top:6px;color:var(--acc)">${MENTALITY_NOTE[t.tactic.mentality] || ""}</div>
+          <div class="small muted" style="margin-top:4px">Changing shape or mentality costs familiarity — the team needs matches to learn it.
             Slots marked <b>auto</b> are the assistant's pick: click any slot on the pitch to choose your own XI.</div>
         </div>
         ${pitchHTML(t.xi, true)}
