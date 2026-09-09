@@ -30,3 +30,11 @@ android/local.properties
 # --- misc ---
 *.log
 .DS_Store
+
+# --- android: staged copies of the game (re-created by make_apk.sh) ---
+android/app/src/main/python/fm/
+android/app/src/main/assets/
+.android/
+
+# --- built APKs (published as GitHub release assets instead) ---
+release/

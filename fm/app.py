@@ -10,7 +10,7 @@ import random
 import sys
 import traceback
 
-sys.path.insert(0, "/home/user")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fm import constants as C
 from fm import engine as E
@@ -18,9 +18,13 @@ from fm import view as V
 from fm.mini import HTTPError, MiniApp, serve
 from fm.world import DB_PATH, build_world, connect
 
-SAVE_DIR = "/home/user/data/saves"
-SAVE_PATH = os.path.join(SAVE_DIR, "career1.json")
-STATIC = "/home/user/fm/static"
+# All three can be overridden by environment variables so the same code runs
+# unchanged on a desktop and inside the Android WebView wrapper (see android/).
+BASE_DIR = os.environ.get("FM_BASE", "/home/user")
+SAVE_DIR = os.environ.get("FM_SAVE_DIR", os.path.join(BASE_DIR, "data", "saves"))
+SAVE_PATH = os.environ.get("FM_SAVE", os.path.join(SAVE_DIR, "career1.json"))
+STATIC = os.environ.get("FM_STATIC", os.path.join(BASE_DIR, "fm", "static"))
+HOST = os.environ.get("FM_HOST", "0.0.0.0")
 
 app = MiniApp(static_dir=STATIC, static_prefix="/static")
 
@@ -688,7 +692,7 @@ def main():
         print("Building the world database (first run)…", flush=True)
         build_world()
     port = int(os.environ.get("PORT", 8000))
-    serve(app, host="0.0.0.0", port=port)
+    serve(app, host=HOST, port=port)
 
 
 if __name__ == "__main__":
