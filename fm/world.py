@@ -169,10 +169,13 @@ SEASON = 2026
 
 
 def connect():
-    con = sqlite3.connect(DB_PATH)
+    # Access is serialised by mini.DB_LOCK; check_same_thread=False lets the
+    # request threads share this connection safely (ThreadingHTTPServer).
+    con = sqlite3.connect(DB_PATH, check_same_thread=False)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("PRAGMA synchronous=NORMAL")
+    con.execute("PRAGMA busy_timeout=8000")
     return con
 
 

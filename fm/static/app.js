@@ -4,7 +4,15 @@
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
 const api = {
-  async get(p) { const r = await fetch(p); if (!r.ok) throw new Error((await r.json()).detail || r.status); return r.json(); },
+  async get(p) {
+    const r = await fetch(p);
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      const e = new Error(j.error || j.detail || ("HTTP " + r.status));
+      e.status = r.status; throw e;
+    }
+    return r.json();
+  },
   async post(p, b) {
     const r = await fetch(p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b || {}) });
     const j = await r.json().catch(() => ({}));
@@ -48,6 +56,7 @@ function modal(html, wide) {
   const box = $("#modal-box");
   box.className = "box" + (wide ? " wide" : "");
   box.innerHTML = `<button class="close" onclick="closeModal()">✕</button>` + html;
+  polish(box);
   $("#modal").classList.add("open");
 }
 function closeModal() { $("#modal").classList.remove("open"); }
@@ -138,6 +147,7 @@ async function searchClubs() {
       <td class="num">${money(c.wage_budget)}</td>
       <td><button class="btn sm primary" onclick='pickClub(${JSON.stringify(c).replace(/'/g, "&#39;")})'>SELECT</button></td>
     </tr>`).join("");
+  polish($("#content"));
 }
 function pickClub(c) { CLUB_PICK = c; stepManagerProfile(); }
 
@@ -264,8 +274,11 @@ const NAV = [
   ["board", "🎯", "Board"], ["media", "📰", "Media"], ["career", "📈", "Career"],
 ];
 function renderNav(items) {
+  const real = items.filter(n => n[0] !== "sep");
   $("#nav").innerHTML = items.map(n => n[0] === "sep" ? '<div class="sep"></div>' :
-    `<button data-s="${n[0]}" onclick="go('${n[0]}')"><span>${n[1]}</span>${n[2]}<span class="badge hidden" id="nb-${n[0]}"></span></button>`).join("");
+    `<button data-s="${n[0]}" onclick="go('${n[0]}')">${svg(n[0])}<span>${n[2]}</span><span class="badge hidden" id="nb-${n[0]}"></span></button>`).join("");
+  renderTabbar(real);
+  renderSheet(real);
 }
 async function enterGame() {
   $("#splash").classList.add("hidden");
@@ -281,6 +294,10 @@ async function resumeMatch() {
 async function go(screen, sub) {
   G.screen = screen; G.sub = sub || null;
   $$("#nav button").forEach(b => b.classList.toggle("active", b.dataset.s === screen));
+  $$("#tabbar button").forEach(b => b.classList.toggle("active", b.dataset.s === screen));
+  $$("#sheet-grid button").forEach(b => b.classList.toggle("active", b.dataset.s === screen));
+  $$("#tabbar button[data-s=__more]").forEach(b => b.classList.toggle("active", !TAB_IDS.includes(screen)));
+  closeSheet();
   $("#content").innerHTML = '<p class="muted">Loading…</p>';
   try {
     if (screen === "home") await renderHome();
@@ -303,8 +320,15 @@ async function go(screen, sub) {
     else if (screen === "career") await renderCareer();
     else if (screen === "jobs") await renderJobs();
   } catch (e) {
-    $("#content").innerHTML = `<p style="color:var(--bad)">Error: ${esc(e.message)}</p>`;
+    if (e.status === 400 && /no active career/i.test(e.message || "")) { showStartScreen(); return; }
+    $("#content").innerHTML = `<div class="card" style="border-color:#5b2b2b">
+      <h3 style="color:var(--bad)">Something went wrong</h3>
+      <p class="small muted">${esc(e.message)}</p>
+      <div class="row"><button class="btn sm" onclick="go('${screen}')">Retry</button>
+      <button class="btn sm primary" onclick="go('home')">Back to home</button></div></div>`;
   }
+  $("#content").scrollTop = 0;
+  polish($("#content"));
   refreshBadges();
 }
 async function refreshState() {
@@ -324,22 +348,29 @@ function paintTop() {
   if (h.unemployed) {
     $("#tb-club").innerHTML = `Unemployed<small>Available for appointment</small>`;
     $("#tb-budget").textContent = "—"; $("#tb-board").textContent = "—";
+    paintCrest("TL", null);
   } else {
     $("#tb-club").innerHTML = `${esc(h.club.name)}<small>${esc(h.club.league)}</small>`;
     $("#tb-budget").innerHTML = `Budget <b>${money(h.finances.transfer_budget)}</b>`;
     $("#tb-board").innerHTML = `Board <b>${Math.round(h.board.confidence)}</b>/100`;
+    paintCrest(h.club.name, h.club.id);
   }
   $("#tb-date").textContent = fmtDate(h.date);
   const nf = h.next_fixture;
   $("#tb-next").innerHTML = nf ? `Next: <b>${esc(nf.home_short)} v ${esc(nf.away_short)}</b> ${fmtDate(nf.date)}` : "No fixture";
   $("#btn-continue").disabled = G.busy;
+  $("#btn-continue").classList.toggle("busy", G.busy);
 }
 async function refreshBadges() {
   try {
     const j = await api.get("/api/inbox?unread=true");
     const n = j.items.length;
-    const b = $("#nb-inbox");
-    if (b) { b.textContent = n; b.classList.toggle("hidden", !n); }
+    const spots = [...document.querySelectorAll('[data-badge="inbox"]')];
+    const b = $("#nb-inbox"); if (b) spots.push(b);
+    spots.forEach(el => {
+      el.textContent = n;
+      el.classList.toggle("hidden", !n);
+    });
   } catch (e) {}
 }
 
@@ -1613,3 +1644,132 @@ document.addEventListener("keydown", e => {
 });
 
 boot();
+
+/* ================================================================
+   GAME SHELL — icons, bottom tab bar, "more" sheet, mobile tables
+   ================================================================ */
+const ICONS = {
+  home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V20a1 1 0 0 0 1 1H10v-6h4v6h3.5a1 1 0 0 0 1-1V9.5"/>',
+  inbox: '<path d="M3 13h4l2 3h6l2-3h4"/><path d="M5 5h14l2 8v6H3v-6z"/>',
+  squad: '<circle cx="9" cy="8" r="3.2"/><path d="M3.5 20c.6-3.6 2.8-5.5 5.5-5.5S13.9 16.4 14.5 20"/><circle cx="17" cy="9" r="2.6"/><path d="M15.5 14.8c2.6.2 4.4 1.9 5 5.2"/>',
+  tactics: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 3v4M16 3v4M8 21v-3M16 21v-3"/><circle cx="9.5" cy="12" r="1.4"/><circle cx="14.5" cy="15.5" r="1.4"/><path d="M9.5 12l5 3.5"/>',
+  training: '<path d="M4 9v6M7 7v10M17 7v10M20 9v6M7 12h10"/>',
+  match: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5l4 3-1.5 4.6h-5L8 10.5z"/><path d="M12 3v4.5M4 9.5l4 1M20 9.5l-4 1M7 19.5l2.5-4.4M17 19.5l-2.5-4.4"/>',
+  transfers: '<path d="M4 8h13l-3-3M20 16H7l3 3"/>',
+  scouting: '<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5.5 5.5"/><path d="M10.5 7.5v6M7.5 10.5h6"/>',
+  finances: '<path d="M3 9.5 12 4l9 5.5"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18"/>',
+  staff: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 12h18"/><circle cx="12" cy="15" r="1.6"/>',
+  youth: '<path d="M12 21v-8"/><path d="M12 13c0-4 3-7 7-7 0 4-3 7-7 7z"/><path d="M12 16c0-3-2.5-5-5.5-5 0 3 2.5 5 5.5 5z"/>',
+  calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/><path d="M8 14h3M8 17.5h6"/>',
+  table: '<path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 5H5a3 3 0 0 0 3 4M16 5h3a3 3 0 0 1-3 4"/><path d="M12 13v4M9 20h6M10 17h4"/>',
+  comps: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.6 3.8 5.6 3.8 9S14.6 18.4 12 21c-2.6-2.6-3.8-5.6-3.8-9S9.4 5.6 12 3z"/>',
+  board: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/>',
+  media: '<rect x="3" y="5" width="15" height="15" rx="2"/><path d="M18 9h3v9a2 2 0 0 1-2 2H5"/><path d="M6.5 9h8M6.5 12.5h8M6.5 16h5"/>',
+  career: '<path d="M4 20V6M4 20h16"/><path d="M7 16l4-5 3 3 5-7"/><path d="M16 7h3v3"/>',
+  more: '<circle cx="6" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18" cy="12" r="1.6"/>',
+};
+function svg(id) {
+  return `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[id] || ICONS.more}</svg>`;
+}
+const TAB_IDS = ["home", "inbox", "squad", "tactics", "match"];
+
+function renderTabbar(items) {
+  const el = $("#tabbar"); if (!el) return;
+  const tabs = TAB_IDS.map(id => items.find(i => i[0] === id)).filter(Boolean);
+  el.innerHTML = tabs.map(n =>
+    `<button data-s="${n[0]}" onclick="go('${n[0]}')">${svg(n[0])}<span>${n[2].split(" ")[0]}</span>` +
+    `<span class="tbadge hidden" data-badge="${n[0]}"></span></button>`).join("") +
+    `<button data-s="__more" onclick="openSheet()">${svg("more")}<span>More</span></button>`;
+}
+function renderSheet(items) {
+  const el = $("#sheet-grid"); if (!el) return;
+  const inBar = new Set(TAB_IDS);
+  el.innerHTML = items.filter(i => !inBar.has(i[0])).map(n =>
+    `<button data-s="${n[0]}" onclick="go('${n[0]}')">${svg(n[0])}<span>${n[2]}</span>` +
+    `<span class="tbadge hidden" data-badge="${n[0]}"></span></button>`).join("");
+}
+function openSheet() {
+  const s = $("#sheet"); s.classList.add("open");
+  requestAnimationFrame(() => s.classList.add("vis"));
+}
+function closeSheet() {
+  const s = $("#sheet"); if (!s || !s.classList.contains("open")) return;
+  s.classList.remove("vis");
+  setTimeout(() => s.classList.remove("open"), 220);
+}
+
+function paintCrest(name, id) {
+  const el = $("#crest"); if (!el) return;
+  const w = String(name || "Touchline").split(/\s+/).filter(Boolean);
+  el.textContent = ((w[0] || "T")[0] + (w[1] ? w[1][0] : (w[0] || "TL")[1] || "L")).toUpperCase();
+  let h = 7; for (const ch of String(name || "touchline")) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const hue = h % 360;
+  document.documentElement.style.setProperty("--crest1", `hsl(${hue} 68% 55%)`);
+  document.documentElement.style.setProperty("--crest2", `hsl(${(hue + 42) % 360} 72% 30%)`);
+}
+
+/* ------------------- tables: scroll on desktop, cards on phones ------------------- */
+function wrapTw(t) {
+  if (t.closest(".tw")) return;
+  const w = document.createElement("div"); w.className = "tw";
+  t.replaceWith(w); w.appendChild(t);
+}
+function tableToCards(t) {
+  const heads = [...t.querySelectorAll("thead th")].map(th => th.textContent.trim());
+  const rows = [...t.querySelectorAll("tbody tr")];
+  if (!rows.length) { wrapTw(t); return; }
+  const host = document.createElement("div"); host.className = "cards";
+  rows.forEach(tr => {
+    if (tr.children.length <= 1) {
+      const d = document.createElement("div"); d.className = "tmsg"; d.innerHTML = tr.innerHTML;
+      host.appendChild(d); return;
+    }
+    const cells = [...tr.children];
+    const card = document.createElement("div");
+    card.className = "tcard" + (tr.classList.contains("me") ? " me" : "");
+    const oc = tr.getAttribute("onclick");
+    if (oc) { card.setAttribute("onclick", oc); card.classList.add("tap"); }
+    let ti = cells.findIndex(td => td.querySelector("b,strong"));
+    if (ti < 0) ti = cells.findIndex(td => !td.classList.contains("num"));
+    if (ti < 0) ti = 0;
+    const hd = document.createElement("div"); hd.className = "tcard-h"; hd.innerHTML = cells[ti].innerHTML;
+    card.appendChild(hd);
+    const grid = document.createElement("div"); grid.className = "tcard-g";
+    cells.forEach((td, i) => {
+      if (i === ti) return;
+      if (!td.textContent.trim() && !td.querySelector(".bar,.tag,svg,img,input,select")) return;
+      const c = document.createElement("div"); c.className = "tcell";
+      c.innerHTML = `<span class="tl">${esc(heads[i] || "")}</span><span class="tv">${td.innerHTML}</span>`;
+      grid.appendChild(c);
+    });
+    card.appendChild(grid);
+    host.appendChild(card);
+  });
+  t.replaceWith(host);
+  let p = host.parentElement;
+  while (p && p !== document.body) {
+    if (p.classList.contains("card") || p.classList.contains("tight")) {
+      p.style.cssText += ";padding:0;border:0;background:none;box-shadow:none;overflow:visible;max-height:none";
+      break;
+    }
+    if (p.tagName === "DIV" && /overflow|max-height/.test(p.getAttribute("style") || "")) {
+      p.style.overflow = "visible"; p.style.maxHeight = "none"; p.style.padding = "8px";
+    }
+    p = p.parentElement;
+  }
+}
+function polish(root) {
+  root = root || document;
+  const tables = $$("table", root);
+  if (window.innerWidth >= 900) { tables.forEach(wrapTw); return; }
+  tables.forEach(t => {
+    if (t.closest(".tw")) return;
+    const cols = t.querySelectorAll("thead th").length;
+    if (cols >= 4) tableToCards(t); else wrapTw(t);
+  });
+}
+window.addEventListener("resize", () => { /* re-layout on rotate happens on next render */ });
+document.addEventListener("DOMContentLoaded", () => {
+  const s = $("#sheet");
+  if (s) s.addEventListener("click", e => { if (e.target.id === "sheet") closeSheet(); });
+});

@@ -5,12 +5,18 @@ routing, JSON handling and static file serving for the presentation layer.
 """
 import inspect
 import json
+import threading
 import mimetypes
 import os
 import re
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
+
+
+# The app keeps one SQLite connection; requests arrive on many threads.
+# Serialising API dispatch keeps every handler single-threaded w.r.t. the DB.
+DB_LOCK = threading.RLock()
 
 
 class HTTPError(Exception):
@@ -171,7 +177,8 @@ def make_handler(app):
             if got:
                 return self._send(200, got[0], got[1])
             query = parse_qs(parsed.query)
-            status, payload = app.handle(self.command, path, query, body)
+            with DB_LOCK:
+                status, payload = app.handle(self.command, path, query, body)
             data = json.dumps(payload).encode("utf-8")
             return self._send(status, "application/json", data,
                               {"Access-Control-Allow-Origin": "*"})

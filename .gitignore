@@ -38,3 +38,8 @@ android/app/src/main/assets/
 
 # --- built APKs (published as GitHub release assets instead) ---
 release/
+
+# --- local tool caches (headless chrome etc.) ---
+.cache/
+.npm/
+.sudo_as_admin_successful
