@@ -611,7 +611,7 @@ async function renderInbox() {
   await refreshState();
   const j = await api.get("/api/inbox" + (INBOX_CAT ? "?cat=" + INBOX_CAT : ""));
   $("#content").innerHTML = `
-    <h1>Inbox</h1>
+    <div class="sec-h"><h3>Inbox</h3></div>
     <div class="tabs">
       <button class="${!INBOX_CAT ? "active" : ""}" onclick="INBOX_CAT='';renderInbox()">All</button>
       ${j.cats.map(c => `<button class="${INBOX_CAT === c ? "active" : ""}" onclick="INBOX_CAT='${c}';renderInbox()">${c}${j.unread_by_cat[c] ? " (" + j.unread_by_cat[c] + ")" : ""}</button>`).join("")}
@@ -899,7 +899,7 @@ async function renderTactics() {
   const IOPT = G.static.instruction_options || {};
   const instr = t.tactic.instr || {};
   $("#content").innerHTML = `
-    <h1>Tactics</h1>
+    <div class="sec-h"><h3>Tactics</h3></div>
     <p class="sub">Familiarity <b>${Math.round(t.tactic.familiarity)}%</b> · attack ${t.rating.attack} ·
       defence ${t.rating.defence} · condition ${t.rating.condition} · press ${t.rating.press} ·
       tempo ${t.rating.tempo} · width ${t.rating.width}</p>
@@ -1038,24 +1038,29 @@ async function renderTraining() {
   await refreshState();
   const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
   $("#content").innerHTML = `
-    <h1>Training</h1>
-    <p class="sub">Squad load — fatigue ${t.squad_load.fatigue} · fitness ${t.squad_load.fitness} · sharpness ${t.squad_load.sharpness} · ${t.squad_load.injured} injured</p>
-    <div class="card" style="padding:0;overflow:auto">
-      <table><thead><tr><th>Day</th><th>Session</th><th>Focus position</th>
-        <th class="num">Fatigue</th><th class="num">Fitness</th><th class="num">Sharpness</th><th>Attributes</th></tr></thead>
-      <tbody>${t.week.map(w => {
+    <div class="sec-h"><h3>Training</h3></div>
+    <div class="strip">
+      <div class="st"><span class="st-l">Fatigue</span><span class="st-v ${t.squad_load.fatigue > 55 ? "warn" : ""}">${t.squad_load.fatigue}</span></div>
+      <div class="st"><span class="st-l">Fitness</span><span class="st-v">${t.squad_load.fitness}</span></div>
+      <div class="st"><span class="st-l">Sharpness</span><span class="st-v">${t.squad_load.sharpness}</span></div>
+      <div class="st"><span class="st-l">Injured</span><span class="st-v ${t.squad_load.injured ? "bad" : ""}">${t.squad_load.injured}</span></div>
+    </div>
+    <div class="card tight" style="padding:0">
+      ${t.week.map(w => {
         const s = t.sessions.find(x => x.name === w.session) || {};
-        return `<tr><td><b>${days[w.day]}</b></td>
-        <td><select onchange="setTraining(${w.day},this.value,'${esc(w.focus || "")}')">
-          ${t.sessions.map(x => `<option ${x.name === w.session ? "selected" : ""}>${x.name}</option>`).join("")}</select></td>
-        <td><select onchange="setTraining(${w.day},'${esc(w.session)}',this.value)">
-          <option value="">— none —</option>
-          ${t.focus_options.map(p => `<option ${w.focus === p ? "selected" : ""}>${p}</option>`).join("")}</select></td>
-        <td class="num">${s.fatigue != null ? (s.fatigue > 0 ? "+" : "") + s.fatigue : "—"}</td>
-        <td class="num">${s.fitness != null ? (s.fitness > 0 ? "+" : "") + s.fitness : "—"}</td>
-        <td class="num">${s.sharpness != null ? (s.sharpness > 0 ? "+" : "") + s.sharpness : "—"}</td>
-        <td class="small muted">${(s.attrs || []).slice(0, 4).join(", ")}</td></tr>`;
-      }).join("")}</tbody></table>
+        const sg = v => v == null ? "—" : (v > 0 ? "+" : "") + v;
+        return `<div class="trn">
+          <div class="trn-d"><b>${days[w.day]}</b><span>${(s.attrs || []).slice(0, 3).join(", ") || "—"}</span></div>
+          <select onchange="setTraining(${w.day},this.value,'${esc(w.focus || "")}')">
+            ${t.sessions.map(x => `<option ${x.name === w.session ? "selected" : ""}>${x.name}</option>`).join("")}</select>
+          <select onchange="setTraining(${w.day},'${esc(w.session)}',this.value)">
+            <option value="">— none —</option>
+            ${t.focus_options.map(p => `<option ${w.focus === p ? "selected" : ""}>${p}</option>`).join("")}</select>
+          <div class="trn-e"><span class="tag ${s.fatigue >= 8 ? "URGENT" : s.fatigue <= -20 ? "ROUTINE" : ""}">fat ${sg(s.fatigue)}</span>
+            <span class="tag ${s.fitness > 0 ? "ROUTINE" : ""}">fit ${sg(s.fitness)}</span>
+            <span class="tag">shp ${sg(s.sharpness)}</span></div>
+        </div>`;
+      }).join("")}
     </div>
     <div class="grid g2" style="margin-top:12px">
       <div class="card"><h3>Coaching staff</h3>
@@ -1419,65 +1424,63 @@ async function renderTransfers() {
   const j = await api.get("/api/screen/transfers");
   const shortlisted = new Set(j.shortlist_ids || []);
   const s = await api.get(`/api/transfer/search?pos=${TR.pos}&q=${encodeURIComponent(TR.q)}&max_fee=${TR.max_fee}&age_max=${TR.age_max}&free=${TR.free}&affordable=${TR.aff !== false}`);
+  const win = j.window && j.window !== "closed";
   $("#content").innerHTML = `
-    <h1>Transfers</h1>
-    <p class="sub">Window: <b>${j.window && j.window !== "closed" ? j.window.toUpperCase() + " — OPEN" : "CLOSED"}</b> · budget ${money(j.budget)} · summer ${fmtDate(j.windows.open)} → ${fmtDate(j.windows.close)}, winter ${fmtDate(j.windows.winter[0])} → ${fmtDate(j.windows.winter[1])}</p>
-    ${j.offers.length ? `<div class="card" style="margin-bottom:12px;border-color:#6b5522"><h3>Incoming bids</h3>
-      <table><thead><tr><th>Player</th><th>From</th><th class="num">Fee</th><th class="num">Value</th><th class="num">Wage offered</th><th></th></tr></thead>
-      <tbody>${j.offers.map(o => `<tr><td><b>${esc(o.player)}</b> <span class="muted small">${esc(o.pos)}, ${o.age}</span></td>
-        <td>${esc(o.from_club || "—")}</td><td class="num">${money(o.fee)}</td><td class="num">${money(o.value)}</td>
-        <td class="num">${wk(o.wage)}</td>
-        <td class="row"><button class="btn sm primary" onclick="bid(${o.id},'accept')">Accept</button>
-        <button class="btn sm" onclick="bid(${o.id},'reject')">Reject</button>
-        <button class="btn sm" onclick="bidCounter(${o.id},${o.fee})">Counter</button></td></tr>`).join("")}</tbody></table></div>` : ""}
-    ${(j.my_offers || []).length ? `<div class="card" style="margin-bottom:12px"><h3>Negotiations</h3>
-      <table><thead><tr><th>Player</th><th>Dir</th><th>Clubs</th><th class="num">Fee</th><th class="num">Wage</th>
-        <th>Status</th><th class="small">Note</th><th></th></tr></thead><tbody>
-      ${j.my_offers.map(o => `<tr>
-        <td><a href="#" onclick="go('player',${o.player_id});return false"><b>${esc(o.player)}</b></a>
-            <span class="muted small">${esc(o.pos)}, ${o.age}</span></td>
-        <td>${o.direction === "in" ? '<span class="tag">IN</span>' : '<span class="tag">OUT</span>'}</td>
-        <td class="small">${esc(o.from_club || "—")} → ${esc(o.to_club || "—")}</td>
-        <td class="num">${money(o.fee)}</td><td class="num small">${wk(o.wage)}</td>
-        <td><span class="tag ${o.awaiting_you ? "warn" : ""}">${esc(o.status)}</span>${o.round > 1 ? ' <span class="muted small">r' + o.round + "</span>" : ""}</td>
-        <td class="small muted">${esc(o.note || "")}</td>
-        <td class="row">${o.direction === "out" && o.status === "counter" ? `
-            <button class="btn sm primary" onclick="respondCounter(${o.id},true,${o.fee})">Accept</button>
-            <button class="btn sm" onclick="respondCounter(${o.id},false)">Walk away</button>
-            <button class="btn sm" onclick="respondCounterNew(${o.id},${o.fee})">Re-bid</button>`
-          : (o.direction === "in" && o.status === "pending" ? `
-            <button class="btn sm primary" onclick="bid(${o.id},'accept')">Accept</button>
-            <button class="btn sm" onclick="bid(${o.id},'reject')">Reject</button>` : "")}</td>
-      </tr>`).join("")}</tbody></table></div>` : ""}
-    <div class="card">
-      <div class="row">
-        <div><label>Search</label><input id="tr-q" placeholder="Player name" value="${esc(TR.q)}" style="width:200px"></div>
-        <div><label>Position</label><select id="tr-pos">
-          <option value="">Any</option>${G.static.positions.map(p => `<option ${TR.pos === p ? "selected" : ""}>${p}</option>`).join("")}</select></div>
-        <div><label>Max value (€m)</label><input id="tr-fee" type="number" value="${TR.max_fee || ""}" style="width:120px"></div>
-        <div><label>Max age</label><input id="tr-age" type="number" value="${TR.age_max || ""}" style="width:90px"></div>
-        <div><label>Free agents</label><select id="tr-free"><option value="false" ${!TR.free ? "selected" : ""}>No</option><option value="true" ${TR.free ? "selected" : ""}>Yes</option></select></div>
-        <div><label>Affordable only</label><select id="tr-aff"><option value="true" ${TR.aff !== false ? "selected" : ""}>Yes</option><option value="false" ${TR.aff === false ? "selected" : ""}>No</option></select></div>
-        <div style="align-self:flex-end"><button class="btn primary" onclick="doSearch()">Search</button></div>
-      </div>
+    <div class="sec-h"><h3>Transfers</h3><span class="spacer"></span>
+      <span class="tag ${win ? "ROUTINE" : "URGENT"}">${win ? String(j.window).toUpperCase() + " WINDOW OPEN" : "WINDOW CLOSED"}</span></div>
+    <div class="strip">
+      <div class="st"><span class="st-l">Budget</span><span class="st-v small" style="font-size:14px">${money(j.budget)}</span></div>
+      <div class="st"><span class="st-l">Summer</span><span class="st-v small" style="font-size:12px">${fmtDate(j.windows.open)} → ${fmtDate(j.windows.close)}</span></div>
+      <div class="st"><span class="st-l">Winter</span><span class="st-v small" style="font-size:12px">${fmtDate(j.windows.winter[0])} → ${fmtDate(j.windows.winter[1])}</span></div>
     </div>
-    <div class="card" style="margin-top:12px;padding:0;overflow:auto">
-      <table><thead><tr><th>Pos</th><th>Name</th><th class="num">Age</th><th>Club</th>
-        <th class="num">Stars</th><th class="num">Value</th><th class="num">Wage</th><th class="num">Contract</th><th class="num">Asking</th><th></th></tr></thead>
-      <div class="small muted" style="padding:8px 12px;border-bottom:1px solid var(--line)">
-        Showing players valued up to <b>${money(s.cap)}</b> (your budget is ${money(s.budget)}).
-        Clear the "Max value" box and untick affordable to search the whole world.</div>
-      <tbody>${s.players.map(p => `<tr>
-        <td><span class="pos">${esc(p.pos)}</span></td>
-        <td><a href="#" onclick="go('player',${p.id});return false"><b>${esc(p.name)}</b></a>${p.known < 60 ? ' <span class="tag">scout ' + p.known + "%</span>" : ""}</td>
-        <td class="num">${p.age}</td><td class="small">${esc(p.club || "Free agent")}</td>
-        <td class="num">${stars(p.stars)}</td><td class="num">${money(p.value)}</td>
-        <td class="num small">${wk(p.wage)}</td><td class="num small">${esc(p.contract_end || "—")}</td>
-        <td class="num">${p.asking ? money(p.asking) : '<span class="muted">free</span>'}</td>
-        <td class="row"><button class="btn sm primary" onclick='openOffer(${p.id}, ${JSON.stringify(p.name)}, ${p.asking || 0}, ${p.wage || 0})'>Bid</button>
-        <button class="btn sm ${shortlisted.has(p.id) ? "active" : ""}" title="Toggle shortlist"
-          onclick="toggleShortlist(${p.id})">${shortlisted.has(p.id) ? "★" : "☆"}</button></td>
-      </tr>`).join("")}</tbody></table>
+    ${j.offers.length ? `<div class="card tight" style="border-color:#6b5522">
+      <div class="sec-h"><h3>Incoming bids</h3><span class="spacer"></span><span class="tag URGENT">${j.offers.length}</span></div>
+      ${j.offers.map(o => `<div class="kv" style="align-items:center;flex-wrap:wrap">
+        <span style="min-width:0"><b>${esc(o.player)}</b> <i class="muted small">${esc(o.pos)}, ${o.age} · from ${esc(o.from_club || "—")}</i></span>
+        <b class="small">${money(o.fee)} <i class="muted" style="font-style:normal">/ value ${money(o.value)} · ${wk(o.wage)}</i></b>
+        <span class="row" style="gap:6px;margin-left:auto">
+          <button class="btn sm primary" onclick="bid(${o.id},'accept')">Accept</button>
+          <button class="btn sm" onclick="bid(${o.id},'reject')">Reject</button>
+          <button class="btn sm" onclick="bidCounter(${o.id},${o.fee})">Counter</button></span></div>`).join("")}
+    </div>` : ""}
+    ${(j.my_offers || []).length ? `<div class="card tight" style="margin-top:10px">
+      <div class="sec-h"><h3>Negotiations</h3></div>
+      ${j.my_offers.map(o => `<div class="kv" style="align-items:center;flex-wrap:wrap">
+        <span style="min-width:0"><a href="#" onclick="go('player',${o.player_id});return false"><b>${esc(o.player)}</b></a>
+          <i class="muted small">${o.direction === "in" ? "IN" : "OUT"} · ${esc(o.from_club || "—")} → ${esc(o.to_club || "—")}</i></span>
+        <b class="small"><span class="tag ${o.awaiting_you ? "IMPORTANT" : ""}">${esc(o.status)}</span> ${money(o.fee)} · ${wk(o.wage)}</b>
+        <span class="row" style="gap:6px;margin-left:auto">${o.direction === "out" && o.status === "counter" ? `
+          <button class="btn sm primary" onclick="respondCounter(${o.id},true,${o.fee})">Accept</button>
+          <button class="btn sm" onclick="respondCounter(${o.id},false)">Walk</button>
+          <button class="btn sm" onclick="respondCounterNew(${o.id},${o.fee})">Re-bid</button>`
+          : (o.direction === "in" && o.status === "pending" ? `
+          <button class="btn sm primary" onclick="bid(${o.id},'accept')">Accept</button>
+          <button class="btn sm" onclick="bid(${o.id},'reject')">Reject</button>` : "")}</span>
+        ${o.note ? `<span class="small muted" style="width:100%">${esc(o.note)}</span>` : ""}</div>`).join("")}
+    </div>` : ""}
+
+    <div class="card tight" style="margin-top:10px">
+      <div class="row" style="gap:8px">
+        <input id="tr-q" placeholder="Search players…" value="${esc(TR.q)}" style="flex:1;min-width:140px">
+        <select id="tr-pos" title="Position"><option value="">Pos</option>${G.static.positions.map(p => `<option ${TR.pos === p ? "selected" : ""}>${p}</option>`).join("")}</select>
+        <input id="tr-fee" type="number" placeholder="Max €m" value="${TR.max_fee || ""}" style="width:86px">
+        <input id="tr-age" type="number" placeholder="Age ≤" value="${TR.age_max || ""}" style="width:76px">
+        <select id="tr-free" title="Free agents"><option value="false" ${!TR.free ? "selected" : ""}>Clubbed</option><option value="true" ${TR.free ? "selected" : ""}>Free agents</option></select>
+        <select id="tr-aff" title="Affordable"><option value="true" ${TR.aff !== false ? "selected" : ""}>Affordable</option><option value="false" ${TR.aff === false ? "selected" : ""}>Any value</option></select>
+        <button class="btn primary sm" onclick="doSearch()">Search</button>
+      </div>
+      <div class="small muted" style="margin-top:8px">Showing players valued up to <b>${money(s.cap)}</b> (budget ${money(s.budget)}).</div>
+    </div>
+
+    <div class="sq-list" style="margin-top:10px">
+      ${s.players.map(p => `<div class="sqr" style="cursor:default">
+        <span class="pos">${esc(p.pos)}</span>
+        <span class="sqr-n" style="cursor:pointer" onclick="go('player',${p.id})"><b>${esc(p.name)}</b>${p.known < 60 ? ` <span class="tag">scout ${p.known}%</span>` : ""}
+          <i>${esc(p.club || "Free agent")} · ${p.age}y · ${stars(p.stars)}</i></span>
+        <span class="sqr-r"><span class="small muted" style="text-align:right">${money(p.value)}<br>${wk(p.wage)}</span>
+          <button class="btn sm primary" onclick='openOffer(${p.id}, ${JSON.stringify(p.name)}, ${p.asking || 0}, ${p.wage || 0})'>Bid</button>
+          <button class="btn sm" title="Shortlist" onclick="toggleShortlist(${p.id})">${shortlisted.has(p.id) ? "★" : "☆"}</button></span>
+      </div>`).join("") || '<p class="muted small" style="padding:12px">No matches — widen the search.</p>'}
     </div>`;
 }
 function doSearch() {
@@ -1539,7 +1542,7 @@ async function renderScouting() {
   const j = await api.get("/api/screen/scouting");
   await refreshState();
   $("#content").innerHTML = `
-    <h1>Scouting</h1>
+    <div class="sec-h"><h3>Scouting</h3></div>
     <p class="sub">Knowledge accumulates over time. Assign scouts to regions or individual players to reduce uncertainty — estimated attributes and values come with error bars until knowledge is high.</p>
     <div class="grid g2">
       <div class="card"><h3>Scouts</h3>
@@ -1589,12 +1592,13 @@ async function renderFinances() {
   await refreshState();
   const c = f.club;
   $("#content").innerHTML = `
-    <h1>Finances</h1>
-    <div class="grid g4">
-      <div class="card"><div class="stat-l">Cash</div><div class="stat ${c.cash < 0 ? "" : ""}" style="${c.cash < 0 ? "color:var(--bad)" : ""}">${money(c.cash)}</div></div>
-      <div class="card"><div class="stat-l">Balance (season)</div><div class="stat small" style="${c.balance < 0 ? "color:var(--bad)" : ""}">${money(c.balance)}</div></div>
-      <div class="card"><div class="stat-l">Debt</div><div class="stat small">${money(c.debt)}</div></div>
-      <div class="card"><div class="stat-l">Transfer budget</div><div class="stat small">${money(c.transfer_budget)}</div></div>
+    <div class="sec-h"><h3>Finances</h3></div>
+    <div class="strip">
+      <div class="st"><span class="st-l">Cash</span><span class="st-v ${c.cash < 0 ? "bad" : ""}">${money(c.cash)}</span></div>
+      <div class="st"><span class="st-l">Season balance</span><span class="st-v ${c.balance < 0 ? "bad" : "good"}">${money(c.balance)}</span></div>
+      <div class="st"><span class="st-l">Debt</span><span class="st-v">${money(c.debt)}</span></div>
+      <div class="st"><span class="st-l">Transfer budget</span><span class="st-v">${money(c.transfer_budget)}</span></div>
+      <div class="st"><span class="st-l">Wage budget</span><span class="st-v small" style="font-size:13px">${money(c.wage_budget)}/yr</span></div>
     </div>
     <div class="grid g2" style="margin-top:12px">
       <div class="card"><h3>Monthly accounts</h3>
@@ -1654,7 +1658,7 @@ async function renderStaff() {
   const j = await api.get("/api/screen/staff");
   await refreshState();
   $("#content").innerHTML = `
-    <h1>Staff</h1>
+    <div class="sec-h"><h3>Staff</h3></div>
     <p class="sub">Coaching quality drives training gains. Scouting quality drives knowledge. Physios reduce injury time.</p>
     <div class="card" style="padding:0;overflow:auto">
       <table><thead><tr><th>Name</th><th>Role</th><th class="num">Age</th><th class="num">Att</th>
@@ -1675,7 +1679,7 @@ async function renderYouth() {
   const j = await api.get("/api/screen/youth");
   await refreshState();
   $("#content").innerHTML = `
-    <h1>Academy</h1>
+    <div class="sec-h"><h3>Academy</h3></div>
     <p class="sub">Youth recruitment ${j.rating}/20 · facilities ${j.facilities}/20. A new intake signs each summer; the best prospects are listed first.</p>
     <div class="card" style="padding:0;overflow:auto">
       <table><thead><tr><th>Name</th><th class="num">Age</th><th>Pos</th><th class="num">CA</th>
@@ -1694,7 +1698,7 @@ async function renderCalendar() {
   const j = await api.get("/api/screen/calendar");
   await refreshState();
   $("#content").innerHTML = `
-    <h1>Calendar</h1>
+    <div class="sec-h"><h3>Calendar</h3></div>
     <p class="sub">Season ${G.home.season_label} · all your fixtures, played and upcoming.</p>
     <div class="card" style="padding:0;overflow:auto">
       <table><thead><tr><th>Date</th><th>Competition</th><th>Home</th><th class="num">Score</th><th>Away</th><th>Venue</th><th></th></tr></thead>
@@ -1714,8 +1718,7 @@ async function renderTable() {
   await refreshState();
   if (!j.comp) { $("#content").innerHTML = "<h1>League</h1><p class='muted'>No league.</p>"; return; }
   $("#content").innerHTML = `
-    <h1>${esc(j.comp.name)}</h1>
-    <p class="sub">Season ${G.home.season_label} · ${j.prom_spots} promotion place(s), ${j.rel_spots} relegation place(s)</p>
+    <div class="sec-h"><h3>${esc(j.comp.name)}</h3><span class="spacer"></span><span class="hint">${G.home.season_label} · ${j.prom_spots} up / ${j.rel_spots} down</span></div>
     <div class="card" style="padding:0;overflow:auto">
       <table><thead><tr><th class="num">#</th><th>Club</th><th class="num">P</th><th class="num">W</th>
         <th class="num">D</th><th class="num">L</th><th class="num">GF</th><th class="num">GA</th>
@@ -1851,7 +1854,7 @@ async function renderBoard() {
   await refreshState();
   if (j.unemployed) return renderJobs();
   $("#content").innerHTML = `
-    <h1>Board</h1>
+    <div class="sec-h"><h3>Board</h3></div>
     <p class="sub">Job security: <b>${esc(j.job_security)}</b></p>
     <div class="grid g2">
       <div class="card"><h3>Confidence</h3>
@@ -1895,7 +1898,7 @@ async function renderMedia() {
   const j = await api.get("/api/screen/media");
   await refreshState();
   $("#content").innerHTML = `
-    <h1>Media</h1>
+    <div class="sec-h"><h3>Media</h3></div>
     <p class="sub">Narrative: <b>${esc(j.narrative || "—")}</b> · pressure ${Math.round(j.pressure || 0)}/100</p>
     <div class="card" style="margin-bottom:12px"><h3>Press conference</h3>
       <p class="small muted">Your answers move board confidence, fan sentiment and media pressure.</p>
@@ -1924,16 +1927,17 @@ async function renderCareer() {
   const j = await api.get("/api/screen/career");
   await refreshState();
   $("#content").innerHTML = `
-    <h1>Career</h1>
+    <div class="sec-h"><h3>Career</h3></div>
     <p class="sub">${esc(j.manager.name)} · ${esc(j.manager.nat)} · reputation ${j.reputation}/95 · ${esc(j.difficulty)} difficulty</p>
-    <div class="grid g3">
-      <div class="card"><div class="stat-l">Current club</div>
-        <div class="stat small">${j.club ? esc(j.club.name) : "Unemployed"}</div>
-        <div class="small muted">${j.club ? esc(j.club.league) : "Available for appointment"}</div></div>
-      <div class="card"><div class="stat-l">Trophies</div><div class="stat">${j.trophies.length}</div>
-        <div class="small muted">${j.trophies.slice(0, 3).map(t => esc(t.comp)).join(", ") || "none yet"}</div></div>
-      <div class="card"><div class="stat-l">Seasons managed</div><div class="stat">${j.season - 2026 + 1}</div>
+    <div class="strip">
+      <div class="st"><span class="st-l">Club</span><span class="st-v small" style="font-size:14px">${j.club ? esc(j.club.name) : "Unemployed"}</span>
+        <div class="small muted">${j.club ? esc(j.club.league) : "available"}</div></div>
+      <div class="st"><span class="st-l">Trophies</span><span class="st-v">${j.trophies.length}</span>
+        <div class="small muted">${j.trophies.slice(0, 2).map(t => esc(t.comp)).join(", ") || "none yet"}</div></div>
+      <div class="st"><span class="st-l">Seasons</span><span class="st-v">${j.season - 2026 + 1}</span>
         <div class="small muted">since ${fmtDate(j.created)}</div></div>
+      <div class="st"><span class="st-l">Reputation</span><span class="st-v">${j.reputation}</span>
+        <div class="small muted">of 95</div></div>
     </div>
     <div class="grid g2" style="margin-top:12px">
       <div class="card"><h3>Club history</h3>
