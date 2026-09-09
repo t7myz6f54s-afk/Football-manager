@@ -116,3 +116,15 @@ python3 tests/season_test.py WXC 3        # 3 full seasons, ~290 s
 - A modern browser
 
 No Android Studio, no Node, no npm, no database server, no cloud service.
+
+---
+
+## Android (offline APK)
+
+A standalone build of the same game is published as a release asset:
+
+**[Touchline-1.0-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/tag/v1.0.0-android)** — 11.8 MB, Android 7.0+, 64-bit ARM.
+
+It embeds CPython (Chaquopy) and runs `fm/` unmodified on `127.0.0.1` inside a WebView, so the
+whole simulation works with no internet connection. Career saves live in app-private storage.
+Build it yourself with `cd android && ./make_apk.sh` — see [android/README.md](android/README.md).
