@@ -39,3 +39,8 @@ Design tokens in style.css; nav restructure (bottom bar: Home/Squad/Tactics/Matc
 - Phase 4 DONE: matchday premium: pre-match hero (comp band/crests/form/venue/XI/bench), animated live clock w/ event feed + skip, HT (stats duo, incidents, talk, subs), FT full-screen (score hero, MOTM, stats, events, player ratings, aftermath).
 - Bugs fixed: stroke icons, topbar <small>, g2 mobile stacking, HT/FT stat key aliases (poss/possession).
 - Next: Phase 5 competition identities + hubs.
+
+## Update ~00:15 UTC
+- Phases 5-8 DONE: comp hubs+identities, club hub, nav restructure (Dashboard/Squad/Tactics/Matches/Comps tabs + More sheet), profile redesign (avatar/strip/attr bars/recent perfs), squad overview+compact list, tactics effect notes, transfers/training/career/finances rebuilds, global input/select styling, tcard label fix.
+- Audits: 16 screens @393px zero JS errors zero h-overflow; season_test passed post engine changes.
+- Next: APK dry-run, desktop pass, inbox detail polish, final regression, then final-hour APK v1.6.0 code 8 + release.
