@@ -1287,7 +1287,24 @@ async function playMatch(mode) {
   G.busy = false; setBusy(false);
 }
 function showHalftime(st) {
-  if (!st) return;
+  if (!st) {
+    const C = G.codes || {};
+    $("#content").innerHTML = `
+      <div class="mhero" style="--comp:${compColor(C.comp)}">
+        <div class="mhero-top"><span class="comp-dot"></span><span>${esc(C.compName || "Match")}</span>
+          <span class="spacer"></span><span>HALF-TIME</span></div>
+        <div style="padding:16px 14px 18px">
+          <h2 style="margin:0 0 6px">Match paused at half-time</h2>
+          <p class="small muted" style="margin:0 0 14px">The break survived, but your notes did not.
+            Resume with no changes, or let the engine finish it.</p>
+          <div class="row">
+            <button class="btn primary" onclick="submitHalftime(true)">Send them back out ▸</button>
+            <button class="btn" onclick="resumeMatch()">Auto-finish</button>
+          </div>
+        </div>
+      </div>`;
+    return;
+  }
   window._ht = st;
   const C = G.codes || {};
   $("#content").innerHTML = `
@@ -1376,10 +1393,12 @@ async function submitHalftime(noChange) {
     await refreshState();
     if (G.matchMode === "full") {
       const st = window._ht;
-      const second = (j.result.events || []).filter(e => e.minute > 45);
-      liveScreen({ events: second, base: [st.score.home, st.score.away], startMin: 45, endMin: 90,
-        label: "full-time", homeShort: st.home_short || st.home_name, awayShort: st.away_short || st.away_name },
-        () => showResult(j.result));
+      if (st) {
+        const second = (j.result.events || []).filter(e => e.minute > 45);
+        liveScreen({ events: second, base: [st.score.home, st.score.away], startMin: 45, endMin: 90,
+          label: "full-time", homeShort: st.home_short || st.home_name, awayShort: st.away_short || st.away_name },
+          () => showResult(j.result));
+      } else showResult(j.result);
     } else showResult(j.result);
   } catch (e) { toast("Match failed: " + esc(e.message), 6000); }
   G.busy = false; setBusy(false);
