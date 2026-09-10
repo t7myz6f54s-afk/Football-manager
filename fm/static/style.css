@@ -318,9 +318,11 @@ tbody tr.tap { cursor: pointer; } tbody tr.tap:active td { background: var(--sf2
 .coach p { color: var(--tx2); font-size: 13px; margin-bottom: 10px; }
 
 /* ---------------------------------------------------------- crest system */
-.crest { width: 26px; height: 26px; flex: none; }
+.crest { width: 26px; height: 26px; flex: none; box-sizing: border-box;
+  background: #eef1f4; border-radius: 7px; padding: 2px; }
 .crest.lg { width: 44px; height: 44px; }
 .crest.xl { width: 62px; height: 62px; }
+img.crest { object-fit: contain; background: transparent; }
 .crest svg { width: 100%; height: 100%; display: block; }
 .cellclub { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .cellclub > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

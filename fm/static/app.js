@@ -85,6 +85,7 @@ async function boot() {
     $("#splash-msg").textContent = "Loading engine data…";
     G.boot = await api.get("/api/boot");
     G.static = G.boot.static;
+  try { REAL_CRESTS = await (await fetch("static/crests.json", { cache: "force-cache" })).json(); } catch (e) { REAL_CRESTS = {}; }
     if (G.boot.has_save) {
       $("#splash-msg").textContent = "Loading career…";
       await enterGame();
@@ -2195,7 +2196,13 @@ const CREST = {
   FEN:["#FFED00","#003050","stripes"], BOC:["#0033A0","#FFB800","sash"], RIV:["#FFFFFF","#E32219","sash"],
 };
 let CREST_N = 0;
+let REAL_CRESTS = {};
 function crest(code, cls) {
+  const u = REAL_CRESTS[code || ""];
+  if (u) return `<img class="crest${cls ? " " + cls : ""}" src="${u}" alt="" loading="lazy" onerror="this.outerHTML=crestSVG('${code}','${cls || ''}')">`;
+  return crestSVG(code, cls);
+}
+function crestSVG(code, cls) {
   code = code || "";
   const c = CREST[code];
   let c1, c2, pat, txt = "";
