@@ -64,3 +64,9 @@ Design tokens in style.css; nav restructure (bottom bar: Home/Squad/Tactics/Matc
 ## Incident ~00:18 UTC (resolved)
 - A range-based edit (staff/youth commit 950d768) used an end-anchor that sat BEFORE its start anchor, duplicating then deleting renderCalendar/renderTable/renderComps/renderCompHub/renderClub. Detected via missing-function grep; restored verbatim from commit 292ccce; audit2 re-run clean; pushed.
 - GUARD ADDED: tests/ui_sanity.js fails if any go() screen lacks a definition, any onclick handler is undefined, or key CSS hooks vanish. Run before every commit from now on.
+
+## Update ~02:30 UTC (hold cycle 3)
+- Six-matchday API playthrough (now Oct 30): La Liga table live (RMA 1st, 28pts), world clubs diverge; dashboard/media/calendar verified mid-season; CONTINUE stress avg 118ms, save 3KB.
+- README gained "What changed in 1.6" section + APK link bump (v1.6.0 tag).
+- Harness lesson: pass screen names verbatim to go(); 'name'.split('-')[1] yielded undefined → "Loading..." false alarm.
+- Pushed: README + mh commits.
