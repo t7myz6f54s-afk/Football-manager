@@ -147,12 +147,27 @@ No Android Studio, no Node, no npm, no database server, no cloud service.
 
 ---
 
+## What changed in 1.7 — PREMIUM "no more shite"
+
+Massive overhaul addressing every feedback point:
+
+- **Realism fixed**: Elite bonus (CA 16+ = 1.12x per point), weak penalty, AI sim ratio**1.35, rep bonuses, genuine tables — Fulham (rep 75) cannot top PL, superteam stacking blocked (Haaland won't join United from City)
+- **Transfers premium**: Glassmorphism cards, player avatars, one-tap selling (Sell 💸 button in squad + quick sell modal), realistic negotiations — rivalry blocks 65% reject (Ars↔Tot, MCI↔MUN, etc), superstar protection CA18.5+ at rep85+ clubs, loyalty matters, contract length 1.35x, young elite 1.35x, player willingness considers wage/ambition/loyalty/rivalry fear
+- **Friendlies realistic**: Rotated squads — youth 2-4, reserves 4-5, first team 3-5 for elite, low intensity 72% chance rate, 85% if elite, premium UI explains rotation
+- **Match animations VISIBLE**: Cinematic VAR full-screen with pulse, 3D card flips 600ms with haptics, goal flashes with crest + glow + screen shake, live feed slide animations — impossible to miss during full match
+- **Inbox premium**: Icons, previews, NEW pulse dots, international break 🌍 briefings with call-up names, derby 🔥 banners, press quotes, empty state illustration — makes you want to read
+- **Matchday premium**: Derby detection with shimmer banner, rivalry tags, press hype pre-match conferences with meaningful choices (affects board/fans/morale), competition gradients with glow, form pills, premium hero cards
+- **International breaks meaningful**: Inbox notifications entering/exiting, 3-7 players called up, fatigue/injury on return, scouting opportunity (foreign leagues continue), home banner with actions
+- **Rivalries/derbies realistic**: 40+ rivalries map, DERBY_NAMES, transfer blocks, match hype, press conferences reference derby importance
+
+---
+
 ## Android (offline APK)
 
 A standalone build of the same game is published as a release asset:
 
-**[Touchline-1.6.2-FIXED-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/tag/v1.6.2)** — ~14 MB, Android 7.0+, 64-bit ARM.
-Phone layout: bottom tab bar, card lists, offline play.
+**[Touchline-1.7.0-PREMIUM-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.7.0-PREMIUM/Touchline-1.7.0-PREMIUM-arm64.apk)** — ~14 MB, Android 7.0+, 64-bit ARM, versionCode 10.
+Premium: glassmorphism, elite gradients, cinematic matchday, easy selling, realistic transfers, friendly rotation, international breaks meaningful.
 
 It embeds CPython (Chaquopy) and runs `fm/` unmodified on `127.0.0.1` inside a WebView, so the
 whole simulation works with no internet connection. Career saves live in app-private storage.
