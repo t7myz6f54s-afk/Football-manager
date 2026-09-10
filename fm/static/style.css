@@ -554,3 +554,6 @@ tbody tr.tap { cursor: pointer; } tbody tr.tap:active td { background: var(--sf2
   font-variant-numeric: tabular-nums; }
 tbody tr.zp td:first-child { box-shadow: inset 2px 0 0 var(--blue); }
 tbody tr.zr td:first-child { box-shadow: inset 2px 0 0 var(--red); }
+.chip.tap, #tb-club.tap { cursor: pointer; }
+.chip.tap:active { background: var(--sf3); }
+#tb-club { cursor: pointer; }

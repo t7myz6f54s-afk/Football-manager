@@ -78,6 +78,10 @@ const bar = (v, cls) => `<div class="bar ${cls || ""}"><i style="width:${pct(v)}
 async function boot() {
   try {
     const v = $("#ver"); if (v) v.textContent = "v" + VERSION;
+    [["#tb-budget", "finances"], ["#tb-board", "board"], ["#tb-next", "match"], ["#tb-club", "club"]].forEach(([sel, sc]) => {
+      const el = $(sel); if (!el) return;
+      el.classList.add("tap"); el.onclick = () => { if (!document.body.classList.contains("pregame")) go(sc); };
+    });
     $("#splash-msg").textContent = "Loading engine data…";
     G.boot = await api.get("/api/boot");
     G.static = G.boot.static;
