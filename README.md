@@ -11,6 +11,34 @@ information, no artificial drama.
 
 ---
 
+## What changed in 1.6 — "kill the clunk"
+
+A ground-up interface rebuild on a single design system (tokens for colour, type, spacing,
+radii and motion; compact rows, dividers and tables instead of card walls):
+
+- **Design system** — one dark palette, one accent, 4px spacing grid, tabular numerals,
+  120–180 ms motion only where it means something.
+- **Club crests** — procedural shields in real club colours for 100+ clubs (stripes, halves,
+  sashes, hoops), consistent in the top bar, tables, fixtures, matchday, hubs and news.
+- **Dashboard = command centre** — next-match hero, status strip (position, points, form,
+  board, fans, cash), squad readiness, board objectives, mini table and inbox preview.
+- **Matchday** — competition-branded pre-match hero (crests, form, venue, XI, bench),
+  an animated live clock with event graphics (goal + scorer + running score, cards, subs),
+  half-time with stats and team talk, full-time with MOTM, stats duo and player ratings.
+- **Competition identities** — UCL, Europa, Premier League, La Liga, Serie A, Bundesliga,
+  Ligue 1 and cups each carry a colour + monogram through headers, hubs and brackets.
+- **Navigation** — Dashboard / Squad / Tactics / Matches / Competitions on the bar,
+  everything else one tap away in the sheet (phone) or sidebar (desktop).
+- **Player profiles** — avatar header, ability/potential/condition/form strip, attribute
+  bars, season record, cards, recent performances with ratings, contract and man-management.
+- **Squad screen** — availability strip (fit/injured/suspended/unfit), form & weak-spot
+  notes, compact rows on phones, full table on desktop, live name filter.
+
+Everything else from 1.5 remains: real 2025/26 squads for 96 big-five clubs, Godfather Mode
+advisor, and the full simulation beneath it.
+
+---
+
 ## Quick start
 
 Zero dependencies — Python 3 standard library only (no pip install, no framework, no database server).
@@ -123,7 +151,7 @@ No Android Studio, no Node, no npm, no database server, no cloud service.
 
 A standalone build of the same game is published as a release asset:
 
-**[Touchline-1.5.0-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/tag/v1.5.0)** — 13.5 MB, Android 7.0+, 64-bit ARM.
+**[Touchline-1.6.0-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/tag/v1.6.0)** — ~14 MB, Android 7.0+, 64-bit ARM.
 Phone layout: bottom tab bar, card lists, offline play.
 
 It embeds CPython (Chaquopy) and runs `fm/` unmodified on `127.0.0.1` inside a WebView, so the
