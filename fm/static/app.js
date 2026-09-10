@@ -86,6 +86,7 @@ async function boot() {
     G.boot = await api.get("/api/boot");
     G.static = G.boot.static;
   try { REAL_CRESTS = await (await fetch("static/crests.json", { cache: "force-cache" })).json(); } catch (e) { REAL_CRESTS = {}; }
+  try { REAL_COMPS = await (await fetch("static/comps.json", { cache: "force-cache" })).json(); } catch (e) { REAL_COMPS = {}; }
     if (G.boot.has_save) {
       $("#splash-msg").textContent = "Loading career…";
       await enterGame();
@@ -505,15 +506,34 @@ function compLabel(f) {
 }
 function compColor(code) {
   code = code || "";
-  if (code === "UCL") return "var(--ucl)";
-  if (code === "UEL" || code === "UECL") return "var(--blue)";
-  if (code.includes("CUP") || code.includes("POKAL") || code.includes("COUPE")) return "var(--gold)";
-  if (code.startsWith("ENG")) return "var(--pl)";
-  if (code.startsWith("ESP")) return "var(--liga)";
-  if (code.startsWith("ITA")) return "var(--serie)";
-  if (code.startsWith("GER")) return "var(--bund)";
-  if (code.startsWith("FRA")) return "var(--l1)";
-  return "var(--acc)";
+  if (code === "UCL") return "#2a5bd7";
+  if (code === "UEL") return "#ff6900";
+  if (code === "UECL") return "#00b050";
+  if (code === "FACUP") return "#ff4444";
+  if (code === "EFLCUP") return "#00c851";
+  if (code.includes("CUP") || code.includes("POKAL") || code.includes("COUPE")) return "#ffb454";
+  if (code === "ENG1") return "#37003c";
+  if (code.startsWith("ENG")) return "#37003c";
+  if (code.startsWith("ESP")) return "#ff4b44";
+  if (code.startsWith("ITA")) return "#008c99";
+  if (code.startsWith("GER")) return "#d20515";
+  if (code.startsWith("FRA")) return "#091c3e";
+  return "#35e08a";
+}
+function compClass(code) {
+  code = code || "";
+  if (code === "UCL") return "comp-UCL";
+  if (code === "UEL") return "comp-UEL";
+  if (code === "UECL") return "comp-UECL";
+  if (code === "FACUP") return "comp-FACUP";
+  if (code === "EFLCUP") return "comp-EFLCUP";
+  if (code === "ENG1") return "comp-ENG1";
+  if (code.startsWith("ENG")) return "comp-ENG1";
+  if (code.startsWith("ESP")) return "comp-ESP1";
+  if (code.startsWith("ITA")) return "comp-ITA1";
+  if (code.startsWith("GER")) return "comp-GER1";
+  if (code.startsWith("FRA")) return "comp-FRA1";
+  return "";
 }
 function formPills(form, n) {
   return (form || []).slice(0, n || 6).map(x =>
@@ -537,8 +557,8 @@ async function renderHome() {
       <td><span class="cellclub">${crest(r.code)}<span>${esc(r.name)}</span></span></td>
       <td class="num muted">${r.p}</td><td class="num"><b>${r.pts}</b></td></tr>`;
   $("#content").innerHTML = `
-    ${f ? `<div class="mhero" style="--comp:${compColor(f.code)}">
-      <div class="mhero-top"><span class="comp-dot"></span><span>${esc(compLabel(f))}${f.stage && f.stage !== "league" && f.comp ? " · " + esc(f.stage) : ""}</span><span class="spacer"></span><span>${fmtDate(f.date)}</span></div>
+    ${f ? `<div class="mhero ${compClass(f.code)}" style="--comp:${compColor(f.code)}">
+      <div class="mhero-top">${compLogo(f.code)}<span class="comp-dot"></span><span>${esc(compLabel(f))}${f.stage && f.stage !== "league" && f.comp ? " · " + esc(f.stage) : ""}</span><span class="spacer"></span><span>${fmtDate(f.date)}</span></div>
       <div class="mhero-body">
         <div class="mhero-club">${crest(f.home_code, "xl")}<div class="nm">${esc(f.home)}</div></div>
         <div class="mhero-mid"><div class="vs">VS</div><div class="when">${f.is_home ? "HOME" : "AWAY"}</div><div class="venue">${esc(f.venue || "")}</div></div>
@@ -1171,10 +1191,16 @@ async function setTraining(day, session, focus) {
 /* -------------------------------------------------------------------- MATCH */
 let MATCH = null;
 /* ------------------------------------------------------------------ MATCHDAY */
-function evIcon(t) {
+function evIcon(t, e) {
   if (t === "goal") return ["ev-goal", "G"];
   if (t === "yellow") return ["ev-card", "Y"];
   if (t === "red") return ["ev-red", "R"];
+  if (t === "var") {
+    if (e && e.stage === "overturn" && e.decision === "disallowed") return ["ev-var disallow", "✕"];
+    if (e && e.stage === "confirmed") return ["ev-var confirm", "✓"];
+    return ["ev-var", "VAR"];
+  }
+  if (t === "var_disallowed") return ["ev-var disallow", "✕"];
   if (t === "sub") return ["ev-sub", "S"];
   if (t === "injury") return ["ev-info", "+"];
   if (t === "penalties") return ["ev-info", "P"];
@@ -1192,7 +1218,7 @@ function scoreEvents(evs, base) {
   });
 }
 function evRow(e) {
-  const [cls, ic] = evIcon(e.type);
+  const [cls, ic] = evIcon(e.type, e);
   return `<div class="ev ${cls}"><span class="min">${e.minute}'</span><span class="ei">${ic}</span>
     <div class="et">${esc(e.text || (e.type === "shot" ? `${e.player || ""} — ${e.outcome || "chance"}${e.xg != null ? " (xG " + e.xg + ")" : ""}` : e.type))}${e._sc ? ` <span class="escore">${e._sc}</span>` : ""}</div></div>`;
 }
@@ -1217,6 +1243,33 @@ function goalFlash(e) {
   document.body.appendChild(el);
   setTimeout(() => el.classList.add("out"), 2200);
   setTimeout(() => el.remove(), 2700);
+}
+function varFlash(e) {
+  const stage = e.stage || "check";
+  const isConfirm = stage === "confirmed" || e.decision === "goal";
+  const isDisallow = stage === "overturn" || e.decision === "disallowed" || e.type === "var_disallowed";
+  const el = document.createElement("div");
+  el.className = "varflash";
+  const boxCls = isConfirm ? "confirm" : isDisallow ? "disallow" : "";
+  const iconTxt = isConfirm ? "✓" : isDisallow ? "✕" : "VAR";
+  const title = stage === "check" ? "VAR CHECK" : isConfirm ? "GOAL CONFIRMED" : "GOAL DISALLOWED";
+  el.innerHTML = `<div class="varbox ${boxCls}"><div class="var-icon">${iconTxt}</div>
+    <div class="var-t">${title}</div>
+    <div class="var-sub">${esc(e.player || "")}${e.reason ? " · " + esc(e.reason) : ""}</div>
+    ${e.text ? `<div class="var-reason">${esc(e.text)}</div>` : ""}</div>`;
+  document.body.appendChild(el);
+  setTimeout(() => el.classList.add("out"), stage === "check" ? 1600 : 2200);
+  setTimeout(() => el.remove(), stage === "check" ? 2000 : 2700);
+}
+function cardFlash(e) {
+  const isRed = e.type === "red";
+  const el = document.createElement("div");
+  el.className = "cardflash";
+  el.innerHTML = `<div class="cf-card ${isRed ? "red" : "yellow"}">${isRed ? "🟥" : "🟨"}</div>
+    <div class="cf-info"><b>${esc(e.player || "")}</b><br><span class="small muted">${esc(e.text || (isRed ? "RED CARD" : "YELLOW CARD"))}</span></div>`;
+  document.body.appendChild(el);
+  setTimeout(() => el.classList.add("out"), 1800);
+  setTimeout(() => el.remove(), 2300);
 }
 function statDuo(a, b, label, fmt) {
   const f = fmt || (x => x);
@@ -1255,8 +1308,8 @@ async function renderMatch() {
   const myForm = p.my.form || [], opForm = p.opp.form || [];
   const hForm = f.is_home ? myForm : opForm, aForm = f.is_home ? opForm : myForm;
   $("#content").innerHTML = `
-    <div class="mhero" style="--comp:${compColor(f.code)}">
-      <div class="mhero-top"><span class="comp-dot"></span><span>${esc(compLabel(f))}${f.stage && f.stage !== "league" && f.comp ? " · " + esc(f.stage) : ""}</span><span class="spacer"></span><span>${fmtDate(f.date)}</span></div>
+    <div class="mhero ${compClass(f.code)}" style="--comp:${compColor(f.code)}">
+      <div class="mhero-top">${compLogo(f.code)}<span class="comp-dot"></span><span>${esc(compLabel(f))}${f.stage && f.stage !== "league" && f.comp ? " · " + esc(f.stage) : ""}</span><span class="spacer"></span><span>${fmtDate(f.date)}</span></div>
       <div class="mhero-body">
         <div class="mhero-club">${crest(f.home_code, "xl")}<div class="nm">${esc(f.home)}</div>
           <div class="fm">${formPills(hForm, 5)}</div></div>
@@ -1304,8 +1357,8 @@ function liveScreen(cfg, onDone) {
   const evs = scoreEvents((cfg.events || []).slice().sort((a, b) => a.minute - b.minute), cfg.base);
   const end = cfg.endMin || Math.max(45, ...evs.map(e => e.minute), 1);
   $("#content").innerHTML = `
-    <div class="mhero" style="--comp:${compColor(C.comp)}">
-      <div class="mhero-top"><span class="comp-dot"></span><span>${esc(C.compName || "Match")}${C.stage && C.stage !== "league" ? " · " + esc(C.stage) : ""}</span><span class="spacer"></span><span>LIVE</span></div>
+    <div class="mhero ${compClass(C.comp)}" style="--comp:${compColor(C.comp)}">
+      <div class="mhero-top">${compLogo(C.comp)}<span class="comp-dot"></span><span>${esc(C.compName || "Match")}${C.stage && C.stage !== "league" ? " · " + esc(C.stage) : ""}</span><span class="spacer"></span><span>LIVE</span></div>
       <div class="live-bar" style="border:0;border-radius:0;background:linear-gradient(90deg, ${hexA(clubCol(G.codes.home,0),.18)}, rgba(0,0,0,0) 38%, rgba(0,0,0,0) 62%, ${hexA(clubCol(G.codes.away,0),.18)})">
         <span class="lb-team">${crest(C.home)}<b>${esc(cfg.homeShort || "")}</b></span>
         <span class="lb-mid"><span class="lscore" id="lv-score">${cfg.base[0]} – ${cfg.base[1]}</span>
@@ -1323,10 +1376,17 @@ function liveScreen(cfg, onDone) {
     const em = feed.querySelector(".lv-empty"); if (em) em.remove();
     feed.insertAdjacentHTML("afterbegin", evRow(e));
     if (e.type === "goal") goalFlash(e);
+    if (e.type === "var" || e.type === "var_disallowed") varFlash(e);
+    if (e.type === "yellow" || e.type === "red") cardFlash(e);
     if (e.type === "goal") {
       if (e._sc) scoreEl.textContent = e._sc.replace("–", " – ");
       else { if ((e.side === "H") === true) sc[0]++; else if (e.side === "A") sc[1]++; scoreEl.textContent = sc[0] + " – " + sc[1]; }
       scoreEl.animate([{ transform: "scale(1.25)" }, { transform: "scale(1)" }], { duration: 260 });
+    }
+    if (e.type === "var_disallowed") {
+      // VAR overturned - if score was previously increased, decrement visually
+      if (e.side === "H" && sc[0] > cfg.base[0]) sc[0]--; else if (e.side === "A" && sc[1] > cfg.base[1]) sc[1]--;
+      scoreEl.textContent = sc[0] + " – " + sc[1];
     }
   };
   const finish = () => { clearInterval(timer); while (i < evs.length) push(evs[i++]); clock.textContent = end + "'"; setTimeout(onDone, 500); };
@@ -1364,8 +1424,8 @@ function showHalftime(st) {
   if (!st) {
     const C = G.codes || {};
     $("#content").innerHTML = `
-      <div class="mhero" style="--comp:${compColor(C.comp)}">
-        <div class="mhero-top"><span class="comp-dot"></span><span>${esc(C.compName || "Match")}</span>
+      <div class="mhero ${compClass(C.comp)}" style="--comp:${compColor(C.comp)}">
+        <div class="mhero-top">${compLogo(C.comp)}<span class="comp-dot"></span><span>${esc(C.compName || "Match")}</span>
           <span class="spacer"></span><span>HALF-TIME</span></div>
         <div style="padding:16px 14px 18px">
           <h2 style="margin:0 0 6px">Match paused at half-time</h2>
@@ -1490,11 +1550,13 @@ function showResult(r) {
     : r.mode === "key" ? relevant.filter(e => ["goal", "red", "injury", "sub", "halftime", "kickoff", "team_talk", "penalties"].includes(e.type))
     : relevant;
   const C = G.codes || {};
-  const hCode = C.home || "", aCode = C.away || "";
+  const hCode = r.home_code || C.home || "", aCode = r.away_code || C.away || "";
+  // update G.codes to match actual result to prevent stale cache
+  G.codes = { home: hCode, away: aCode, comp: r.comp_code || r.code || C.comp, compName: r.comp || C.compName, stage: C.stage, venue: C.venue, date: C.date };
   const motm = (r.players || []).find(p => p.pid === r.motm);
   $("#content").innerHTML = `
-    <div class="mhero" style="--comp:${compColor(C.comp)};background:linear-gradient(103deg, ${hexA(clubCol(hCode,0),.15)}, rgba(0,0,0,0) 45%, rgba(0,0,0,0) 55%, ${hexA(clubCol(aCode,1),.15)})">
-      <div class="mhero-top"><span class="comp-dot"></span><span>${esc(r.comp || C.compName || "Match")}${C.stage && C.stage !== "league" && r.comp ? " · " + esc(C.stage) : ""}</span><span class="spacer"></span><span>FULL-TIME</span></div>
+    <div class="mhero ${compClass(C.comp || r.code)}" style="--comp:${compColor(C.comp)};background:linear-gradient(103deg, ${hexA(clubCol(hCode,0),.15)}, rgba(0,0,0,0) 45%, rgba(0,0,0,0) 55%, ${hexA(clubCol(aCode,1),.15)})">
+      <div class="mhero-top">${compLogo(C.comp || r.code)}<span class="comp-dot"></span><span>${esc(r.comp || C.compName || "Match")}${C.stage && C.stage !== "league" && r.comp ? " · " + esc(C.stage) : ""}</span><span class="spacer"></span><span>FULL-TIME</span></div>
       <div class="mhero-body">
         <div class="mhero-club">${crest(hCode, "xl")}<div class="nm">${esc(r.home)}</div></div>
         <div class="mhero-mid"><div class="score" style="font-size:34px">${r.hg} – ${r.ag}</div>
@@ -1846,8 +1908,8 @@ async function renderCalendar() {
     <div class="sq-list" style="display:flex">
       ${j.fixtures.map(f => {
         const next = !f.played && f.date === nextDate;
-        return `<div class="fxr ${next ? "next" : ""}">
-          <span class="fx-d"><b>${fmtDate(f.date).replace(/, \d{4}$/, "")}</b><i>${esc(compLabel(f))}${f.stage && f.stage !== "league" && f.comp ? " · " + esc(f.stage) : ""}</i></span>
+        return `<div class="fxr ${next ? "next" : ""} ${compClass(f.code)}">
+          <span class="fx-d"><b>${fmtDate(f.date).replace(/, \d{4}$/, "")}</b><i>${compLogo(f.code)} ${esc(compLabel(f))}${f.stage && f.stage !== "league" && f.comp ? " · " + esc(f.stage) : ""}</i></span>
           <span class="fx-m">${crest(f.home_code)}<b>${esc(f.home_short || f.home)}</b>
             <span class="fx-s">${f.played ? (f.hg != null ? f.hg + "–" + f.aw : "—") : "v"}</span>
             <b>${esc(f.away_short || f.away)}</b>${crest(f.away_code)}</span>
@@ -1890,8 +1952,9 @@ function compMono(code) {
   return String(code || "?").slice(0, 3);
 }
 function compBand(c, right) {
+  const logo = compLogo(c.code, "lg");
   return `<div class="comp-band" style="--comp:${compColor(c.code)}">
-    <span class="ci">${esc(compMono(c.code))}</span>
+    ${logo}
     <span style="min-width:0"><b>${esc(c.name)}</b><br><span class="sub">${esc(c.ctype === "continental" ? "Europe" : c.ctype === "cup" ? "Knockout cup" : "League")}${c.tier ? " · tier " + c.tier : ""}</span></span>
     <span class="spacer"></span>${right || ""}</div>`;
 }
@@ -2270,6 +2333,12 @@ const CREST = {
 };
 let CREST_N = 0;
 let REAL_CRESTS = {};
+let REAL_COMPS = {};
+function compLogo(code, cls) {
+  const u = REAL_COMPS[code || ""];
+  if (u) return `<img class="comp-logo${cls ? " " + cls : ""}" src="${u}" alt="" loading="lazy">`;
+  return `<span class="ci">${esc(compMono(code))}</span>`;
+}
 function crest(code, cls) {
   const u = REAL_CRESTS[code || ""];
   if (u) return `<img class="crest${cls ? " " + cls : ""}" src="${u}" alt="" loading="lazy" onerror="this.outerHTML=crestSVG('${code}','${cls || ''}')">`;

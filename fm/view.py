@@ -855,6 +855,8 @@ def match_result_view(con, save, data, fx):
                      "shots": _at(shp, i, pid)})
     rows.sort(key=lambda r: -r["rating"])
     return {"home": data["home_name"], "away": data["away_name"],
+            "home_code": data.get("home_code") or fx.get("home_code"),
+            "away_code": data.get("away_code") or fx.get("away_code"),
             "hg": data.get("hg", data.get("goals_home", 0)),
             "ag": data.get("ag", data.get("goals_away", 0)),
             "result": data.get("result") or save.get("last_result", {}).get("result"),
@@ -872,6 +874,8 @@ def match_result_view(con, save, data, fx):
             "motm": data.get("motm"), "injuries": data.get("injuries", []),
             "weather": data.get("weather"), "referee": data.get("referee"),
             "penalties": data.get("penalties"),
-            "comp": fx.get("comp_name"), "date": save["date"],
+            "comp": data.get("comp") or fx.get("comp_name"), "code": data.get("comp_code") or data.get("code") or fx.get("comp_code") or fx.get("code"),
+            "comp_code": data.get("comp_code") or data.get("code") or fx.get("comp_code") or fx.get("code"),
+            "date": save["date"],
             "board_confidence": round(save["board"]["confidence"], 1),
             "fan_sentiment": round(save["fans"]["sentiment"], 1)}

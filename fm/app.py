@@ -352,8 +352,9 @@ def api_continue(payload: dict = Body(default={})):
         stop_for = ("match", "urgent") if until == "match" else ("urgent",)
     days = int(payload.get("days", 7))
     seen = [u["id"] for u in E.unread_urgent(con(), s)]
+    auto_h = (until == "season_end")
     res = E.advance(con(), s, days=days, until=until, stop_for=tuple(stop_for),
-                    rng=S["rng"], ignore_ids=seen)
+                    rng=S["rng"], ignore_ids=seen, auto_human=auto_h)
     commit()
     nf = E.next_fixture(con(), s) if s["club_id"] else None
     return {"ok": True, "date": s["date"], "season": s["season"],
@@ -368,8 +369,10 @@ def api_continue(payload: dict = Body(default={})):
 def api_advance(payload: dict = Body(default={})):
     s = need_save()
     no_pending()
+    until = payload.get("until")
+    auto_h = (until == "season_end")
     res = E.advance(con(), s, days=int(payload.get("days", 1)),
-                    until=payload.get("until"), rng=S["rng"],
+                    until=until, rng=S["rng"], auto_human=auto_h,
                     stop_for=tuple(payload.get("stop_for") or ()))
     commit()
     return {"ok": True, "date": s["date"], "stop_reason": res["stop_reason"],
@@ -419,7 +422,7 @@ def api_match_play(payload: dict = Body(default={})):
         if not nf:
             return {"ok": False, "msg": "No upcoming fixture."}
         if nf["match_date"] > s["date"]:
-            E.advance(con(), s, until="date", days=nf["match_date"], rng=S["rng"], stop_for=())
+            E.advance(con(), s, until="date", days=nf["match_date"], rng=S["rng"], stop_for=(), auto_human=False)
         nf = E.next_fixture(con(), s)
         row = con().execute("""SELECT f.*, k.name AS comp_name, k.code AS comp_code, k.ctype
             FROM fixtures f LEFT JOIN competitions k ON k.id=f.comp_id WHERE f.id=?""",

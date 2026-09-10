@@ -516,6 +516,42 @@ class MatchRunner:
                       outcome="goal" if scored else ("on target" if on_target else
                                                      ("blocked" if blocked else "off target")))
             if scored:
+                # --- VAR check (8-12% of goals) ---
+                var_check = self.rng.random() < 0.12
+                var_overturn = False
+                var_reason = None
+                if var_check:
+                    # VAR event before goal confirmation
+                    var_reason = self.rng.choice(["offside", "handball", "foul in build-up"])
+                    self.events.append(dict(minute=minute, side=side, type="var",
+                                            stage="check",
+                                            player=shooter["name"], pid=shooter["id"],
+                                            reason=var_reason,
+                                            text=f"VAR CHECK — Goal by {shooter['name']} under review ({var_reason})..."))
+                    # 30% chance VAR disallows
+                    if self.rng.random() < 0.32:
+                        var_overturn = True
+                        # disallow - do not count goal
+                        self.events.append(dict(minute=minute, side=side, type="var",
+                                                stage="overturn",
+                                                decision="disallowed",
+                                                player=shooter["name"], pid=shooter["id"],
+                                                reason=var_reason,
+                                                text=f"VAR — GOAL DISALLOWED! {shooter['name']} ({var_reason})"))
+                        # record as disallowed shot
+                        ev["type"] = "var_disallowed"
+                        ev["text"] = f"DISALLOWED — {shooter['name']} ({label}) - {var_reason} (VAR)"
+                        ev["outcome"] = "disallowed"
+                        self.ratings[side][i] += 0.15  # small bump for chance created
+                        self.events.append(ev)
+                        return  # exit without counting goal
+                    else:
+                        self.events.append(dict(minute=minute, side=side, type="var",
+                                                stage="confirmed",
+                                                decision="goal",
+                                                player=shooter["name"], pid=shooter["id"],
+                                                text=f"VAR — GOAL CONFIRMED! {shooter['name']}"))
+
                 self.goals[side] += 1
                 self.goals_p[side][i] += 1
                 ev["type"] = "goal"

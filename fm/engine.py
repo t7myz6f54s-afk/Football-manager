@@ -537,12 +537,12 @@ def fixtures_on(con, dt, club_id=None):
     iso = ds(dt)
     if club_id:
         rows = con.execute("""SELECT f.*, k.name AS comp_name, k.code AS comp_code, k.ctype
-            FROM fixtures f JOIN competitions k ON k.id=f.comp_id
+            FROM fixtures f LEFT JOIN competitions k ON k.id=f.comp_id
             WHERE f.match_date=? AND (f.home_id=? OR f.away_id=?) AND f.played=0""",
             (iso, club_id, club_id)).fetchall()
     else:
         rows = con.execute("""SELECT f.*, k.name AS comp_name, k.code AS comp_code, k.ctype
-            FROM fixtures f JOIN competitions k ON k.id=f.comp_id
+            FROM fixtures f LEFT JOIN competitions k ON k.id=f.comp_id
             WHERE f.match_date=? AND f.played=0""", (iso,)).fetchall()
     return [dict(r) for r in rows]
 
@@ -1140,6 +1140,7 @@ def _finish_human_match(con, save, fx, ctx, result, mode="key"):
     # motm
     best_i = max(range(len(mine)), key=lambda i: (ratings[i] if i < len(ratings) else 0))
     motm = mine[best_i]["pid"]
+    home_club = club(con, fx["home_id"]); away_club = club(con, fx["away_id"])
     data = dict(
         ai=False, mode=mode, hg=hg, ag=ag, my_goals=my_goals, opp_goals=opp_goals,
         result=res,
@@ -1164,7 +1165,10 @@ def _finish_human_match(con, save, fx, ctx, result, mode="key"):
         weather=result["weather"], referee=result["referee"], motm=motm,
         injuries=[{"name": n, "injury": i, "days": dd} for n, i, dd in inj_report],
         home_id=fx["home_id"], away_id=fx["away_id"],
-        home_name=club(con, fx["home_id"])["name"], away_name=club(con, fx["away_id"])["name"],
+        home_name=home_club["name"], away_name=away_club["name"],
+        home_code=home_club["code"], away_code=away_club["code"],
+        comp=fx.get("comp_name"), comp_code=fx.get("comp_code") or fx.get("code"),
+        code=fx.get("comp_code") or fx.get("code"),
     )
     apply_result(con, save, fx, hg, ag, data, rng)
     save["last_result"] = dict(fixture_id=fx["id"], date=save["date"], comp=fx.get("comp_name"),
@@ -3469,11 +3473,16 @@ def unread_urgent(con, save, cats=("BOARD", "MEDICAL", "TRANSFER")):
     return [dict(r) for r in rows]
 
 
-def advance(con, save, days=1, until=None, stop_for=("match",), rng=None, ignore_ids=()):
+def advance(con, save, days=1, until=None, stop_for=("match",), rng=None, ignore_ids=(), auto_human=False):
     """Advance the simulation. Stops at the next meaningful event.
 
     ignore_ids: unread-urgent message ids the manager has already been shown, so
     they must not halt the simulation again.
+    auto_human: if True, human fixtures on the advanced days are auto-played (only
+                used for season-end sweep). Defaults to False to prevent the
+                '38 games played' bug where Continue auto-played competitive matches.
+                set explicitly to False when advancing to a fixture that the user
+                wants to play manually (prevents double-play bug).
     """
     rng = rng or random.Random()
     ignore = set(ignore_ids or ())
@@ -3506,6 +3515,7 @@ def advance(con, save, days=1, until=None, stop_for=("match",), rng=None, ignore
     log = []
     guard = 0
     stop_reason = None
+    # auto_human now defaults False; old derived logic removed to fix 38-games bug
     while d(save["date"]) < target and guard < 900:
         guard += 1
         if save["flags"].get("unemployed"):
@@ -3522,7 +3532,7 @@ def advance(con, save, days=1, until=None, stop_for=("match",), rng=None, ignore
                                       "is_home": f["home_id"] == save["club_id"],
                                       "stage": f.get("stage")} for f in competitive]})
             break
-        evs = tick_day(con, save, rng, auto_human=("match" not in stop_for))
+        evs = tick_day(con, save, rng, auto_human=auto_human)
         for e in evs:
             log.append(dict(date=save["date"], **e))
         urg = [u for u in unread_urgent(con, save) if u["id"] not in ignore]
@@ -3533,14 +3543,34 @@ def advance(con, save, days=1, until=None, stop_for=("match",), rng=None, ignore
             break
         con.commit()
         persist(con, save)
-    # catch any overdue human fixture that was not played
-    overdue = [] if not save.get("club_id") or save["flags"].get("unemployed") else con.execute(
-        """SELECT f.*, k.name AS comp_name, k.code AS comp_code, k.ctype FROM fixtures f
-        LEFT JOIN competitions k ON k.id=f.comp_id
-        WHERE (f.home_id=? OR f.away_id=?) AND f.played=0 AND f.match_date<? ORDER BY f.match_date""",
-        (save["club_id"], save["club_id"], save["date"])).fetchall()
-    for f in overdue:
-        play_human_match(con, save, dict(f), mode="instant", rng=rng)
+    # catch any overdue human fixture that was not played — only auto-play if explicitly allowed
+    # to prevent the "38 games show as played" bug where Continue with until=week/month
+    # would skip matches and auto-play them.
+    if auto_human:
+        overdue = [] if not save.get("club_id") or save["flags"].get("unemployed") else con.execute(
+            """SELECT f.*, k.name AS comp_name, k.code AS comp_code, k.ctype FROM fixtures f
+            LEFT JOIN competitions k ON k.id=f.comp_id
+            WHERE (f.home_id=? OR f.away_id=?) AND f.played=0 AND f.match_date<? ORDER BY f.match_date""",
+            (save["club_id"], save["club_id"], save["date"])).fetchall()
+        for f in overdue:
+            play_human_match(con, save, dict(f), mode="instant", rng=rng)
+    else:
+        # if we have overdue competitive fixtures and auto_human is False, rewind date
+        # to the earliest overdue fixture so user can still play it (prevents skipping)
+        if save.get("club_id") and not save["flags"].get("unemployed"):
+            earliest = con.execute(
+                """SELECT MIN(match_date) FROM fixtures
+                   WHERE (home_id=? OR away_id=?) AND played=0 AND match_date<? AND comp_id!=0""",
+                (save["club_id"], save["club_id"], save["date"])).fetchone()[0]
+            if earliest:
+                # don't auto-play, but ensure next_fixture can still find it by rewinding date
+                # we keep save["date"] at earliest-1 so next advance will stop at match
+                try:
+                    ed = d(earliest)
+                    if d(save["date"]) > ed:
+                        save["date"] = ds(ed - timedelta(days=1))
+                except Exception:
+                    pass
     con.commit()
     persist(con, save)
     if d(save["date"]) < start:                 # never move the clock backwards
@@ -3556,7 +3586,7 @@ def play_next_match(con, save, mode="key", rng=None, lineup=None):
     if not nf:
         return {"ok": False, "msg": "No upcoming fixture."}
     if nf["match_date"] > save["date"]:
-        advance(con, save, until="date", days=nf["match_date"], rng=rng, stop_for=())
+        advance(con, save, until="date", days=nf["match_date"], rng=rng, stop_for=(), auto_human=False)
         nf = next_fixture(con, save)
         if not nf:
             return {"ok": False, "msg": "No upcoming fixture after advancing."}
