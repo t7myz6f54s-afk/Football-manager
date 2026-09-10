@@ -1805,10 +1805,12 @@ async function renderMedia() {
         <button class="btn danger" onclick="press('critical')">Be critical of the squad</button>
       </div>
     </div>
-    <div class="card" style="padding:0"><h3 style="padding:12px 14px 0">News feed</h3>
+    <div class="card tight" style="padding:0">
+      <div class="sec-h" style="padding:10px 12px 4px"><h3>World news feed</h3></div>
       <div style="max-height:60vh;overflow:auto">
-      ${j.news.map(n => `<div class="list-item"><span class="tag">${esc(n.cat)}</span>
-        <div style="flex:1">${esc(n.text)}<div class="small muted">${fmtDate(n.date)}</div></div></div>`).join("")}
+      ${j.news.map(n => `<div class="mrow slim" style="cursor:default"><span class="mdot"></span>
+        <div class="mmain"><div class="msub" style="white-space:normal">${esc(n.text).replace("for €0k on loan", "on loan")}</div>
+        <div class="mmeta"><span class="mcat">${esc(n.cat)}</span><span>${fmtDate(n.date)}</span></div></div></div>`).join("")}
       </div>
     </div>`;
 }
