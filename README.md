@@ -151,7 +151,7 @@ No Android Studio, no Node, no npm, no database server, no cloud service.
 
 A standalone build of the same game is published as a release asset:
 
-**[Touchline-1.6.0-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/tag/v1.6.0)** — ~14 MB, Android 7.0+, 64-bit ARM.
+**[Touchline-1.6.1-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/tag/v1.6.1)** — ~14 MB, Android 7.0+, 64-bit ARM.
 Phone layout: bottom tab bar, card lists, offline play.
 
 It embeds CPython (Chaquopy) and runs `fm/` unmodified on `127.0.0.1` inside a WebView, so the
