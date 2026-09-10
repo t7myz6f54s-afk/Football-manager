@@ -533,3 +533,6 @@ tbody tr.tap { cursor: pointer; } tbody tr.tap:active td { background: var(--sf2
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pitch .nm.muted { color: var(--tx3); font-weight: 500; }
 @media (max-width: 560px) { .pitch { height: 300px; } .pitch .slot { width: 62px; } }
+.escore { margin-left: 6px; font-weight: 800; color: var(--tx); background: var(--sf3);
+  padding: 1px 6px; border-radius: 5px; font-size: 11px; font-variant-numeric: tabular-nums; }
+#splash .slogo svg { width: 100%; height: 100%; }

@@ -1113,10 +1113,21 @@ function evIcon(t) {
   if (t === "penalties") return ["ev-info", "P"];
   return ["ev-info", "•"];
 }
+function scoreEvents(evs, base) {
+  let h = base ? base[0] : 0, a = base ? base[1] : 0;
+  return (evs || []).map(e => {
+    const o = Object.assign({}, e);
+    if (e.type === "goal") {
+      if (e.side === "H") h++; else if (e.side === "A") a++;
+      o._sc = h + "–" + a;
+    }
+    return o;
+  });
+}
 function evRow(e) {
   const [cls, ic] = evIcon(e.type);
   return `<div class="ev ${cls}"><span class="min">${e.minute}'</span><span class="ei">${ic}</span>
-    <div class="et">${esc(e.text || e.type)}</div></div>`;
+    <div class="et">${esc(e.text || (e.type === "shot" ? `${e.player || ""} — ${e.outcome || "chance"}${e.xg != null ? " (xG " + e.xg + ")" : ""}` : e.type))}${e._sc ? ` <span class="escore">${e._sc}</span>` : ""}</div></div>`;
 }
 function statDuo(a, b, label, fmt) {
   const f = fmt || (x => x);
@@ -1201,7 +1212,7 @@ async function renderMatch() {
 /* live presentation: clock ticks, events land at their minute, score pops */
 function liveScreen(cfg, onDone) {
   const C = G.codes || {};
-  const evs = (cfg.events || []).slice().sort((a, b) => a.minute - b.minute);
+  const evs = scoreEvents((cfg.events || []).slice().sort((a, b) => a.minute - b.minute), cfg.base);
   const end = cfg.endMin || Math.max(45, ...evs.map(e => e.minute), 1);
   $("#content").innerHTML = `
     <div class="mhero" style="--comp:${compColor(C.comp)}">
@@ -1223,8 +1234,8 @@ function liveScreen(cfg, onDone) {
     const em = feed.querySelector(".lv-empty"); if (em) em.remove();
     feed.insertAdjacentHTML("afterbegin", evRow(e));
     if (e.type === "goal") {
-      if ((e.side === "H") === true) sc[0]++; else if (e.side === "A") sc[1]++;
-      scoreEl.textContent = sc[0] + " – " + sc[1];
+      if (e._sc) scoreEl.textContent = e._sc.replace("–", " – ");
+      else { if ((e.side === "H") === true) sc[0]++; else if (e.side === "A") sc[1]++; scoreEl.textContent = sc[0] + " – " + sc[1]; }
       scoreEl.animate([{ transform: "scale(1.25)" }, { transform: "scale(1)" }], { duration: 260 });
     }
   };
@@ -1275,7 +1286,7 @@ function showHalftime(st) {
     </div>
     <div class="card tight" style="margin-top:12px">
       <div class="sec-h"><h3>First-half incidents</h3></div>
-      ${st.events.length ? st.events.slice().reverse().map(evRow).join("") : '<p class="muted small">A quiet first half.</p>'}
+      ${st.events.length ? scoreEvents(st.events.slice(), [0, 0]).reverse().map(evRow).join("") : '<p class="muted small">A quiet first half.</p>'}
     </div>
     <div class="grid g2" style="margin-top:12px">
       <div class="card tight">
@@ -1393,7 +1404,7 @@ function showResult(r) {
       </div>
       <div class="card tight">
         <div class="sec-h"><h3>Key events</h3><span class="spacer"></span><span class="small muted">${esc(r.mode)} view</span></div>
-        <div style="max-height:300px;overflow-y:auto">${shown.slice().reverse().map(evRow).join("") || '<p class="muted small">Nothing notable.</p>'}</div>
+        <div style="max-height:300px;overflow-y:auto">${scoreEvents(shown.slice(), [0, 0]).reverse().map(evRow).join("") || '<p class="muted small">Nothing notable.</p>'}</div>
       </div>
     </div>
 
