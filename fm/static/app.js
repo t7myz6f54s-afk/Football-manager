@@ -367,6 +367,7 @@ async function go(screen, sub) {
   $$("#sheet-grid button").forEach(b => b.classList.toggle("active", b.dataset.s === screen));
   $$("#tabbar button[data-s=__more]").forEach(b => b.classList.toggle("active", !TAB_IDS.includes(screen)));
   closeSheet();
+  const _c = $("#content"); if (_c) { _c.classList.remove("in"); void _c.offsetWidth; _c.classList.add("in"); }
   $("#content").innerHTML = '<p class="muted">Loading…</p>';
   try {
     if (screen === "home") await renderHome();
@@ -1195,6 +1196,28 @@ function evRow(e) {
   return `<div class="ev ${cls}"><span class="min">${e.minute}'</span><span class="ei">${ic}</span>
     <div class="et">${esc(e.text || (e.type === "shot" ? `${e.player || ""} — ${e.outcome || "chance"}${e.xg != null ? " (xG " + e.xg + ")" : ""}` : e.type))}${e._sc ? ` <span class="escore">${e._sc}</span>` : ""}</div></div>`;
 }
+function hexA(c, a) {
+  if (!c || c[0] !== "#") return "rgba(120,140,160," + a + ")";
+  const n = parseInt(c.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+function clubCol(code, i) {
+  const c = CREST[code || ""]; return c ? c[i] : null;
+}
+function goalFlash(e) {
+  const C = G.codes || {};
+  const code = e.side === "H" ? C.home : C.away;
+  const el = document.createElement("div");
+  el.className = "gflash";
+  el.style.setProperty("--gc", compColor(C.comp));
+  el.innerHTML = `<div class="gf-in">${crest(code, "lg")}
+    <div style="flex:1;min-width:0"><div class="gf-t">GOAL · ${e.minute}'</div>
+    <div class="gf-n">${esc(e.player || "")}</div></div>
+    <div class="gf-s">${esc(e._sc || "")}</div></div>`;
+  document.body.appendChild(el);
+  setTimeout(() => el.classList.add("out"), 2200);
+  setTimeout(() => el.remove(), 2700);
+}
 function statDuo(a, b, label, fmt) {
   const f = fmt || (x => x);
   const an = Number(a) || 0, bn = Number(b) || 0;
@@ -1283,7 +1306,7 @@ function liveScreen(cfg, onDone) {
   $("#content").innerHTML = `
     <div class="mhero" style="--comp:${compColor(C.comp)}">
       <div class="mhero-top"><span class="comp-dot"></span><span>${esc(C.compName || "Match")}${C.stage && C.stage !== "league" ? " · " + esc(C.stage) : ""}</span><span class="spacer"></span><span>LIVE</span></div>
-      <div class="live-bar" style="border:0;border-radius:0;background:transparent">
+      <div class="live-bar" style="border:0;border-radius:0;background:linear-gradient(90deg, ${hexA(clubCol(G.codes.home,0),.18)}, rgba(0,0,0,0) 38%, rgba(0,0,0,0) 62%, ${hexA(clubCol(G.codes.away,0),.18)})">
         <span class="lb-team">${crest(C.home)}<b>${esc(cfg.homeShort || "")}</b></span>
         <span class="lb-mid"><span class="lscore" id="lv-score">${cfg.base[0]} – ${cfg.base[1]}</span>
           <span class="clock" id="lv-clock">${cfg.startMin}'</span></span>
@@ -1299,6 +1322,7 @@ function liveScreen(cfg, onDone) {
   const push = e => {
     const em = feed.querySelector(".lv-empty"); if (em) em.remove();
     feed.insertAdjacentHTML("afterbegin", evRow(e));
+    if (e.type === "goal") goalFlash(e);
     if (e.type === "goal") {
       if (e._sc) scoreEl.textContent = e._sc.replace("–", " – ");
       else { if ((e.side === "H") === true) sc[0]++; else if (e.side === "A") sc[1]++; scoreEl.textContent = sc[0] + " – " + sc[1]; }
@@ -1360,7 +1384,7 @@ function showHalftime(st) {
   $("#content").innerHTML = `
     <div class="mhero" style="--comp:${compColor(C.comp)}">
       <div class="mhero-top"><span class="comp-dot"></span><span>${esc(C.compName || "Match")}</span><span class="spacer"></span><span>HALF-TIME</span></div>
-      <div class="live-bar" style="border:0;border-radius:0;background:transparent">
+      <div class="live-bar" style="border:0;border-radius:0;background:linear-gradient(90deg, ${hexA(clubCol(G.codes.home,0),.18)}, rgba(0,0,0,0) 38%, rgba(0,0,0,0) 62%, ${hexA(clubCol(G.codes.away,0),.18)})">
         <span class="lb-team">${crest(C.home)}<b>${esc(st.home_name)}</b></span>
         <span class="lb-mid"><span class="lscore">${st.score.home} – ${st.score.away}</span><span class="clock ht">HT</span></span>
         <span class="lb-team r"><b>${esc(st.away_name)}</b>${crest(C.away)}</span>
@@ -1469,7 +1493,7 @@ function showResult(r) {
   const hCode = C.home || "", aCode = C.away || "";
   const motm = (r.players || []).find(p => p.pid === r.motm);
   $("#content").innerHTML = `
-    <div class="mhero" style="--comp:${compColor(C.comp)}">
+    <div class="mhero" style="--comp:${compColor(C.comp)};background:linear-gradient(103deg, ${hexA(clubCol(hCode,0),.15)}, rgba(0,0,0,0) 45%, rgba(0,0,0,0) 55%, ${hexA(clubCol(aCode,1),.15)})">
       <div class="mhero-top"><span class="comp-dot"></span><span>${esc(r.comp || C.compName || "Match")}${C.stage && C.stage !== "league" && r.comp ? " · " + esc(C.stage) : ""}</span><span class="spacer"></span><span>FULL-TIME</span></div>
       <div class="mhero-body">
         <div class="mhero-club">${crest(hCode, "xl")}<div class="nm">${esc(r.home)}</div></div>
