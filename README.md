@@ -179,7 +179,23 @@ Massive overhaul addressing **"It still feels like a browser trying to act like 
 
 A standalone build of the same game is published as a release asset:
 
-**[Touchline-1.14.1-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.14.1/Touchline-1.14.1-arm64.apk)** — ~14 MB, Android 7.0+, 64-bit ARM, versionCode 19.
+**[Touchline-1.15.0-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.15.0/Touchline-1.15.0-arm64.apk)** — ~14 MB, Android 7.0+, 64-bit ARM, versionCode 20.
+
+### What changed in 1.15 — STAFF MANAGEMENT
+Your backroom is now yours to manage. The **Staff screen** (Club section) has two halves:
+
+- **Your backroom** — every coach with role-relevant ratings (tactics/tech/fitness/youth/judging…), weekly wage, and a colour-coded contract chip (red < 90 days, amber < 180). **Renew** extends two years (+5% wage). **Sack** pays 4 weeks' severance and returns them to the market.
+- **Coaching market** — 160 available coaches, filterable by role (AM, first-team, fitness, GK, youth, scouting, physio, data), with the same ratings and a one-tap **Sign** (2-year deal, 3 years for top-reputation coaches).
+
+Every decision is real:
+- The staff average **is** the coaching quality the simulation trains on — hire a better first-team coach and player development and conditioning actually improve; release them and it drops
+- Wages count against your **wage budget** alongside players (you'll be refused if the bill exceeds it)
+- Contracts **expire**: when a coach's deal ends they leave and the board tells you — renew or replace
+- Backroom is capped at 16 staff
+
+Verified: 10-check seeded engine suite (deterministic market, hire/sack/renew mechanics, budget & cap guards, expiry, world clubs untouched), plus a 3-season A/B regression proving the feature is bit-identical to the previous code whenever no contract expires.
+
+Previous: [1.14.1](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.14.1/Touchline-1.14.1-arm64.apk) (nav patch), [1.14.0](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.14.0/Touchline-1.14.0-arm64.apk) (facilities).
 
 ### What changed in 1.14.1 — NAV BUG PATCH
 - **Fixed: the Facilities screen was unreachable** (missing from the More sheet in 1.14.0)

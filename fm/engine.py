@@ -1532,6 +1532,13 @@ def tick_day(con, save, rng, auto_human=False):
     else:
         cq *= (0.75 + c["facilities"] / 60.0)
     _med_bonus = max(0, _fl["medical"] - _fl["med_base"]) if _fl else 0
+    # staff contract expiries (your club only — world backrooms are static)
+    for _sr in con.execute("""SELECT id, name, role FROM staff
+        WHERE club_id=? AND contract_end!='' AND contract_end<?""", (cid, save["date"])):
+        con.execute("UPDATE staff SET club_id=NULL, contract_end='' WHERE id=?", (_sr["id"],))
+        add_inbox(con, save, "STAFF", "IMPORTANT", f"{_sr['name']}'s contract expired",
+                  f"{_sr['name']} ({_sr['role']}) leaves the club as their contract ends. "
+                  "Hire a replacement from the coaching market (Staff screen).")
     focus = session and con.execute("SELECT focus FROM training WHERE club_id=? AND day=?",
                                     (cid, weekday)).fetchone()
     focus_pos = (focus["focus"] if focus else "") or ""
@@ -2988,6 +2995,96 @@ def ensure_free_agent_club(con):
         (nid, "FREE", "Free Agents", "Free Agents", "None", "ENG5", 5, 1, "minnow", "-", 0,
          1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 50, "Nothing specific", "-", 1))
     return nid
+
+
+# ------------------------------------------------------------- staff management
+STAFF_CAP = 16               # max staff per club (default backroom is 14)
+STAFF_SEVERANCE_WEEKS = 4    # paid on release
+
+STAFF_ROLE_ATTRS = {
+    "Assistant Manager": ("tactical", "technical", "mental", "man_mgmt"),
+    "First-Team Coach": ("tactical", "technical", "mental"),
+    "Fitness Coach": ("fitness",),
+    "Goalkeeping Coach": ("goalkeeping",),
+    "Head of Youth Development": ("youth",),
+    "Chief Scout": ("judging",),
+    "Scout": ("judging",),
+    "Physio": ("fitness", "mental"),
+    "Data Analyst": ("tactical", "judging"),
+}
+
+
+def staff_quality(s):
+    keys = STAFF_ROLE_ATTRS.get(s["role"], ("tactical",))
+    return round(sum(s[k] for k in keys) / len(keys), 1)
+
+
+def coaching_ratings(con, cid):
+    """Coaching averages the sim actually uses (see tick_day / _development_tick)."""
+    row = con.execute("""SELECT AVG(technical) t, AVG(tactical) ta, AVG(fitness) f,
+        AVG(mental) m, AVG(youth) y FROM staff WHERE club_id=?""", (cid,)).fetchone()
+    t, ta, f, m, y = (row["t"] or 8), (row["ta"] or 8), (row["f"] or 8), (row["m"] or 8), (row["y"] or 0)
+    return {"training": round((t + ta + f) / 3.0, 2),
+            "development": round(t * 0.4 + ta * 0.3 + m * 0.3, 2),
+            "youth": round(y, 2)}
+
+
+def hire_staff(con, save, staff_id):
+    s = con.execute("SELECT * FROM staff WHERE id=?", (staff_id,)).fetchone()
+    if not s:
+        return {"ok": False, "msg": "That coach is not on the market."}
+    if s["club_id"] is not None:
+        return {"ok": False, "msg": "Already employed elsewhere."}
+    cid = save["club_id"]
+    c = club(con, cid)
+    n = con.execute("SELECT COUNT(*) n FROM staff WHERE club_id=?", (cid,)).fetchone()["n"]
+    if n >= STAFF_CAP:
+        return {"ok": False, "msg": f"Backroom is full ({n} staff) — release someone first."}
+    pbill = con.execute("SELECT COALESCE(SUM(wage),0) w FROM players WHERE club_id=?", (cid,)).fetchone()["w"]
+    sbill = con.execute("SELECT COALESCE(SUM(wage),0) w FROM staff WHERE club_id=?", (cid,)).fetchone()["w"]
+    annual = (pbill + sbill + s["wage"]) * 52 / 1000.0
+    if annual > (c["wage_budget"] or 0):
+        return {"ok": False, "msg": f"Exceeds wage budget: {annual:.1f}m of {c['wage_budget']:.1f}m."}
+    years = 3 if s["reputation"] >= 70 else 2
+    cend = date(d(save["date"]).year + years, 6, 30).isoformat()
+    before = coaching_ratings(con, cid)
+    con.execute("UPDATE staff SET club_id=?, contract_end=? WHERE id=?", (cid, cend, staff_id))
+    add_inbox(con, save, "STAFF", "NORMAL", f"{s['name']} signs",
+              f"{s['name']} ({s['role']}) joins the backroom at {s['wage']:.1f}k/wk until {cend}.")
+    return {"ok": True, "name": s["name"], "role": s["role"], "wage": s["wage"],
+            "contract_end": cend, "coaching": coaching_ratings(con, cid), "coaching_before": before}
+
+
+def sack_staff(con, save, staff_id):
+    s = con.execute("SELECT * FROM staff WHERE id=?", (staff_id,)).fetchone()
+    if not s or s["club_id"] != save["club_id"]:
+        return {"ok": False, "msg": "Not your staff member."}
+    cid = save["club_id"]
+    c = club(con, cid)
+    sev = round(s["wage"] * STAFF_SEVERANCE_WEEKS / 1000.0, 2)
+    if c["cash"] < sev:
+        return {"ok": False, "msg": f"Severance costs {sev}m — the club holds {c['cash']:.2f}m."}
+    before = coaching_ratings(con, cid)
+    con.execute("UPDATE clubs SET cash=cash-? WHERE id=?", (sev, cid))
+    con.execute("UPDATE staff SET club_id=NULL, contract_end='' WHERE id=?", (staff_id,))
+    add_inbox(con, save, "STAFF", "NORMAL", f"{s['name']} released",
+              f"{s['name']} ({s['role']}) leaves with {sev}m severance and returns to the market.")
+    return {"ok": True, "name": s["name"], "severance": sev,
+            "coaching": coaching_ratings(con, cid), "coaching_before": before}
+
+
+def renew_staff(con, save, staff_id, years=2):
+    s = con.execute("SELECT * FROM staff WHERE id=?", (staff_id,)).fetchone()
+    if not s or s["club_id"] != save["club_id"]:
+        return {"ok": False, "msg": "Not your staff member."}
+    base = d(s["contract_end"]) if s["contract_end"] else d(save["date"])
+    start = base if base > d(save["date"]) else d(save["date"])
+    cend = date(start.year + years, 6, 30).isoformat()
+    new_wage = round(s["wage"] * 1.05, 2)
+    con.execute("UPDATE staff SET contract_end=?, wage=? WHERE id=?", (cend, new_wage, staff_id))
+    add_inbox(con, save, "STAFF", "NORMAL", f"{s['name']} renews",
+              f"{s['name']} signs a {years}-year extension to {cend} at {new_wage:.1f}k/wk.")
+    return {"ok": True, "name": s["name"], "contract_end": cend, "wage": new_wage}
 
 
 def _world_transfer_activity(con, save, rng, events, volume=3):

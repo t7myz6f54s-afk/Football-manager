@@ -938,6 +938,39 @@ def api_facility_upgrade(payload: dict = Body(default={})):
     return res
 
 
+@app.post("/api/staff/hire")
+def api_staff_hire(payload: dict = Body(default={})):
+    s = need_club()
+    try:
+        res = E.hire_staff(con(), s, int(payload.get("id", 0)))
+    except Exception as e:
+        res = {"ok": False, "msg": str(e)}
+    commit()
+    return res
+
+
+@app.post("/api/staff/sack")
+def api_staff_sack(payload: dict = Body(default={})):
+    s = need_club()
+    try:
+        res = E.sack_staff(con(), s, int(payload.get("id", 0)))
+    except Exception as e:
+        res = {"ok": False, "msg": str(e)}
+    commit()
+    return res
+
+
+@app.post("/api/staff/renew")
+def api_staff_renew(payload: dict = Body(default={})):
+    s = need_club()
+    try:
+        res = E.renew_staff(con(), s, int(payload.get("id", 0)))
+    except Exception as e:
+        res = {"ok": False, "msg": str(e)}
+    commit()
+    return res
+
+
 @app.post("/api/tactics")
 def api_tactics(payload: dict = Body(...)):
     s = need_club()

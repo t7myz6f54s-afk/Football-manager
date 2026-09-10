@@ -15,7 +15,7 @@ const api = {
     return j;
   }
 };
-const VERSION = "1.14.1";
+const VERSION = "1.15.0";
 let DEAD = false;
 function deadScreen() { if (DEAD) return; DEAD = true; const d = $("#dead"); if (d) d.classList.remove("hidden"); }
 const G = { boot: null, home: null, screen: "home", sub: null, static: null, busy: false, prevScreen: null };
@@ -765,9 +765,53 @@ function cashSpark(hist){
 }
 
 /* STAFF / YOUTH */
+let _staffRoleFilter="All";
+const STAFF_ROLE_LABEL={All:"All","Assistant Manager":"AM","First-Team Coach":"FT Coach","Fitness Coach":"Fitness","Goalkeeping Coach":"GK","Head of Youth Development":"Youth","Chief Scout":"Chief Scout","Scout":"Scout","Physio":"Physio","Data Analyst":"Data"};
+function staffAttrChips(s){ const L={tactical:"Tac",technical:"Tec",mental:"Men",man_mgmt:"Mgr",fitness:"Fit",goalkeeping:"GK",youth:"You",judging:"Jud"}; return Object.entries(s.key).map(([k,v])=>`<span style="font-size:9.5px;padding:2px 5px;border-radius:5px;background:var(--panel3);border:1px solid var(--line);color:var(--tx2)">${L[k]||k} <b style="color:var(--tx)">${v}</b></span>`).join(""); }
+function staffCard(s,actions){
+  const cd=s.contract_days;
+  const chip=cd==null?`<span class="small muted" style="font-size:9.5px">free agent</span>`
+    :`<span style="font-size:9.5px;padding:2px 6px;border-radius:999px;font-weight:900;${cd<90?"background:rgba(255,90,110,.16);color:#ff8a94":cd<180?"background:rgba(255,200,50,.14);color:#ffcc33":"background:var(--panel3);color:var(--tx3)"}">until ${cd}d</span>`;
+  return `<div style="display:flex;gap:8px;align-items:flex-start;padding:10px;border-radius:12px;background:var(--panel);border:1px solid var(--line)">
+    <div style="flex:1;min-width:0"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><b style="font-size:12px">${esc(s.name)}</b><span class="tag" style="font-size:8.5px">${s.quality}</span>${chip}</div>
+    <div class="small muted" style="font-size:10px;margin-top:2px">${esc(s.role)} · ${esc(s.nat)} · ${s.age}y</div>
+    <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:5px">${staffAttrChips(s)}</div></div>
+    <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:6px"><span style="font-size:10.5px;font-weight:900;font-family:var(--ff-mono)">${wk(s.wage)}/wk</span>${actions}</div></div>`;
+}
 async function renderStaff(){
   const j=await api.get("/api/screen/staff"); await refreshState();
-  $("#content").innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:13px"> STAFF · ${j.length}</b><span class="small muted">Wages ${money(j.reduce((a,b)=>a+(b.wage||0)*52/1000,0))}/yr</span></div><div style="display:grid;gap:6px">${j.map(s=>`<div style="display:flex;gap:10px;align-items:center;padding:10px;border-radius:12px;background:var(--panel);border:1px solid var(--line)"><span class="tag">${{Assistant:"AM",Chief:"CS",Scout:"SC",Physio:"PH",Coach:"CO"}[s.role?.split(" ")[0]]||"ST"}</span><div style="flex:1"><b style="font-size:12px">${esc(s.name)}</b><div class="small muted" style="font-size:10px">${esc(s.role)} · ${esc(s.nat)} · ${s.age}y</div></div><span style="font-size:11px">${wk(s.wage)}</span></div>`).join("")}</div>`;
+  const w=j.wage, load=w.players+w.staff;
+  const pool=(j.pool||[]).filter(s=>_staffRoleFilter==="All"||s.role===_staffRoleFilter);
+  $("#content").innerHTML=`
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><b style="font-size:13px"> STAFF · ${j.current.length}/${j.cap}</b><span class="spacer"></span><span class="small muted" style="font-size:10.5px">Coaching <b style="color:var(--acc)">${j.coaching.training}</b> · Dev <b style="color:var(--acc)">${j.coaching.development}</b>${j.coaching.youth?` · Youth <b style="color:var(--acc)">${j.coaching.youth}</b>`:""}</span></div>
+  <div class="small muted" style="font-size:10.5px;margin-bottom:10px">Wage load ${money(load)} of ${money(w.budget)} budget (players ${money(w.players)} + staff ${money(w.staff)}) · cash ${money(w.cash)} · coaching drives training & development</div>
+  <div style="display:grid;gap:6px;margin-bottom:12px">${j.current.map(s=>staffCard(s,`<button class="btn sm" onclick="staffRenew(${s.id})">Renew</button><button class="btn sm" id="sack-${s.id}" onclick="staffSack(${s.id},'${esc(s.name)}')">Sack</button>`)).join("")||'<p class="small muted">No backroom staff — hire from the market below.</p>'}</div>
+  <b style="font-size:11px;letter-spacing:.1em;color:var(--tx3)">COACHING MARKET</b>
+  <div style="display:flex;gap:4px;flex-wrap:wrap;margin:8px 0">${["All",...(j.roles||[])].map(r=>`<button class="btn sm ${r===_staffRoleFilter?"primary":""}" onclick="_staffRoleFilter='${r}' ;renderStaff()">${STAFF_ROLE_LABEL[r]||r}</button>`).join("")}</div>
+  <div style="display:grid;gap:6px">${pool.map(s=>staffCard(s,`<button class="btn sm primary" onclick="staffHire(${s.id},'${esc(s.name)}')">Sign · ${s.reputation>=70?"3y":"2y"}</button>`)).join("")||'<p class="small muted">No available coaches in this role.</p>'}</div>`;
+}
+async function staffHire(id,name){
+  try{ const r=await api.post("/api/staff/hire",{id});
+    if(r.ok){ toast(`${name} signs · coaching ${r.coaching_before?.training??"–"} → ${r.coaching?.training??"–"}`,4200); Juice.haptic("success"); Juice.play("success"); }
+    else toast(esc(r.msg||"Cannot sign"),4200);
+    await renderStaff();
+  }catch(e){ toast("Failed: "+esc(e.message),4000); }
+}
+async function staffSack(id,name){
+  const b=document.getElementById("sack-"+id);
+  if(b&&!b.dataset.armed){ b.dataset.armed="1"; b.textContent="Confirm?"; b.classList.add("primary"); setTimeout(()=>{ if(b){ delete b.dataset.armed; b.textContent="Sack"; b.classList.remove("primary"); } },3000); return; }
+  try{ const r=await api.post("/api/staff/sack",{id});
+    if(r.ok){ toast(`${name} released · ${money(r.severance)} severance`,4200); Juice.haptic("medium"); Juice.play("nav"); }
+    else toast(esc(r.msg||"Cannot release"),4200);
+    await renderStaff();
+  }catch(e){ toast("Failed: "+esc(e.message),4000); }
+}
+async function staffRenew(id){
+  try{ const r=await api.post("/api/staff/renew",{id});
+    if(r.ok){ toast(`${r.name} renews to ${r.contract_end}`,4000); Juice.haptic("success"); Juice.play("success"); }
+    else toast(esc(r.msg||"Cannot renew"),4000);
+    await renderStaff();
+  }catch(e){ toast("Failed: "+esc(e.message),4000); }
 }
 async function renderYouth(){
   const j=await api.get("/api/screen/youth"); await refreshState();

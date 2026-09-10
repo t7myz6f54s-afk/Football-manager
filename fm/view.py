@@ -557,13 +557,34 @@ def _coaching(con, save):
 
 
 def staff_screen(con, save):
-    rows = con.execute("SELECT * FROM staff WHERE club_id=? ORDER BY role, reputation DESC",
-                       (save["club_id"],)).fetchall()
-    out = []
-    for r in rows:
+    cid = save["club_id"]
+    today = save["date"]
+    current = []
+    for r in con.execute("SELECT * FROM staff WHERE club_id=? ORDER BY role, reputation DESC", (cid,)):
         d = dict(r)
-        out.append(d)
-    return out
+        d["key"] = {k: d[k] for k in E.STAFF_ROLE_ATTRS.get(d["role"], ("tactical",))}
+        d["quality"] = E.staff_quality(d)
+        d["contract_days"] = int((E.d(d["contract_end"]) - E.d(today)).days) if d["contract_end"] else None
+        current.append(d)
+    pool_rows = con.execute("SELECT * FROM staff WHERE club_id IS NULL").fetchall()
+    pool = sorted((dict(r) for r in pool_rows), key=lambda x: -E.staff_quality(x))
+    pool_out = []
+    for d in pool[:60]:
+        d["key"] = {k: d[k] for k in E.STAFF_ROLE_ATTRS.get(d["role"], ("tactical",))}
+        d["quality"] = E.staff_quality(d)
+        pool_out.append(d)
+    pbill = con.execute("SELECT COALESCE(SUM(wage),0) w FROM players WHERE club_id=?", (cid,)).fetchone()["w"]
+    sbill = con.execute("SELECT COALESCE(SUM(wage),0) w FROM staff WHERE club_id=?", (cid,)).fetchone()["w"]
+    c = E.club(con, cid)
+    return {
+        "current": current,
+        "pool": pool_out,
+        "coaching": E.coaching_ratings(con, cid),
+        "wage": {"players": round(pbill * 52 / 1000, 2), "staff": round(sbill * 52 / 1000, 2),
+                 "budget": c["wage_budget"], "cash": c["cash"]},
+        "cap": E.STAFF_CAP,
+        "roles": list(E.STAFF_ROLE_ATTRS.keys()),
+    }
 
 
 def _nonwage(c):

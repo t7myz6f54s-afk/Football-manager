@@ -763,16 +763,54 @@ def build_world(seed=20260701):
                 con.execute("""INSERT INTO staff VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (sid, make_staff_name(r, c["country"]), c["country"] if r.random() < 0.75
                      else r.choice(NATIONALITY_POOL), role, c["id"],
-                     spec.get("attacking", lvl), spec.get("defending", lvl),
-                     spec.get("fitness", lvl), spec.get("goalkeeping", max(2, lvl - 4)),
-                     spec.get("mental", lvl), spec.get("tactical", lvl),
-                     spec.get("technical", lvl), spec.get("youth", max(2, lvl - 3)),
-                     spec.get("man_mgmt", lvl), spec.get("judging", max(2, lvl - 2)),
-                     spec.get("judging_pot", max(2, lvl - 2)), spec.get("discipline", lvl),
-                     spec.get("motivator", lvl), spec.get("adaptability", lvl),
-                     round(lvl * 0.55 * (0.4 + c["coef"]) * (0.45 + c["rep"] / 110.0), 2),
-                     date(2026 + r.randint(1, 4), 6, 30).isoformat(),
-                     lvl * 3, r.choice(C.PERSONALITIES), r.randint(30, 62)))
+                    spec.get("attacking", lvl), spec.get("defending", lvl),
+                    spec.get("fitness", lvl), spec.get("goalkeeping", max(2, lvl - 4)),
+                    spec.get("mental", lvl), spec.get("tactical", lvl),
+                    spec.get("technical", lvl), spec.get("youth", max(2, lvl - 3)),
+                    spec.get("man_mgmt", lvl), spec.get("judging", max(2, lvl - 2)),
+                    spec.get("judging_pot", max(2, lvl - 2)), spec.get("discipline", lvl),
+                    spec.get("motivator", lvl), spec.get("adaptability", lvl),
+                    round(lvl * 0.55 * (0.4 + c["coef"]) * (0.45 + c["rep"] / 110.0), 2),
+                    date(2026 + r.randint(1, 4), 6, 30).isoformat(),
+                    lvl * 3, r.choice(C.PERSONALITIES), r.randint(30, 62)))
+
+    # ------------------------------------------------- free-coaches market
+    # available for hire by any club (club_id NULL); deterministic per world
+    pool_roles = [("Assistant Manager", 14), ("First-Team Coach", 28), ("Fitness Coach", 16),
+                  ("Goalkeeping Coach", 14), ("Head of Youth Development", 16), ("Chief Scout", 12),
+                  ("Scout", 28), ("Physio", 16), ("Data Analyst", 16)]
+    for pi, (role, cnt) in enumerate(pool_roles):
+        for k in range(cnt):
+            sid += 1
+            r = random.Random(_seed(f"freecoach{sid}"))
+            q = r.uniform(0.15, 1.0)              # market quality 0.15-1.0
+            lvl = max(3, min(19, int(round(4 + q * 14 + r.gauss(0, 1.6)))))
+            rep = min(95, int(lvl * 4.6 + r.uniform(-4, 6)))
+            nat = r.choice(NATIONALITY_POOL)
+            spec = {}
+            if role == "Fitness Coach":
+                spec = dict(fitness=lvl + 2, technical=max(2, lvl - 3), tactical=max(2, lvl - 3))
+            elif role == "Goalkeeping Coach":
+                spec = dict(goalkeeping=lvl + 2, technical=max(2, lvl - 1))
+            elif role == "Head of Youth Development":
+                spec = dict(youth=lvl + 3)
+            elif role in ("Chief Scout", "Scout"):
+                spec = dict(judging=lvl + 1, judging_pot=lvl + 1, tactical=max(2, lvl - 2))
+            elif role == "Physio":
+                spec = dict(fitness=lvl, mental=max(2, lvl - 4))
+            elif role == "Data Analyst":
+                spec = dict(tactical=lvl + 1, judging=lvl + 1)
+            con.execute("""INSERT INTO staff VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (sid, make_staff_name(r, nat), nat, role, None,
+                spec.get("attacking", lvl), spec.get("defending", lvl),
+                spec.get("fitness", lvl), spec.get("goalkeeping", max(2, lvl - 4)),
+                spec.get("mental", lvl), spec.get("tactical", lvl),
+                spec.get("technical", lvl), spec.get("youth", max(2, lvl - 3)),
+                spec.get("man_mgmt", lvl), spec.get("judging", max(2, lvl - 2)),
+                spec.get("judging_pot", max(2, lvl - 2)), spec.get("discipline", lvl),
+                spec.get("motivator", lvl), spec.get("adaptability", lvl),
+                round(lvl * 0.55 * (0.4 + q * 0.7) * (0.45 + rep / 110.0), 2),
+                "", rep, r.choice(C.PERSONALITIES), r.randint(28, 60)))
     # ------------------------------------------------------------- managers
     mid = 0
     all_club_rows = con.execute("""SELECT c.id, c.code, c.name, c.country, c.rep, c.profile, c.league
