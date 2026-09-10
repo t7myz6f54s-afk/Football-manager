@@ -147,18 +147,31 @@ No Android Studio, no Node, no npm, no database server, no cloud service.
 
 ---
 
-## What changed in 1.7 — PREMIUM "no more shite"
+## What changed in 1.8 — GAME "not a browser"
 
-Massive overhaul addressing every feedback point:
+Massive overhaul addressing **"It still feels like a browser trying to act like a game"**:
 
-- **Realism fixed**: Elite bonus (CA 16+ = 1.12x per point), weak penalty, AI sim ratio**1.35, rep bonuses, genuine tables — Fulham (rep 75) cannot top PL, superteam stacking blocked (Haaland won't join United from City)
-- **Transfers premium**: Glassmorphism cards, player avatars, one-tap selling (Sell 💸 button in squad + quick sell modal), realistic negotiations — rivalry blocks 65% reject (Ars↔Tot, MCI↔MUN, etc), superstar protection CA18.5+ at rep85+ clubs, loyalty matters, contract length 1.35x, young elite 1.35x, player willingness considers wage/ambition/loyalty/rivalry fear
-- **Friendlies realistic**: Rotated squads — youth 2-4, reserves 4-5, first team 3-5 for elite, low intensity 72% chance rate, 85% if elite, premium UI explains rotation
-- **Match animations VISIBLE**: Cinematic VAR full-screen with pulse, 3D card flips 600ms with haptics, goal flashes with crest + glow + screen shake, live feed slide animations — impossible to miss during full match
-- **Inbox premium**: Icons, previews, NEW pulse dots, international break 🌍 briefings with call-up names, derby 🔥 banners, press quotes, empty state illustration — makes you want to read
-- **Matchday premium**: Derby detection with shimmer banner, rivalry tags, press hype pre-match conferences with meaningful choices (affects board/fans/morale), competition gradients with glow, form pills, premium hero cards
-- **International breaks meaningful**: Inbox notifications entering/exiting, 3-7 players called up, fatigue/injury on return, scouting opportunity (foreign leagues continue), home banner with actions
-- **Rivalries/derbies realistic**: 40+ rivalries map, DERBY_NAMES, transfer blocks, match hype, press conferences reference derby importance
+**Find the GOOD and don't touch it:**
+- Elite realism 1.12x per point, ratio**1.35, 40+ rivalry blocks (Haaland won't join United), friendly rotation, transfer negotiation realism, VAR/card/goal cinematic, international breaks, Godfather mode — all kept
+
+**Find the BAD and make it GOOD:**
+- **Browser shell killed**: No more max-width 920 centered website, flat chips, line indicator tabbar, flat cards
+- **Game shell**: Animated mesh gradient background (green .12 + blue + violet) + vignette overlay, HUD topbar with crest glow + stat icons (not chips), floating dock tabbar (pill active with translateY -2px + gradient), 3D tactile buttons with shine animation, 165deg gradient cards with inset highlight + float shadow + hover -2px
+- **Transitions**: Slide left/right by nav direction (cubic-bezier .2,.9,.3,1.2), game-rise 0.34s stagger, logo-float splash, shimmer derby banners
+
+**Find the UGLY and turn it into GEM:**
+- **Start screen**: Was website hero → Now game launcher: 96px glowing crest with v8 badge, gradient title, pill badge PREMIUM · OFFLINE · 402 CLUBS, primary CTA 56px with glow, feature cards
+- **Home = Manager Office**: Was browser dashboard with strip + tables → Now game HUD: circular SVG gauges (position/board/fans/fit) with drop-shadow glow, 3 quick-stat cards (points/form/cash), dressing-room style squad card + board card with 3D, league mini-cards not table rows, news as social feed with dot pulse
+- **Squad = Dressing Room**: Was browser table + list → Now jersey locker cards: 44px avatar, pos + status pill (FIT/INJ/BAN/UNFIT with color), CA glow, goals/assists pill, grid 158px min, physio room card
+- **Inbox = Social Feed**: Icons + previews kept but now with game dot pulse + gradient unread + NEW pill
+- **Transfers = Marketplace**: Ticker + glass cards + negotiation realism kept, now with floating dock context
+- **Matchday = Stadium**: Full takeover with shimmer, live-bar 165deg, confetti on win, haptics everywhere
+
+**Game juice:**
+- `navigator.vibrate` patterns: tap 12ms, nav 10ms, heavy 35ms, goal [30,40,80], card 25ms, VAR [15,20,15,20,40], success [15,30,40]
+- Web Audio API sounds: tap 800Hz sine, nav 600Hz, success 660→880Hz, goal 440→660Hz triangle, card sawtooth 220Hz
+- Confetti 28 particles on win, shake on goal, badge-bounce 1.8s infinite
+- Every button: haptic + sound + scale .92 on active, 3D tactile
 
 ---
 
@@ -166,8 +179,10 @@ Massive overhaul addressing every feedback point:
 
 A standalone build of the same game is published as a release asset:
 
-**[Touchline-1.7.0-PREMIUM-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.7.0-PREMIUM/Touchline-1.7.0-PREMIUM-arm64.apk)** — ~14 MB, Android 7.0+, 64-bit ARM, versionCode 10.
-Premium: glassmorphism, elite gradients, cinematic matchday, easy selling, realistic transfers, friendly rotation, international breaks meaningful.
+**[Touchline-1.8.0-GAME-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.8.0-GAME/Touchline-1.8.0-GAME-arm64.apk)** — ~14 MB, Android 7.0+, 64-bit ARM, versionCode 11.
+GAME: feels like native mobile game — HUD, floating dock, dressing room, manager office gauges, haptics, sounds, confetti, slide transitions. Not a browser.
+
+Previous: [v1.7.0-PREMIUM](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.7.0-PREMIUM/Touchline-1.7.0-PREMIUM-arm64.apk) · [v1.6.2](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.6.2/Touchline-1.6.2-FIXED-arm64.apk)
 
 It embeds CPython (Chaquopy) and runs `fm/` unmodified on `127.0.0.1` inside a WebView, so the
 whole simulation works with no internet connection. Career saves live in app-private storage.

@@ -1,4 +1,4 @@
-/* Touchline — front end. Pure fetch + DOM rendering, no frameworks. */
+/* Touchline — front end. GAME EDITION v1.8 — feels like native game, not browser */
 "use strict";
 
 const $ = (s, r) => (r || document).querySelector(s);
@@ -25,13 +25,99 @@ const api = {
   }
 };
 
-const VERSION = "1.7.0-PREMIUM";
+const VERSION = "1.8.0-GAME";
 let DEAD = false;
 function deadScreen() {
   if (DEAD) return; DEAD = true;
   const d = $("#dead"); if (d) d.classList.remove("hidden");
 }
-const G = { boot: null, home: null, screen: "home", sub: null, static: null, busy: false };
+const G = { boot: null, home: null, screen: "home", sub: null, static: null, busy: false, prevScreen: null };
+
+/* -------------------------------------------------------------- GAME JUICE — haptics, sounds, confetti */
+const Juice = {
+  haptic(type) {
+    try {
+      if (!navigator.vibrate) return;
+      const patterns = {
+        tap: [12],
+        light: [8],
+        medium: [20],
+        heavy: [35],
+        success: [15, 30, 40],
+        warning: [20, 20, 20],
+        error: [40, 30, 60],
+        goal: [30, 40, 80],
+        card: [25],
+        var: [15, 20, 15, 20, 40],
+        nav: [10]
+      };
+      navigator.vibrate(patterns[type] || patterns.tap);
+    } catch(e) {}
+  },
+  play(type) {
+    // Web Audio API — subtle game sounds, no external files
+    try {
+      const ctx = Juice._ctx || (Juice._ctx = new (window.AudioContext || window.webkitAudioContext)());
+      if (ctx.state === "suspended") ctx.resume();
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      const now = ctx.currentTime;
+      const sounds = {
+        tap: { f: 800, d: 0.06, t: "sine", v: 0.08 },
+        nav: { f: 600, d: 0.08, t: "sine", v: 0.07 },
+        success: { f: 660, d: 0.18, t: "sine", v: 0.12, f2: 880 },
+        goal: { f: 440, d: 0.35, t: "triangle", v: 0.15, f2: 660 },
+        card: { f: 220, d: 0.12, t: "sawtooth", v: 0.08 },
+        var: { f: 300, d: 0.22, t: "square", v: 0.06 },
+        error: { f: 180, d: 0.2, t: "sawtooth", v: 0.09 }
+      };
+      const s = sounds[type] || sounds.tap;
+      o.type = s.t; o.frequency.setValueAtTime(s.f, now);
+      if (s.f2) o.frequency.linearRampToValueAtTime(s.f2, now + s.d * 0.6);
+      g.gain.setValueAtTime(0, now);
+      g.gain.linearRampToValueAtTime(s.v, now + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.001, now + s.d);
+      o.start(now); o.stop(now + s.d);
+    } catch(e) {}
+  },
+  confetti() {
+    try {
+      const colors = ["#35e08a", "#4ded9c", "#5a9eff", "#ffcc33", "#a78bfa"];
+      for (let i = 0; i < 28; i++) {
+        const el = document.createElement("div");
+        el.style.position = "fixed";
+        el.style.left = (Math.random() * 100) + "vw";
+        el.style.top = "-10px";
+        el.style.width = (6 + Math.random() * 8) + "px";
+        el.style.height = (6 + Math.random() * 6) + "px";
+        el.style.background = colors[Math.floor(Math.random() * colors.length)];
+        el.style.borderRadius = Math.random() > 0.5 ? "50%" : "3px";
+        el.style.pointerEvents = "none";
+        el.style.zIndex = "95";
+        el.style.transform = `rotate(${Math.random() * 360}deg)`;
+        document.body.appendChild(el);
+        const anim = el.animate([
+          { transform: `translateY(0) rotate(0deg) scale(1)`, opacity: 1 },
+          { transform: `translateY(${60 + Math.random() * 40}vh) rotate(${360 + Math.random() * 720}deg) translateX(${(Math.random() - 0.5) * 120}px) scale(.8)`, opacity: 0 }
+        ], { duration: 1200 + Math.random() * 800, easing: "cubic-bezier(.2,.8,.2,1)", delay: Math.random() * 200 });
+        anim.onfinish = () => el.remove();
+      }
+    } catch(e) {}
+  },
+  shake() {
+    try {
+      document.body.animate([
+        { transform: "translateX(0)" },
+        { transform: "translateX(-4px)" },
+        { transform: "translateX(4px)" },
+        { transform: "translateX(-3px)" },
+        { transform: "translateX(3px)" },
+        { transform: "translateX(0)" }
+      ], { duration: 380, easing: "ease-out" });
+    } catch(e) {}
+  }
+};
 
 /* ------------------------------------------------------------------ helpers */
 const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -57,19 +143,41 @@ function fmtDate(s) {
 }
 function daysTo(a, b) { return Math.round((new Date(a) - new Date(b)) / 86400000); }
 function toast(msg, ms) {
+  Juice.haptic("light");
   const t = document.createElement("div");
-  t.className = "toast"; t.innerHTML = msg;
+  t.className = "toast";
+  t.style.cssText = "background:linear-gradient(135deg,#1a231f,#151a27);border:1px solid rgba(53,224,138,.25);box-shadow:0 12px 32px rgba(0,0,0,.5),0 0 0 1px rgba(53,224,138,.08) inset;border-radius:14px;padding:12px 16px;font-weight:700;font-size:13px;backdrop-filter:blur(16px)";
+  t.innerHTML = `<div style="display:flex;align-items:center;gap:10px"><div style="width:28px;height:28px;border-radius:9px;background:linear-gradient(135deg,var(--acc),var(--acc2));display:grid;place-items:center;color:#06120c;font-weight:900">✓</div><div style="flex:1">${msg}</div></div>`;
   $("#toast-wrap").appendChild(t);
-  setTimeout(() => t.remove(), ms || 3200);
+  // animate in
+  t.animate([{ transform: "translateY(16px) scale(.96)", opacity: 0 }, { transform: "translateY(0) scale(1)", opacity: 1 }], { duration: 340, easing: "cubic-bezier(.2,.9,.3,1.2)" });
+  setTimeout(() => {
+    t.animate([{ transform: "translateY(0) scale(1)", opacity: 1 }, { transform: "translateY(-8px) scale(.96)", opacity: 0 }], { duration: 260 }).onfinish = () => t.remove();
+  }, ms || 3200);
 }
 function modal(html, wide) {
+  Juice.haptic("medium");
   const box = $("#modal-box");
   box.className = "box" + (wide ? " wide" : "");
-  box.innerHTML = `<button class="close" onclick="closeModal()">✕</button>` + html;
+  box.style.cssText = "background:linear-gradient(165deg,#151a27,#10131a);border:1px solid rgba(255,255,255,.1);box-shadow:0 24px 64px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.08);border-radius:20px;animation:modal-in .36s cubic-bezier(.2,.9,.3,1.2)";
+  if (!document.getElementById("modal-kf")) {
+    const s = document.createElement("style"); s.id = "modal-kf";
+    s.textContent = "@keyframes modal-in{from{opacity:0;transform:translateY(24px) scale(.94)}to{opacity:1;transform:translateY(0) scale(1)}}";
+    document.head.appendChild(s);
+  }
+  box.innerHTML = `<button class="close" onclick="closeModal()" style="width:32px;height:32px;border-radius:10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);color:var(--tx)">✕</button>` + html;
   polish(box);
   $("#modal").classList.add("open");
+  $("#modal").style.backdropFilter = "blur(18px)";
+  $("#modal").style.background = "rgba(6,8,12,.72)";
 }
-function closeModal() { $("#modal").classList.remove("open"); }
+function closeModal() {
+  Juice.haptic("light");
+  const box = $("#modal-box");
+  box.animate([{ transform: "scale(1)", opacity: 1 }, { transform: "scale(.96)", opacity: 0 }], { duration: 180 }).onfinish = () => {
+    $("#modal").classList.remove("open");
+  };
+}
 function setBusy(on) { const b = $("#busybar"); if (b) b.classList.toggle("on", !!on); }
 $("#modal").addEventListener("click", e => { if (e.target.id === "modal") closeModal(); });
 const bar = (v, cls) => `<div class="bar ${cls || ""}"><i style="width:${pct(v)}%"></i></div>`;
@@ -105,34 +213,34 @@ const NAV_START = [];
 function showStartScreen() {
   renderNav(NAV_START);
   $("#content").innerHTML = `
-    <div class="start">
-      <div class="start-hero">
-        <svg class="start-logo" viewBox="0 0 40 40" aria-hidden="true">
-          <path d="M20 2 L36 8 V20 C36 30 29 36 20 38 C11 36 4 30 4 20 V8 Z" fill="#0d3b26"/>
-          <path d="M20 2 L36 8 V20 C36 30 29 36 20 38 C11 36 4 30 4 20 V8 Z" fill="none" stroke="#35e08a" stroke-width="1.4"/>
-          <circle cx="20" cy="19" r="6.5" fill="none" stroke="#35e08a" stroke-width="1.3"/>
-          <path d="M20 12.5v13M13.5 19h13M15.4 14.4l9.2 9.2M24.6 14.4l-9.2 9.2" stroke="#35e08a" stroke-width=".8" opacity=".7"/>
-        </svg>
-        <h1>TOUCHLINE</h1>
-        <p class="start-tag">The permanent football world. Every club, every fixture, every summer window — simulated with or without you.</p>
-        <div class="row" style="justify-content:center;margin-top:22px">
-          <button class="btn primary" style="padding:0 26px;min-height:46px;font-size:14.5px" onclick="stepChooseClub()">NEW CAREER ▸</button>
+    <div style="min-height:72vh;display:grid;place-items:center;padding:20px 14px">
+      <div style="width:100%;max-width:520px;text-align:center">
+        <div style="position:relative;width:96px;height:96px;margin:0 auto 18px;border-radius:28px;background:linear-gradient(135deg,#0d2818,#123a22);border:1.5px solid rgba(53,224,138,.35);box-shadow:0 18px 48px rgba(53,224,138,.25),inset 0 1px 0 rgba(255,255,255,.08);display:grid;place-items:center;animation:logo-float 3s ease-in-out infinite">
+          <svg viewBox="0 0 40 40" style="width:54px;height:54px;filter:drop-shadow(0 0 12px rgba(53,224,138,.6))"><path d="M20 2 L36 8 V20 C36 30 29 36 20 38 C11 36 4 30 4 20 V8 Z" fill="#0d3b26"/><path d="M20 2 L36 8 V20 C36 30 29 36 20 38 C11 36 4 30 4 20 V8 Z" fill="none" stroke="#35e08a" stroke-width="1.6"/><circle cx="20" cy="19" r="7" fill="none" stroke="#35e08a" stroke-width="1.3"/><path d="M20 12v14M13 19h14M15 14.5l10 9M25 14.5l-10 9" stroke="#35e08a" stroke-width=".9" opacity=".8"/></svg>
+          <div style="position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,#35e08a,#4ded9c);display:grid;place-items:center;font-size:11px;font-weight:900;color:#06120c;box-shadow:0 4px 12px rgba(53,224,138,.5)">v8</div>
         </div>
-        <p class="small muted" style="margin-top:10px">Starting a new career rebuilds the world and replaces any saved career.</p>
-      </div>
-      <div class="strip" style="margin:26px 0 12px">
-        <div class="st"><span class="st-l">Clubs</span><span class="st-v">402</span></div>
-        <div class="st"><span class="st-l">Leagues</span><span class="st-v">21</span></div>
-        <div class="st"><span class="st-l">Players</span><span class="st-v">9,000+</span></div>
-        <div class="st"><span class="st-l">Seasons</span><span class="st-v">∞</span></div>
-      </div>
-      <div class="grid g3">
-        <div class="card tight"><div class="row" style="gap:8px">${svg("tactics")}<b style="font-size:13px">Manage everything</b></div>
-          <p class="small muted" style="margin-top:6px">Tactics, roles and duties, training, contracts, scouting, transfers, staff, youth, finances, media and the board.</p></div>
-        <div class="card tight"><div class="row" style="gap:8px">${svg("comps")}<b style="font-size:13px">A living world</b></div>
-          <p class="small muted" style="margin-top:6px">Other clubs sack and appoint managers, buy and sell players, win and lose. Leagues, cups and Europe run without you.</p></div>
-        <div class="card tight"><div class="row" style="gap:8px">${svg("career")}<b style="font-size:13px">Your career</b></div>
-          <p class="small muted" style="margin-top:6px">Get sacked and find a new job. Build a reputation. Trophy room, records and season reviews are kept forever.</p></div>
+        <h1 style="font-size:38px;letter-spacing:-.04em;margin:0 0 6px;background:linear-gradient(180deg,#eaf5ef 10%,#a7d7be);-webkit-background-clip:text;background-clip:text;color:transparent">TOUCHLINE</h1>
+        <div style="display:inline-flex;align-items:center;gap:8px;padding:6px 14px;border-radius:999px;background:rgba(53,224,138,.1);border:1px solid rgba(53,224,138,.18);font-size:11px;letter-spacing:.14em;font-weight:800;color:var(--acc);margin-bottom:14px">● PREMIUM EDITION · OFFLINE · 402 CLUBS</div>
+        <p style="color:var(--tx2);font-size:14px;line-height:1.55;margin:0 auto;max-width:380px">A permanent football world. Elite clubs feel elite. Rivals never join rivals. Every window, every sacking, every derby — lives without you.</p>
+
+        <div style="margin:22px auto 0;display:grid;gap:10px;max-width:360px">
+          <button class="btn primary" style="min-height:56px;border-radius:16px;font-size:16px;letter-spacing:.02em;box-shadow:0 10px 28px rgba(53,224,138,.35),inset 0 1px 0 rgba(255,255,255,.2)" onclick="Juice.haptic('heavy');Juice.play('success');stepChooseClub()">▶ NEW CAREER</button>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div style="padding:12px;border-radius:14px;background:linear-gradient(165deg,#151a27,#10131a);border:1px solid var(--line2);text-align:left"><div style="font-size:20px">🌍</div><div style="font-weight:800;font-size:12px;margin-top:4px">Living world</div><div style="font-size:11px;color:var(--tx3);margin-top:2px">Clubs buy, sell, sack — without you</div></div>
+            <div style="padding:12px;border-radius:14px;background:linear-gradient(165deg,#151a27,#10131a);border:1px solid var(--line2);text-align:left"><div style="font-size:20px">⚔️</div><div style="font-weight:800;font-size:12px;margin-top:4px">Realism</div><div style="font-size:11px;color:var(--tx3);margin-top:2px">Haaland won't join United. Ever.</div></div>
+          </div>
+        </div>
+
+        <div style="margin-top:22px;display:flex;justify-content:center;gap:14px;flex-wrap:wrap">
+          <div style="text-align:center"><div style="font-size:22px;font-weight:900;letter-spacing:-.03em">402</div><div style="font-size:10px;letter-spacing:.14em;color:var(--tx3);font-weight:700">CLUBS</div></div>
+          <div style="width:1px;background:var(--line2)"></div>
+          <div style="text-align:center"><div style="font-size:22px;font-weight:900;letter-spacing:-.03em">21</div><div style="font-size:10px;letter-spacing:.14em;color:var(--tx3);font-weight:700">LEAGUES</div></div>
+          <div style="width:1px;background:var(--line2)"></div>
+          <div style="text-align:center"><div style="font-size:22px;font-weight:900;letter-spacing:-.03em">9K+</div><div style="font-size:10px;letter-spacing:.14em;color:var(--tx3);font-weight:700">PLAYERS</div></div>
+          <div style="width:1px;background:var(--line2)"></div>
+          <div style="text-align:center"><div style="font-size:22px;font-weight:900;letter-spacing:-.03em">∞</div><div style="font-size:10px;letter-spacing:.14em;color:var(--tx3);font-weight:700">SEASONS</div></div>
+        </div>
+        <p class="small muted" style="margin-top:18px;opacity:.6">v${VERSION} · Arm64 · Offline · No ads · No IAP</p>
       </div>
     </div>`;
 }
@@ -361,15 +469,45 @@ async function resumeMatch() {
   if (r && r.ok) { G.pendingMatch = false; await refreshState(); showResult(r.result); }
   else toast(esc((r && r.msg) || "No paused match."), 4000);
 }
+const SCREEN_ORDER = ["home","inbox","squad","tactics","match","comps","transfers","scouting","finances","calendar","table","club","board","training","career"];
+function getNavDir(newScreen, oldScreen) {
+  const a = SCREEN_ORDER.indexOf(oldScreen||"home");
+  const b = SCREEN_ORDER.indexOf(newScreen||"home");
+  if (a === -1 || b === -1) return 0;
+  return b > a ? 1 : b < a ? -1 : 0;
+}
 async function go(screen, sub) {
+  const prev = G.screen;
+  G.prevScreen = prev;
   G.screen = screen; G.sub = sub || null;
   $$("#nav button").forEach(b => b.classList.toggle("active", b.dataset.s === screen));
   $$("#tabbar button").forEach(b => b.classList.toggle("active", b.dataset.s === screen));
   $$("#sheet-grid button").forEach(b => b.classList.toggle("active", b.dataset.s === screen));
   $$("#tabbar button[data-s=__more]").forEach(b => b.classList.toggle("active", !TAB_IDS.includes(screen)));
   closeSheet();
-  const _c = $("#content"); if (_c) { _c.classList.remove("in"); void _c.offsetWidth; _c.classList.add("in"); }
-  $("#content").innerHTML = '<p class="muted">Loading…</p>';
+  Juice.haptic("nav");
+  Juice.play("nav");
+  const _c = $("#content");
+  if (_c) {
+    const dir = getNavDir(screen, prev);
+    _c.classList.remove("in","slide-left","slide-right");
+    _c.style.animation = "none";
+    void _c.offsetWidth;
+    _c.style.animation = "";
+    if (dir !== 0) {
+      _c.classList.add(dir > 0 ? "slide-left" : "slide-right");
+      // inject keyframes dynamically if not exist
+      if (!document.getElementById("slide-kf")) {
+        const s = document.createElement("style");
+        s.id = "slide-kf";
+        s.textContent = `@keyframes slide-left-in{from{opacity:0;transform:translateX(24px) scale(.98)}to{opacity:1;transform:translateX(0) scale(1)}}@keyframes slide-right-in{from{opacity:0;transform:translateX(-24px) scale(.98)}to{opacity:1;transform:translateX(0) scale(1)}}.slide-left{animation:slide-left-in .34s cubic-bezier(.2,.9,.3,1.2)}.slide-right{animation:slide-right-in .34s cubic-bezier(.2,.9,.3,1.2)}`;
+        document.head.appendChild(s);
+      }
+    } else {
+      _c.classList.add("in");
+    }
+  }
+  $("#content").innerHTML = '<div style="display:grid;place-items:center;padding:48px 20px;gap:16px"><div style="width:42px;height:42px;border-radius:14px;background:linear-gradient(135deg,var(--acc),var(--acc2));display:grid;place-items:center;animation:logo-float 1.8s infinite"><div style="width:22px;height:22px;border:2px solid white;border-radius:50%;border-top-color:transparent;animation:spin 0.8s linear infinite"></div></div><div class="small muted" style="font-weight:800;letter-spacing:.12em">LOADING</div></div><style>@keyframes spin{to{transform:rotate(360deg)}}</style>';
   try {
     if (screen === "home") await renderHome();
     else if (screen === "inbox") await renderInbox();
@@ -424,18 +562,27 @@ function paintTop() {
   const h = G.home; if (!h) return;
   const _pl0 = $("#btn-continue .pl"); if (_pl0 && !G.busy) _pl0.textContent = continueLabel();
   if (h.unemployed) {
-    $("#tb-club").innerHTML = `Unemployed<small>Available for appointment</small>`;
-    $("#tb-budget").textContent = "—"; $("#tb-board").textContent = "—";
+    $("#tb-club").innerHTML = `<span style="font-weight:900">UNEMPLOYED</span><small>Available</small>`;
+    $("#tb-budget").innerHTML = `<span class="ico">💼</span><span>—</span>`;
+    $("#tb-board").innerHTML = `<span class="ico">🛡️</span><span>—</span>`;
     paintCrest("");
   } else {
-    $("#tb-club").innerHTML = `${esc(h.club.name)}<small>${esc(h.club.league)}</small>`;
-    $("#tb-budget").innerHTML = `Budget <b>${money(h.finances.transfer_budget)}</b>`;
-    $("#tb-board").innerHTML = `Board <b>${Math.round(h.board.confidence)}</b>/100`;
+    $("#tb-club").innerHTML = `<span style="font-weight:900;letter-spacing:-.02em">${esc(h.club.name)}</span><small>${esc(h.club.league)}</small>`;
+    $("#tb-budget").innerHTML = `<span class="ico">💰</span><span>${money(h.finances.transfer_budget)}</span>`;
+    const conf = Math.round(h.board.confidence);
+    const confColor = conf < 30 ? "color:var(--red)" : conf < 55 ? "color:var(--amber)" : "color:var(--acc)";
+    $("#tb-board").innerHTML = `<span class="ico">🛡️</span><span style="${confColor};font-weight:900">${conf}</span>`;
     paintCrest(h.club.code);
   }
-  $("#tb-date").textContent = fmtDate(h.date);
+  // Game HUD date with icon
+  $("#tb-date").innerHTML = `<span style="opacity:.6">📅</span> ${fmtDate(h.date).replace(/, \d{4}$/,"")}`;
   const nf = h.next_fixture;
-  $("#tb-next").innerHTML = nf ? `Next: <b>${esc(nf.home_short)} v ${esc(nf.away_short)}</b> ${fmtDate(nf.date)}` : "No fixture";
+  if (nf) {
+    const isRival = isRivalry(nf.home_code, nf.away_code);
+    $("#tb-next").innerHTML = `${isRival ? '🔥 ' : ''}<b>${esc(nf.home_short)} v ${esc(nf.away_short)}</b> <span style="opacity:.6">${fmtDate(nf.date).split(",")[0]}</span>`;
+  } else {
+    $("#tb-next").innerHTML = `No fixture`;
+  }
   $("#btn-continue").disabled = G.busy;
   $("#btn-continue").classList.toggle("busy", G.busy);
 }
@@ -593,6 +740,14 @@ function pressHypeForFixture(f) {
   return "";
 }
 
+/* GAME HUD helpers */
+function gaugeSVG(value, max, color, label, icon) {
+  const pct = Math.max(0, Math.min(1, value / max));
+  const circ = 2 * Math.PI * 34;
+  const dash = circ * pct;
+  return `<div style="text-align:center;flex:1"><div style="position:relative;width:76px;height:76px;margin:0 auto"><svg viewBox="0 0 80 80" style="width:100%;height:100%;transform:rotate(-90deg)"><circle cx="40" cy="40" r="34" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="6"/><circle cx="40" cy="40" r="34" fill="none" stroke="${color}" stroke-width="6" stroke-linecap="round" stroke-dasharray="${dash} ${circ - dash}" style="filter:drop-shadow(0 0 6px ${color});transition:stroke-dasharray .9s cubic-bezier(.2,.9,.3,1.2)"/></svg><div style="position:absolute;inset:0;display:grid;place-items:center"><div><div style="font-size:18px">${icon}</div><div style="font-weight:900;font-size:15px;letter-spacing:-.02em">${Math.round(value)}${max===100?"":""}</div></div></div></div><div style="font-size:10px;letter-spacing:.12em;font-weight:800;color:var(--tx3);margin-top:6px">${label}</div></div>`;
+}
+
 async function renderHome() {
   await refreshState();
   const h = G.home;
@@ -605,103 +760,72 @@ async function renderHome() {
   const avail = Math.max(0, ft - ss.injured - ss.suspended - ss.unfit);
   const tbl = h.table || [];
   const mine = tbl.find(r => r.club_id === h.club.id);
-  const top = tbl.slice(0, 8);
-  const rowHtml = r => `<tr class="${r.club_id === h.club.id ? "me" : ""}">
-      <td class="num muted">${r.pos || "–"}</td>
-      <td><span class="cellclub">${crest(r.code)}<span>${esc(r.name)}</span></span></td>
-      <td class="num muted">${r.p}</td><td class="num"><b>${r.pts}</b></td></tr>`;
+  const top = tbl.slice(0, 5);
+  const rowHtml = r => `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;${r.club_id === h.club.id ? "background:linear-gradient(90deg,rgba(53,224,138,.15),transparent);border:1px solid rgba(53,224,138,.2)" : "background:rgba(255,255,255,.03);border:1px solid transparent"}"><span style="font-size:11px;font-weight:800;min-width:18px;text-align:center;color:${r.club_id===h.club.id?"var(--acc)":"var(--tx3)"}">${r.pos||"–"}</span>${crest(r.code)}<span style="flex:1;font-weight:700;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.name)}</span><span style="font-size:11px;color:var(--tx3)">${r.p}</span><b style="font-size:13px;min-width:22px;text-align:right">${r.pts}</b></div>`;
   const rivalry = f ? isRivalry(f.home_code, f.away_code) : null;
-  const intBreak = (() => {
-    try {
-      const d = new Date(h.date);
-      const m = d.getMonth();
-      // International breaks: March, June, September, October, November
-      if ([2,5,8,9,10].includes(m) && d.getDate() <= 14) {
-        const day = d.getDate();
-        if (day <= 14) return true;
-      }
-      return false;
-    } catch(e) { return false; }
-  })();
+  const intBreak = (() => { try { const d = new Date(h.date); const m = d.getMonth(); if ([2,5,8,9,10].includes(m) && d.getDate() <= 14) return true; return false; } catch(e){ return false; } })();
+
   $("#content").innerHTML = `
-    ${intBreak ? `<div class="int-break">
-      <h3>🌍 International break — squad depleted</h3>
-      <p>Many first-team players are away on international duty. Your youth and reserves will train with the first team. Use this time to scout, arrange friendlies, or rest. Check your inbox for national team reports.</p>
-      <div class="row" style="margin-top:10px">
-        <button class="btn sm" onclick="go('squad')">Check available players</button>
-        <button class="btn sm" onclick="go('calendar')">See schedule</button>
-        <button class="btn sm" onclick="go('scouting')">Scout internationally</button>
-      </div>
-    </div>` : ""}
+    ${intBreak ? `<div style="margin-bottom:12px;padding:14px;border-radius:16px;background:linear-gradient(135deg,#1a2e1a,#162a16);border:1px solid #2a4a2a;box-shadow:0 8px 24px rgba(0,0,0,.3)"><div style="display:flex;align-items:center;gap:10px"><div style="width:40px;height:40px;border-radius:12px;background:rgba(53,224,138,.15);display:grid;place-items:center;font-size:20px">🌍</div><div style="flex:1"><b style="font-size:13px;color:#35e08a">International break — squad depleted</b><div class="small muted" style="font-size:11px;margin-top:2px">Youth & reserves training with first team. Prime scouting time.</div></div><button class="btn sm" style="border-radius:10px" onclick="go('squad')">Squad</button></div></div>` : ""}
 
     ${f ? `
-      ${rivalry ? `<div class="derby-banner">🔥 ${esc(rivalry.name.toUpperCase())} — ${esc(f.home)} VS ${esc(f.away)} — BRAGGING RIGHTS AT STAKE 🔥</div>` : ""}
-      <div class="mhero ${compClass(f.code)}" style="--comp:${compColor(f.code)}">
-      <div class="mhero-top">${compLogo(f.code)}<span class="comp-dot"></span><span>${esc(compLabel(f))}${f.stage && f.stage !== "league" && f.comp ? " · " + esc(f.stage) : ""} ${rivalry ? `· <span class="rivalry-tag">🔥 ${esc(rivalry.name)}</span>` : ""}</span><span class="spacer"></span><span>${fmtDate(f.date)}</span></div>
-      <div class="mhero-body">
-        <div class="mhero-club">${crest(f.home_code, "xl")}<div class="nm">${esc(f.home)}</div><div class="small muted" style="font-size:11px">${f.is_home ? "HOME" : "AWAY"} · ${esc(f.venue||"").split(",")[0]||""}</div></div>
-        <div class="mhero-mid">
-          <div class="vs">VS</div>
-          <div class="when" style="font-size:14px;font-weight:800">${f.is_home ? "AT HOME" : "AWAY"}</div>
-          <div class="venue" style="font-size:11px">${esc(f.venue || "")}</div>
-          <div style="margin-top:6px;display:flex;gap:4px">${formPills(f.is_home ? (G.home.form||[]) : [], 3)} <span style="opacity:.4">vs</span> ${formPills(!f.is_home ? (G.home.form||[]) : [], 3)}</div>
+      ${rivalry ? `<div style="margin-bottom:10px;padding:10px 14px;border-radius:14px;background:linear-gradient(90deg,#ff3b30,#ff6b35);color:white;font-weight:900;letter-spacing:.08em;font-size:12px;text-align:center;box-shadow:0 6px 20px rgba(255,59,48,.4);animation:shimmer 2s infinite">🔥 ${esc(rivalry.name.toUpperCase())} — DERBY — BRAGGING RIGHTS 🔥</div>` : ""}
+      <div style="position:relative;border-radius:20px;overflow:hidden;background:linear-gradient(165deg,#151a27,#10131a);border:1px solid var(--line2);box-shadow:0 16px 48px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.08)">
+        <div style="position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,${compColor(f.code)},var(--acc2))"></div>
+        <div style="padding:10px 14px;display:flex;align-items:center;gap:8px;background:linear-gradient(90deg,rgba(0,0,0,.25),transparent);border-bottom:1px solid var(--line2)">${compLogo(f.code)}<span style="font-size:11px;letter-spacing:.12em;font-weight:800;color:var(--tx2)">${esc(compLabel(f))}${f.stage && f.stage!=="league"?" · "+esc(f.stage):""}</span><span class="spacer"></span><span style="font-size:11px;color:var(--tx3)">${fmtDate(f.date)}</span></div>
+        <div style="padding:16px 14px;display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center">
+          <div style="text-align:center"><div style="width:64px;height:64px;margin:0 auto 8px;border-radius:18px;background:linear-gradient(135deg,#1a2132,#151a27);border:1px solid rgba(255,255,255,.08);display:grid;place-items:center;box-shadow:0 6px 18px rgba(0,0,0,.3)">${crest(f.home_code,"xl")}</div><div style="font-weight:900;font-size:13px;letter-spacing:-.02em">${esc(f.home)}</div><div style="font-size:10px;color:var(--tx3);margin-top:2px">${f.is_home?"HOME":"AWAY"}</div><div style="margin-top:6px;display:flex;justify-content:center;gap:3px">${formPills(f.is_home?(G.home.form||[]):[],3)}</div></div>
+          <div style="text-align:center"><div style="width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,var(--acc),var(--acc2));display:grid;place-items:center;font-weight:900;font-size:14px;color:#06120c;box-shadow:0 6px 18px rgba(53,224,138,.4)">VS</div><div style="font-size:11px;font-weight:800;letter-spacing:.12em;color:var(--tx3);margin-top:8px">${f.is_home?"AT HOME":"AWAY"}</div><div style="font-size:10px;color:var(--tx3);margin-top:2px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.venue||"")}</div></div>
+          <div style="text-align:center"><div style="width:64px;height:64px;margin:0 auto 8px;border-radius:18px;background:linear-gradient(135deg,#1a2132,#151a27);border:1px solid rgba(255,255,255,.08);display:grid;place-items:center;box-shadow:0 6px 18px rgba(0,0,0,.3)">${crest(f.away_code,"xl")}</div><div style="font-weight:900;font-size:13px;letter-spacing:-.02em">${esc(f.away)}</div><div style="font-size:10px;color:var(--tx3);margin-top:2px">${!f.is_home?"HOME":"AWAY"}</div><div style="margin-top:6px;display:flex;justify-content:center;gap:3px">${formPills(!f.is_home?(G.home.form||[]):[],3)}</div></div>
         </div>
-        <div class="mhero-club">${crest(f.away_code, "xl")}<div class="nm">${esc(f.away)}</div><div class="small muted" style="font-size:11px">${!f.is_home ? "HOME" : "AWAY"}</div></div>
+        <div style="padding:0 12px 12px;display:flex;gap:8px">
+          <button class="btn primary" style="flex:1;min-height:48px;border-radius:14px;font-size:14px;box-shadow:0 8px 24px rgba(53,224,138,.35)" onclick="Juice.haptic('heavy');go('match')">▶ MATCH CENTRE</button>
+          <button class="btn" style="min-height:48px;border-radius:14px;min-width:54px" onclick="Juice.haptic('medium');quickPlay()">⚡</button>
+        </div>
       </div>
-      <div class="mhero-foot">
-        <button class="btn primary" style="min-height:44px;padding:0 22px;font-size:14px" onclick="go('match')">MATCH CENTRE ▸</button>
-        <button class="btn" style="min-height:44px" onclick="quickPlay()">⚡ Instant result</button>
+      <div style="margin-top:10px">${pressHypeForFixture(f)}</div>
+    ` : `<div style="padding:24px;border-radius:20px;background:linear-gradient(165deg,#151a27,#10131a);border:1px solid var(--line2);text-align:center"><div style="font-size:32px">🏁</div><h3 style="margin:8px 0 4px">Season complete</h3><p class="small muted">No fixtures left — continue for awards & new season.</p><button class="btn primary sm" style="margin-top:10px;border-radius:12px" onclick="doContinue()">Continue ▸</button></div>`}
+
+    <!-- MANAGER OFFICE HUD — circular gauges like a game -->
+    <div style="margin-top:14px;padding:14px;border-radius:20px;background:linear-gradient(165deg,#151a27,#10131a);border:1px solid var(--line2);box-shadow:var(--shadow-float)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><b style="font-size:13px;letter-spacing:.06em">MANAGER OFFICE</b><span style="font-size:10px;letter-spacing:.14em;color:var(--tx3);font-weight:800">SEASON ${G.home.season_label}</span></div>
+      <div style="display:flex;gap:6px;justify-content:space-around">
+        ${gaugeSVG(pos?pos.pos:10, pos?pos.size:20, pos && pos.pos<=4 ? "#35e08a" : pos && pos.pos>= (pos?pos.size:20)-2 ? "#ff5d6b" : "#5a9eff", "POSITION", "📊")}
+        ${gaugeSVG(h.board.confidence, 100, h.board.confidence<30?"#ff5d6b":h.board.confidence<55?"#ffb454":"#35e08a", "BOARD", "🏛️")}
+        ${gaugeSVG(h.fans.sentiment, 100, h.fans.sentiment<30?"#ff5d6b":"#ffb454", "FANS", "🔥")}
+        ${gaugeSVG(avail, ft||22, avail<12?"#ff5d6b":avail<16?"#ffb454":"#35e08a", "FIT", "🩺")}
+      </div>
+      <div style="margin-top:12px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+        <div style="padding:10px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);text-align:center"><div style="font-size:11px;color:var(--tx3);font-weight:700;letter-spacing:.08em">POINTS</div><div style="font-weight:900;font-size:18px;margin-top:2px">${pos?pos.pts:0}<span style="font-size:11px;color:var(--tx3);font-weight:700"> · ${pos&&pos.gd? (pos.gd>0?"+":"")+pos.gd+" GD":""}</span></div></div>
+        <div style="padding:10px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);text-align:center"><div style="font-size:11px;color:var(--tx3);font-weight:700;letter-spacing:.08em">FORM</div><div style="margin-top:4px;display:flex;justify-content:center;gap:3px">${pills||"<span class='small muted'>—</span>"}</div></div>
+        <div style="padding:10px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);text-align:center"><div style="font-size:11px;color:var(--tx3);font-weight:700;letter-spacing:.08em">CASH</div><div style="font-weight:900;font-size:14px;margin-top:2px;color:var(--acc)">${money(h.finances.cash)}</div></div>
       </div>
     </div>
-    ${pressHypeForFixture(f)}
-    ` : `<div class="card" style="text-align:center;padding:24px"><h3>No fixtures left</h3><p class="muted small" style="margin-top:6px">Season almost over — continue to process end of season, awards, and new contracts.</p><button class="btn primary sm" style="margin-top:10px" onclick="doContinue()">Continue to next season ▸</button></div>`}
 
-    <div class="strip">
-      <div class="st"><span class="st-l">Position</span><span class="st-v">${pos && pos.played ? `${pos.pos}<i>/${pos.size}</i>` : "—"} ${pos && pos.pos <= 4 ? '<span class="tag ROUTINE" style="font-size:10px">UCL</span>' : pos && pos.pos >= pos.size-2 ? '<span class="tag URGENT" style="font-size:10px">DANGER</span>' : ""}</span></div>
-      <div class="st"><span class="st-l">Points</span><span class="st-v">${pos ? pos.pts : 0}<i>${pos && pos.played ? ` · ${pos.gd > 0 ? "+" : ""}${pos.gd} GD` : ""}</i></span></div>
-      <div class="st"><span class="st-l">Form</span><span class="st-v">${pills || "<i>—</i>"}</span></div>
-      <div class="st"><span class="st-l">Board</span><span class="st-v">${Math.round(h.board.confidence)}<i>/100</i></span>${bar(h.board.confidence, h.board.confidence < 30 ? "red" : h.board.confidence < 55 ? "amber" : "")}</div>
-      <div class="st"><span class="st-l">Fans</span><span class="st-v">${Math.round(h.fans.sentiment)}</span>${bar(h.fans.sentiment, h.fans.sentiment < 30 ? "red" : "")}</div>
-      <div class="st"><span class="st-l">Cash</span><span class="st-v" style="font-size:15px">${money(h.finances.cash)}</span></div>
-    </div>
-
-    <div class="grid g2">
-      <div class="card tight">
-        <div class="sec-h"><h3>🩺 Squad readiness</h3><span class="spacer"></span><button class="btn sm" onclick="go('squad')">Open squad ▸</button></div>
-        <div class="kv"><span>Fit & available</span><b class="${avail < 12 ? "warn" : "good"}" style="font-size:16px">${avail}</b></div>
-        <div class="kv"><span>Injured</span><b class="${ss.injured ? "bad" : ""}">${ss.injured} ${ss.injured ? "— check physio room" : "— everyone fit"}</b></div>
-        <div class="kv"><span>Suspended</span><b class="${ss.suspended ? "bad" : ""}">${ss.suspended}</b></div>
-        <div class="kv"><span>Below match fitness</span><b class="${ss.unfit ? "warn" : ""}">${ss.unfit}</b></div>
-        ${avail < 14 ? `<div class="card tight" style="margin-top:10px;background:linear-gradient(135deg, #3d1a1e, #2a1214);border-color:#5a2226"><span class="small" style="color:var(--red)">⚠️ Thin squad — risk of playing unfit players. Consider recalling loanees or promoting youth.</span></div>` : ""}
-      </div>
-      <div class="card tight">
-        <div class="sec-h"><h3>🏛️ Board expectations</h3><span class="spacer"></span>${h.board.warning ? '<span class="tag URGENT">⚠️ WARNING</span>' : '<span class="tag ROUTINE">STABLE</span>'}</div>
-        ${h.board.objectives.map(o => `<div class="obj"><div class="t" style="display:flex;align-items:center;gap:8px">${esc(o.text)}${o.critical ? ' <span class="tag URGENT" style="font-size:10px">CRITICAL</span>' : ""}</div>
-          <div class="small muted">${esc(o.comp || o.status || "")}</div></div>`).join("")}
-        <button class="btn sm" style="margin-top:10px" onclick="go('board')">Boardroom ▸</button>
-      </div>
+    <!-- Quick actions — game cards -->
+    <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <button onclick="Juice.haptic('tap');go('squad')" style="text-align:left;padding:14px;border-radius:16px;background:linear-gradient(165deg,#1b2334,#151a27);border:1px solid rgba(255,255,255,.08);color:var(--tx);box-shadow:0 8px 24px rgba(0,0,0,.25)"><div style="display:flex;align-items:center;gap:10px"><div style="width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,#1e3a5f,#162a45);display:grid;place-items:center;font-size:18px">🩺</div><div style="flex:1"><div style="font-weight:800;font-size:13px">Squad</div><div style="font-size:11px;color:var(--tx3)">${avail} fit · ${ss.injured} injured · ${ss.suspended} banned</div></div><span style="opacity:.4">▸</span></div>${avail<14?`<div style="margin-top:8px;padding:6px 8px;border-radius:8px;background:rgba(255,93,107,.12);border:1px solid rgba(255,93,107,.18);font-size:11px;color:#ff8a94">⚠️ Thin squad — promote youth?</div>`:""}</button>
+      <button onclick="Juice.haptic('tap');go('board')" style="text-align:left;padding:14px;border-radius:16px;background:linear-gradient(165deg,#1f2937,#151a27);border:1px solid rgba(255,255,255,.08);color:var(--tx);box-shadow:0 8px 24px rgba(0,0,0,.25)"><div style="display:flex;align-items:center;gap:10px"><div style="width:40px;height:40px;border-radius:12px;background:${h.board.warning?"linear-gradient(135deg,#3d1a1e,#2a1214)":"linear-gradient(135deg,#1a2e1a,#162a16)"};display:grid;place-items:center;font-size:18px">${h.board.warning?"⚠️":"🏛️"}</div><div style="flex:1"><div style="font-weight:800;font-size:13px">Board</div><div style="font-size:11px;color:var(--tx3)">${h.board.objectives[0]?esc(h.board.objectives[0].text).slice(0,36):"Stable"}</div></div><span style="opacity:.4">▸</span></div><div style="margin-top:8px;display:flex;gap:6px"><span style="font-size:10px;padding:3px 8px;border-radius:999px;background:${h.board.warning?"rgba(255,93,107,.15)":"rgba(53,224,138,.12)"};color:${h.board.warning?"#ff8a94":"var(--acc)"};font-weight:800">${h.board.warning?"WARNING":"STABLE"}</span><span style="font-size:10px;color:var(--tx3)">${Math.round(h.board.confidence)}/100 confidence</span></div></button>
     </div>
 
     ${godCard(adv)}
 
-    <div class="grid g2" style="margin-top:14px">
-      <div class="card tight" style="padding:0">
-        <div class="sec-h" style="padding:12px 14px 6px"><h3>📊 ${esc(h.club.league)}</h3><span class="spacer"></span><button class="btn sm" onclick="go('table')">Full table ▸</button></div>
-        <table><tbody>${top.map(rowHtml).join("")}${mine && mine.pos > 8 ? `<tr><td colspan="4" class="muted small" style="text-align:center;padding:6px;background:rgba(53,224,138,.04)">··· you are ${mine.pos}th ···</td></tr>${rowHtml(mine)}` : ""}</tbody></table>
+    <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div style="padding:0;border-radius:16px;background:linear-gradient(165deg,#151a27,#10131a);border:1px solid var(--line2);overflow:hidden;box-shadow:var(--shadow-float)">
+        <div style="padding:12px 14px 8px;display:flex;align-items:center;justify-content:space-between"><b style="font-size:12px;letter-spacing:.06em">📊 ${esc(h.club.league)}</b><button class="btn sm" style="border-radius:10px;font-size:11px" onclick="go('table')">Full ▸</button></div>
+        <div style="padding:0 8px 8px;display:grid;gap:4px">${top.map(rowHtml).join("")}${mine && mine.pos>5 ? `<div style="text-align:center;padding:6px;font-size:10px;color:var(--tx3);letter-spacing:.1em">··· YOU ${mine.pos}TH ···</div>${rowHtml(mine)}`:""}</div>
       </div>
-      <div class="card tight" style="padding:0">
-        <div class="sec-h" style="padding:12px 14px 6px"><h3>📰 Latest news</h3><span class="spacer"></span>${h.unread ? `<span class="tag NEW">${h.unread} new</span>` : ""}<button class="btn sm" onclick="go('inbox')">Open ▸</button></div>
-        <div id="home-inbox"></div>
-        <div style="padding:10px 12px"><button class="btn sm wide" onclick="go('inbox')">Open news centre 📰</button></div>
+      <div style="padding:0;border-radius:16px;background:linear-gradient(165deg,#151a27,#10131a);border:1px solid var(--line2);overflow:hidden;box-shadow:var(--shadow-float)">
+        <div style="padding:12px 14px 8px;display:flex;align-items:center;justify-content:space-between"><b style="font-size:12px;letter-spacing:.06em">📰 News</b><div style="display:flex;gap:6px;align-items:center">${h.unread?`<span style="min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#ff3b30;color:white;font-size:10px;font-weight:900;display:grid;place-items:center">${h.unread}</span>`:""}<button class="btn sm" style="border-radius:10px;font-size:11px" onclick="go('inbox')">Open ▸</button></div></div>
+        <div id="home-inbox" style="padding:0 8px 8px;display:grid;gap:4px"></div>
       </div>
     </div>`;
   const ib = await api.get("/api/inbox");
-  $("#home-inbox").innerHTML = ib.items.slice(0, 4).map(m => `
-    <button class="mrow slim p-${(m.priority || "").toLowerCase()} ${m.read ? "" : "unread"}" onclick="openMail(${m.id})">
-      <span class="mdot"></span>
-      <div class="mmain"><div class="msub" style="font-size:13.5px">${esc(m.subject)}</div>
-        <div class="mmeta"><span class="mcat" style="font-size:10px">${esc(m.cat)}</span><span>${fmtDate(m.date)}</span></div></div>
-    </button>`).join("") || '<div style="padding:20px;text-align:center"><div class="small muted">No news — quiet day at the office</div></div>';
+  $("#home-inbox").innerHTML = ib.items.slice(0, 3).map(m => `
+    <button onclick="Juice.haptic('tap');openMail(${m.id})" style="text-align:left;width:100%;padding:10px;border-radius:12px;background:${m.read?"rgba(255,255,255,.03)":"linear-gradient(90deg,rgba(53,224,138,.12),rgba(255,255,255,.03))"};border:1px solid ${m.read?"rgba(255,255,255,.06)":"rgba(53,224,138,.18)"};color:var(--tx);display:flex;gap:8px;align-items:flex-start">
+      <span style="width:6px;height:6px;border-radius:50%;background:${m.priority==="URGENT"?"#ff3b30":m.priority==="IMPORTANT"?"#ffb454":"var(--acc)"};margin-top:6px;flex:none;box-shadow:0 0 8px ${m.priority==="URGENT"?"rgba(255,59,48,.6)":"rgba(53,224,138,.4)"};opacity:${m.read?".3":"1"}"></span>
+      <span style="flex:1;min-width:0"><span style="font-weight:800;font-size:12px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.subject)}</span><span style="font-size:10px;color:var(--tx3)">${esc(m.cat)} · ${fmtDate(m.date).split(",")[0]}</span></span>
+    </button>`).join("") || '<div style="padding:16px;text-align:center"><div class="small muted">Quiet day at the office ☕</div></div>';
 }
 function godCard(adv) {
   if (!adv || !adv.ok) return "";
@@ -910,78 +1034,43 @@ async function renderSquad() {
   const injured = all.filter(p => p.injured), susp = all.filter(p => p.suspended > 0);
   const unfit = all.filter(p => !p.injured && !p.suspended && p.condition < 0.9);
   const fit = all.filter(p => !p.injured && !p.suspended && p.condition >= 0.9);
-  const inForm = fit.slice().sort((a, b) => b.form - a.form).slice(0, 3);
-  const bucket = p => p.pos === "GK" ? "GK" : /DC|LD|RD|WB|LB|RB/.test(p.pos) ? "DEF" : /DM|MC|AM|WL|WR|W/.test(p.pos) ? "MID" : "ATT";
-  const buckets = {};
-  fit.forEach(p => { (buckets[bucket(p)] = buckets[bucket(p)] || []).push(p.ca); });
-  const weak = Object.entries(buckets).map(([k, v]) => [k, v.reduce((a, b) => a + b, 0) / v.length])
-    .sort((a, b) => a[1] - b[1])[0];
+
   $("#content").innerHTML = `
-    <div class="sec-h"><h3>Squad</h3><span class="spacer"></span>
-      <span class="hint">${G.home.club.name} · wage ${money(G.home.finances.wage_bill)}/yr</span></div>
-    <div class="strip">
-      <div class="st"><span class="st-l">Fit</span><span class="st-v good">${fit.length}</span></div>
-      <div class="st"><span class="st-l">Injured</span><span class="st-v ${injured.length ? "bad" : ""}">${injured.length}</span></div>
-      <div class="st"><span class="st-l">Suspended</span><span class="st-v ${susp.length ? "bad" : ""}">${susp.length}</span></div>
-      <div class="st"><span class="st-l">Unfit</span><span class="st-v ${unfit.length ? "warn" : ""}">${unfit.length}</span></div>
-      <div class="st"><span class="st-l">Avg age</span><span class="st-v">${(all.reduce((a, b) => a + b.age, 0) / (all.length || 1)).toFixed(1)}</span></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><b style="font-size:15px;letter-spacing:.04em">👕 DRESSING ROOM</b><span class="small muted">${G.home.club.name} · ${fit.length} fit · ${injured.length} injured</span></div>
+
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+      <div style="padding:12px;border-radius:14px;background:linear-gradient(135deg,#1a2e1a,#162a16);border:1px solid #2a4a2a;text-align:center"><div style="font-weight:900;font-size:20px;color:#35e08a">${fit.length}</div><div style="font-size:10px;letter-spacing:.12em;color:#8ab88a;font-weight:800">FIT</div></div>
+      <div style="padding:12px;border-radius:14px;background:linear-gradient(135deg,#3d1a1e,#2a1214);border:1px solid #5a2226;text-align:center"><div style="font-weight:900;font-size:20px;color:#ff5d6b">${injured.length}</div><div style="font-size:10px;letter-spacing:.12em;color:#ff8a94;font-weight:800">INJURED</div></div>
+      <div style="padding:12px;border-radius:14px;background:linear-gradient(135deg,#3a2c17,#2a1e0f);border:1px solid #5a4222;text-align:center"><div style="font-weight:900;font-size:20px;color:#ffb454">${susp.length}</div><div style="font-size:10px;letter-spacing:.12em;color:#ffcc8a;font-weight:800">BANNED</div></div>
+      <div style="padding:12px;border-radius:14px;background:linear-gradient(135deg,#1a2132,#151a27);border:1px solid var(--line2);text-align:center"><div style="font-weight:900;font-size:20px">${(all.reduce((a,b)=>a+b.age,0)/(all.length||1)).toFixed(1)}</div><div style="font-size:10px;letter-spacing:.12em;color:var(--tx3);font-weight:800">AVG AGE</div></div>
     </div>
-    <div class="grid g2">
-      <div class="card tight">
-        <div class="sec-h"><h3>Unavailable</h3></div>
-        ${injured.map(p => `<div class="kv"><span class="bad">${esc(p.name)}</span><b class="small muted">${esc(p.injury)} · ${p.return_date ? fmtDate(p.return_date) : "—"}</b></div>`).join("")
-          + susp.map(p => `<div class="kv"><span class="warn">${esc(p.name)}</span><b class="small muted">suspended ${p.suspended}</b></div>`).join("")
-          || '<p class="muted small">Everyone is available.</p>'}
-      </div>
-      <div class="card tight">
-        <div class="sec-h"><h3>Form &amp; balance</h3></div>
-        ${inForm.map(p => `<div class="kv"><span>${esc(p.name)} <i class="muted small">${esc(p.pos)}</i></span><b class="good">+${p.form.toFixed(1)}</b></div>`).join("")}
-        ${weak ? `<div class="kv"><span>Weakest area (fit)</span><b class="warn">${weak[0]} · ${weak[1].toFixed(1)}</b></div>` : ""}
-      </div>
+
+    <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:10px;scrollbar-width:none">
+      ${groups.map(g => `<button onclick="Juice.haptic('tap');SQUAD_FILTER='${g}';renderSquad()" style="flex:none;padding:8px 14px;border-radius:12px;font-weight:800;font-size:12px;letter-spacing:.02em;border:1px solid ${SQUAD_FILTER===g?"rgba(53,224,138,.4)":"rgba(255,255,255,.08)"};background:${SQUAD_FILTER===g?"linear-gradient(135deg,var(--acc),var(--acc2))":"rgba(255,255,255,.05)"};color:${SQUAD_FILTER===g?"#06120c":"var(--tx2)"}">${g}</button>`).join("")}
+      <input id="sq-q" placeholder="Search…" value="${esc(SQUAD_Q||"")}" oninput="SQUAD_Q=this.value;filterSquadList()" style="flex:none;width:120px;min-height:36px;border-radius:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:var(--tx);padding:0 12px">
     </div>
-    <div class="tabs">
-      ${groups.map(g => `<button class="${SQUAD_FILTER === g ? "active" : ""}" onclick="SQUAD_FILTER='${g}';renderSquad()">${g}</button>`).join("")}
-      <input id="sq-q" placeholder="Filter by name…" value="${esc(SQUAD_Q || "")}" oninput="SQUAD_Q=this.value;filterSquadList()" style="min-height:32px;margin-left:auto;width:130px">
-      <select onchange="SQUAD_SORT=this.value;renderSquad()">
-        ${[["ca", "Ability"], ["pos", "Position"], ["age", "Age"], ["value", "Value"], ["wage", "Wage"],
-           ["goals", "Goals"], ["condition", "Condition"], ["name", "Name"]]
-          .map(o => `<option value="${o[0]}" ${SQUAD_SORT === o[0] ? "selected" : ""}>Sort: ${o[1]}</option>`).join("")}
-      </select>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:10px">
+      ${players.map(p => {
+        const ini = p.name.split(" ").map(w=>w[0]).slice(0,2).join("").toUpperCase();
+        const condColor = p.condition>1.02 ? "#35e08a" : p.condition<0.92 ? "#ff5d6b" : "#ffb454";
+        const status = p.injured ? "INJ" : p.suspended ? "BAN" : p.condition<0.9 ? "UNFIT" : "FIT";
+        const statusColor = p.injured ? "#ff5d6b" : p.suspended ? "#ffb454" : p.condition<0.9 ? "#ffb454" : "#35e08a";
+        return `<button onclick="Juice.haptic('tap');go('player',${p.id})" style="text-align:left;padding:12px;border-radius:16px;background:linear-gradient(165deg,#1a2132,#151a27);border:1px solid ${p.listed?"rgba(255,93,107,.35)":"rgba(255,255,255,.08)"};color:var(--tx);position:relative;overflow:hidden;box-shadow:0 6px 20px rgba(0,0,0,.25);transition:transform .18s">
+          <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${condColor}"></div>
+          <div style="display:flex;align-items:flex-start;gap:10px">
+            <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#242d44,#1a2132);border:1px solid rgba(255,255,255,.08);display:grid;place-items:center;font-weight:900;font-size:13px">${ini}</div>
+            <div style="flex:1;min-width:0"><div style="font-weight:900;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.name)}</div><div style="display:flex;gap:4px;margin-top:3px"><span style="font-size:10px;padding:2px 6px;border-radius:6px;background:rgba(255,255,255,.08);font-weight:800">${esc(p.pos)}</span><span style="font-size:10px;padding:2px 6px;border-radius:6px;background:${statusColor}20;color:${statusColor};font-weight:800">${status}</span></div></div>
+            <div style="text-align:right"><div style="font-weight:900;font-size:13px;color:${condColor}">${p.ca.toFixed(1)}</div><div style="font-size:10px;color:var(--tx3)">${p.age}y</div></div>
+          </div>
+          <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center"><span style="font-size:11px;color:var(--tx3)">${stars(p.stars)} · ${money(p.value)}</span><span style="font-size:10px;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,.06);font-weight:700">${p.goals}G ${p.assists}A</span></div>
+          ${p.listed?`<div style="margin-top:8px;padding:4px 8px;border-radius:8px;background:rgba(255,93,107,.12);border:1px solid rgba(255,93,107,.18);font-size:10px;font-weight:800;color:#ff8a94;text-align:center">💸 LISTED</div>`:""}
+        </button>`;
+      }).join("")}
     </div>
-    <div class="sq-list" style="margin-top:10px">${players.map(p => `<div class="sqr" style="cursor:default">
-      <span class="pos">${esc(p.pos)}</span>
-      <button class="sqr-n" style="text-align:left;flex:1;background:none;border:0" onclick="go('player',${p.id})"><b>${esc(p.name)}</b>${p.injured ? ` <span class="tag L">${esc(p.injury)}</span>` : p.suspended ? ' <span class="tag L">susp</span>' : ""} ${p.listed ? '<span class="tag URGENT" style="font-size:9px">LISTED</span>' : ""}
-        <i>${stars(p.stars)} · ${p.age}y · ${p.ca.toFixed(1)} · ${money(p.value)} · ${wk(p.wage)}</i></button>
-      <span class="sqr-r" style="flex-direction:column;align-items:flex-end;gap:6px">
-        <span class="tag ${condClass(p.condition)}">${p.condition.toFixed(2)}</span>
-        <div class="sell-quick" onclick="event.stopPropagation()">
-          <button class="sell" onclick="quickSell(${p.id},'${esc(p.name).replace(/'/g,"\\'")}')" title="List for sale - one tap">Sell 💸</button>
-          <button onclick="go('player',${p.id})">View</button>
-        </div>
-      </span>
-    </div>`).join("")}</div>
-    <div class="card sq-table" style="padding:0;overflow:auto">
-      <table><thead><tr>
-        <th>Pos</th><th>Name</th><th class="num">Age</th><th class="num">Nat</th>
-        <th class="num">Stars</th><th class="num">CA</th><th class="num">PA</th>
-        <th class="num">Cond</th><th class="num">Fit</th><th class="num">Fat</th>
-        <th class="num">Morale</th><th class="num">Form</th>
-        <th class="num">Apps</th><th class="num">G</th><th class="num">A</th><th class="num">Rating</th>
-        <th class="num">Value</th><th class="num">Wage</th><th>Status</th></tr></thead>
-      <tbody>${players.map(p => `<tr onclick="go('player',${p.id})" style="cursor:pointer">
-        <td><span class="pos">${esc(p.pos)}</span>${p.pos2 ? '<span class="muted small">/' + esc(p.pos2) + "</span>" : ""}</td>
-        <td><b>${esc(p.name)}</b>${p.injured ? ' <span class="tag L">' + esc(p.injury) + "</span>" : ""}${p.suspended ? ' <span class="tag L">susp</span>' : ""}</td>
-        <td class="num">${p.age}</td><td class="num small">${esc(p.nat)}</td>
-        <td class="num">${stars(p.stars)}</td><td class="num mono">${p.ca.toFixed(1)}</td>
-        <td class="num mono muted">${p.pa.toFixed(1)}</td>
-        <td class="num"><span class="tag ${condClass(p.condition)}">${p.condition.toFixed(2)}</span></td>
-        <td class="num">${Math.round(p.fitness)}</td><td class="num">${Math.round(p.fatigue)}</td>
-        <td class="num">${Math.round(p.morale)}</td><td class="num">${p.form > 0 ? "+" : ""}${p.form.toFixed(1)}</td>
-        <td class="num">${p.apps}</td><td class="num">${p.goals}</td><td class="num">${p.assists}</td>
-        <td class="num">${p.avg_rating ? p.avg_rating.toFixed(2) : "—"}</td>
-        <td class="num">${money(p.value)}</td><td class="num small">${wk(p.wage)}</td>
-        <td class="small muted">${esc(p.promise)}</td></tr>`).join("")}</tbody></table>
-    </div>`;
+
+    ${injured.length||susp.length?`<div style="margin-top:14px;padding:12px;border-radius:14px;background:linear-gradient(135deg,#1a1a2e,#16213e);border:1px solid #0f3460"><b style="font-size:12px">🩺 Physio room</b><div style="margin-top:8px;display:grid;gap:6px">${injured.map(p=>`<div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:#ff8a94">${esc(p.name)}</span><span class="small muted">${esc(p.injury)} · ${p.return_date?fmtDate(p.return_date):"—"}</span></div>`).join("")}${susp.map(p=>`<div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:#ffcc8a">${esc(p.name)}</span><span class="small muted">suspended ${p.suspended}</span></div>`).join("")}</div></div>`:""}
+  `;
 }
 
 /* ------------------------------------------------------------------- PLAYER */
@@ -2612,29 +2701,54 @@ function svg(id) {
 const TAB_IDS = ["home", "inbox", "squad", "match", "comps"];
 
 const TAB_LABEL = { home: "Home", inbox: "News", squad: "Squad", match: "Match", comps: "Comps" };
+const TAB_ICON_EMOJI = { home: "🏠", inbox: "📰", squad: "👥", match: "⚽", comps: "🏆" };
 function renderTabbar(items) {
   const el = $("#tabbar"); if (!el) return;
   const tabs = TAB_IDS.map(id => items.find(i => i[0] === id)).filter(Boolean);
-  el.innerHTML = tabs.map(n =>
-    `<button data-s="${n[0]}" onclick="go('${n[0]}')">${svg(n[0])}<span>${TAB_LABEL[n[0]] || n[2].split(" ")[0]}</span>` +
+  // Floating dock game style
+  el.innerHTML = `<div class="dock">${tabs.map(n =>
+    `<button data-s="${n[0]}" onclick="Juice.haptic('tap');go('${n[0]}')"><span style="font-size:18px">${TAB_ICON_EMOJI[n[0]]||""}</span><span>${TAB_LABEL[n[0]] || n[2].split(" ")[0]}</span>` +
     `<span class="tbadge hidden" data-badge="${n[0]}"></span></button>`).join("") +
-    `<button data-s="__more" onclick="openSheet()">${svg("more")}<span>More</span></button>`;
+    `<button data-s="__more" onclick="Juice.haptic('tap');openSheet()"><span style="font-size:18px">⋯</span><span>More</span></button></div>`;
+  // add dock style if not present
+  if (!document.getElementById("dock-style")) {
+    const s = document.createElement("style"); s.id = "dock-style";
+    s.textContent = `#tabbar{position:fixed;left:0;right:0;bottom:0;z-index:40;padding:0 10px 10px;pointer-events:none;display:flex;justify-content:center}#tabbar .dock{pointer-events:auto;display:flex;gap:4px;padding:6px;background:linear-gradient(180deg,rgba(22,28,42,.92),rgba(14,18,28,.96));backdrop-filter:blur(24px) saturate(1.2);border:1px solid rgba(255,255,255,.1);border-radius:20px;box-shadow:0 12px 36px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.06) inset,0 1px 0 rgba(255,255,255,.08) inset}#tabbar .dock button{position:relative;min-width:62px;min-height:48px;padding:6px 10px;border-radius:14px;border:0;background:transparent;color:var(--tx3);display:flex;flex-direction:column;align-items:center;gap:2px;font-size:10px;font-weight:800;letter-spacing:.04em;transition:all .22s cubic-bezier(.2,.9,.3,1.2)}#tabbar .dock button.active{background:linear-gradient(135deg,var(--acc),var(--acc2));color:#06120c;transform:translateY(-2px);box-shadow:0 6px 18px rgba(53,224,138,.4),inset 0 1px 0 rgba(255,255,255,.3)}#tabbar .dock button:active{transform:scale(.92)}#tabbar .dock .tbadge{position:absolute;top:2px;right:6px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:#ff3b30;color:white;font-size:10px;font-weight:900;display:grid;place-items:center;box-shadow:0 2px 8px rgba(255,59,48,.5)}#tabbar .dock .tbadge.hidden{display:none}`;
+    document.head.appendChild(s);
+  }
 }
 function renderSheet(items) {
   const el = $("#sheet-grid"); if (!el) return;
   const inBar = new Set(TAB_IDS);
-  el.innerHTML = items.filter(i => !inBar.has(i[0])).map(n =>
-    `<button data-s="${n[0]}" onclick="go('${n[0]}')">${svg(n[0])}<span>${n[2]}</span>` +
-    `<span class="tbadge hidden" data-badge="${n[0]}"></span></button>`).join("");
+  const moreItems = items.filter(i => !inBar.has(i[0]));
+  const MORE_EMOJI = { transfers: "💸", scouting: "🔍", finances: "💰", club: "🏟️", calendar: "📅", table: "📊", training: "🏋️", career: "🏅", board: "🏛️", media: "🎤", staff: "👔", youth: "🌱", jobs: "💼" };
+  el.innerHTML = moreItems.map(n =>
+    `<button data-s="${n[0]}" onclick="Juice.haptic('tap');go('${n[0]}')" style="position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border-radius:16px;background:linear-gradient(165deg,#1a2132,#151a27);border:1px solid rgba(255,255,255,.08);color:var(--tx);font-weight:700;font-size:12px"><span style="font-size:24px">${MORE_EMOJI[n[0]]||"📦"}</span><span>${n[2]}</span>` +
+    `<span class="tbadge hidden" data-badge="${n[0]}" style="position:absolute;top:6px;right:6px;min-width:18px;height:18px;border-radius:999px;background:#ff3b30;color:white;font-size:10px;display:grid;place-items:center"></span></button>`).join("");
+  // sheet styling
+  const sheet = $("#sheet");
+  if (sheet && !document.getElementById("sheet-game-style")) {
+    const s = document.createElement("style"); s.id = "sheet-game-style";
+    s.textContent = `#sheet{position:fixed;inset:0;z-index:50;background:rgba(6,8,12,.72);backdrop-filter:blur(18px);display:none}#sheet.open{display:grid;place-items:end center}#sheet.vis{animation:sheet-in .32s cubic-bezier(.2,.9,.3,1.2)}@keyframes sheet-in{from{opacity:0}to{opacity:1}}#sheet .sheet-box{width:100%;max-width:520px;background:linear-gradient(180deg,#1a2132,#10131a);border-radius:24px 24px 0 0;border:1px solid rgba(255,255,255,.1);border-bottom:0;box-shadow:0 -12px 48px rgba(0,0,0,.6);padding:12px 12px calc(20px + env(safe-area-inset-bottom));transform:translateY(100%);transition:transform .34s cubic-bezier(.2,.9,.3,1.2)}#sheet.vis .sheet-box{transform:translateY(0)}#sheet-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}`;
+    document.head.appendChild(s);
+    if (!sheet.querySelector(".sheet-box")) {
+      const inner = sheet.innerHTML;
+      sheet.innerHTML = `<div class="sheet-box"><div style="width:36px;height:4px;border-radius:999px;background:rgba(255,255,255,.18);margin:0 auto 12px"></div><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><b style="font-size:15px">More</b><button onclick="closeSheet()" style="width:32px;height:32px;border-radius:10px;background:rgba(255,255,255,.08);border:0;color:var(--tx)">✕</button></div><div id="sheet-grid">${inner}</div></div>`;
+    }
+  }
 }
 function openSheet() {
-  const s = $("#sheet"); s.classList.add("open");
+  Juice.haptic("light");
+  const s = $("#sheet"); if (!s) return;
+  // ensure sheet-box exists
+  if (!s.querySelector(".sheet-box")) renderSheet(NAV);
+  s.classList.add("open");
   requestAnimationFrame(() => s.classList.add("vis"));
 }
 function closeSheet() {
   const s = $("#sheet"); if (!s || !s.classList.contains("open")) return;
   s.classList.remove("vis");
-  setTimeout(() => s.classList.remove("open"), 220);
+  setTimeout(() => s.classList.remove("open"), 260);
 }
 
 /* ---------------- club crests: procedural shields in real club colours -------- */
