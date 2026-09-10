@@ -1775,7 +1775,7 @@ async function renderTable() {
         <th class="num">D</th><th class="num">L</th><th class="num">GF</th><th class="num">GA</th>
         <th class="num">GD</th><th class="num">Pts</th><th>Form</th></tr></thead>
       <tbody>${j.rows.map(r => `<tr class="${r.club_id === j.my_club ? "me" : ""} ${r.zone === "promotion" ? "zp" : r.zone === "relegation" ? "zr" : ""}">
-        <td class="num">${r.pos}${r.zone === "promotion" ? ' <span style="color:var(--good)">▲</span>' : r.zone === "relegation" ? ' <span style="color:var(--bad)">▼</span>' : ""}</td>
+        <td class="num">${r.pos || "–"}${r.zone === "promotion" ? ' <span style="color:var(--good)">▲</span>' : r.zone === "relegation" ? ' <span style="color:var(--bad)">▼</span>' : ""}</td>
         <td><span class="cellclub">${crest(r.code)}<span>${esc(r.name)} <i class="muted small">${r.rep}</i></span></span></td>
         <td class="num">${r.p}</td><td class="num">${r.w}</td><td class="num">${r.d}</td><td class="num">${r.l}</td>
         <td class="num">${r.gf}</td><td class="num">${r.ga}</td>
