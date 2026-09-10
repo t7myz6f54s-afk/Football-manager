@@ -60,3 +60,7 @@ Design tokens in style.css; nav restructure (bottom bar: Home/Squad/Tactics/Matc
 - Squad live name filter.
 - tests/multiseason.py: TWO-SEASON proof passed (trophies 26 La Liga; 27 Copa+La Liga; ageing/rep/finances carry).
 - Remaining hold cycles: godfather-on visual, key-mode HT, desktop inbox; final hour 05:27 freeze→APK→release→report.
+
+## Incident ~00:18 UTC (resolved)
+- A range-based edit (staff/youth commit 950d768) used an end-anchor that sat BEFORE its start anchor, duplicating then deleting renderCalendar/renderTable/renderComps/renderCompHub/renderClub. Detected via missing-function grep; restored verbatim from commit 292ccce; audit2 re-run clean; pushed.
+- GUARD ADDED: tests/ui_sanity.js fails if any go() screen lacks a definition, any onclick handler is undefined, or key CSS hooks vanish. Run before every commit from now on.
