@@ -177,7 +177,42 @@ def connect():
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("PRAGMA synchronous=NORMAL")
     con.execute("PRAGMA busy_timeout=8000")
+    ensure_facilities_schema(con)
     return con
+
+
+def _fac_level(f):
+    """Derive a 1-10 facility level from the legacy 1-20 facilities rating."""
+    return max(1, min(10, int(f / 2 + 0.5)))
+
+
+def ensure_facilities_schema(con):
+    """Idempotent migration for the facilities table (old saves have none).
+
+    Levels are derived from the legacy clubs.facilities rating; the *_base
+    columns freeze the baseline so upgrades measure their effect RELATIVE to
+    it — an un-upgraded club behaves exactly like the old code.
+    """
+    con.execute("""CREATE TABLE IF NOT EXISTS club_facilities (
+        club_id INT PRIMARY KEY,
+        training INT DEFAULT 1, medical INT DEFAULT 1, youth INT DEFAULT 1, stadium INT DEFAULT 1,
+        train_base INT DEFAULT 1, med_base INT DEFAULT 1, youth_base INT DEFAULT 1, stad_base INT DEFAULT 1,
+        train_done TEXT, med_done TEXT, youth_done TEXT, stadium_done TEXT
+    )""")
+    has_clubs = con.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='clubs'").fetchone()
+    if not has_clubs:
+        return  # fresh DB — build_world creates clubs (backfill runs on next connect)
+    clubs = con.execute("SELECT id, facilities FROM clubs").fetchall()
+    missing = [c for c in clubs if not con.execute(
+        "SELECT 1 FROM club_facilities WHERE club_id=?", (c["id"],)).fetchone()]
+    if missing:
+        for c in missing:
+            l = _fac_level(c["facilities"] or 10)
+            con.execute("""INSERT INTO club_facilities (club_id,training,medical,youth,stadium,
+                train_base,med_base,youth_base,stad_base) VALUES (?,?,?,?,?,?,?,?,?)""",
+                (c["id"], l, l, l, l, l, l, l, l))
+        con.commit()
 
 
 # -------------------------------------------------------------- player making
@@ -1066,6 +1101,7 @@ def build_world(seed=20260701):
     con.execute("INSERT INTO meta VALUES ('built','1') ON CONFLICT(k) DO UPDATE SET v='1'")
     con.execute("INSERT INTO meta VALUES ('season_start',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", (SEASON_START,))
     con.commit()
+    ensure_facilities_schema(con)  # backfill levels for the freshly built clubs
     con.close()
     return DB_PATH
 

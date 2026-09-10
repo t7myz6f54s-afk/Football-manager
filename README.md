@@ -179,7 +179,23 @@ Massive overhaul addressing **"It still feels like a browser trying to act like 
 
 A standalone build of the same game is published as a release asset:
 
-**[Touchline-1.13.1-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.13.1/Touchline-1.13.1-arm64.apk)** — ~14 MB, Android 7.0+, 64-bit ARM, versionCode 17.
+**[Touchline-1.14.0-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.14.0/Touchline-1.14.0-arm64.apk)** — ~14 MB, Android 7.0+, 64-bit ARM, versionCode 18.
+
+### What changed in 1.14 — FACILITIES & INFRASTRUCTURE
+Invest in your club, not just your squad. New **Facilities** screen (Club section): four investment areas — **training ground, medical centre, youth academy, stadium** — each with a 10-segment level bar, live cost, and build time.
+
+- **Pay for it, build for 28 days** (stadium 56), one project at a time per area. Costs scale with level and club tier (€0.7m for a small club's medical unit to multi-million stadium redevelopments).
+- **Every upgrade changes the simulation, not a stat bar:**
+  - *Training ground* — raises player conditioning and development speed
+  - *Medical centre* — injured players recover up to 18% faster
+  - *Youth academy* — intake quality improves as the academy levels rise
+  - *Stadium* — attendance and ticket revenue; new revenue hits the accounts at completion
+- Effects are relative to your club's starting baseline, so a club that never upgrades plays exactly as it always did.
+- Board is told when work starts and finishes (inbox).
+
+Also in this release — **seeded determinism fix**: the world simulation could previously drift between runs of the same seed (unseeded friendly lineups and database-level random ordering). The sim is now fully reproducible per seed, which is also how this release was regression-verified: a 3-season seeded run is bit-identical with and without the facilities code.
+
+Previous: [1.13.1](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.13.1/Touchline-1.13.1-arm64.apk) (matchday speed), [1.13.0](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.13.0/Touchline-1.13.0-arm64.apk) (save slots).
 
 ### What changed in 1.13.1 — MATCHDAY SPEED
 The "clunk" you felt when CONTINUE landed on a matchday is gone. The world simulation's

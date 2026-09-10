@@ -37,12 +37,13 @@ gradle --no-daemon --console=plain assembleDebug
 echo "[3/4] collecting APK"
 APK=app/build/outputs/apk/debug/app-debug.apk
 test -f "$APK" || { echo "APK not found"; exit 1; }
+VER=$(sed -n 's/.*versionName "\(.*\)"/\1/p' app/build.gradle)
 mkdir -p ../release
-cp "$APK" ../release/Touchline-1.13.1-arm64.apk
-ls -lh ../release/Touchline-1.13.1-arm64.apk
+cp "$APK" "../release/Touchline-${VER}-arm64.apk"
+ls -lh "../release/Touchline-${VER}-arm64.apk"
 
 echo "[4/4] verifying"
 BT=/usr/local/android-sdk/build-tools/34.0.0
-"$BT/aapt2" dump badging ../release/Touchline-1.13.1-arm64.apk | head -6 || true
-unzip -l ../release/Touchline-1.13.1-arm64.apk | grep -cE "assets/game/|assets/chaquopy|lib/arm64-v8a" || true
+"$BT/aapt2" dump badging "../release/Touchline-${VER}-arm64.apk" | head -6 || true
+unzip -l "../release/Touchline-${VER}-arm64.apk" | grep -cE "assets/game/|assets/chaquopy|lib/arm64-v8a" || true
 echo "done"

@@ -225,7 +225,7 @@ const NAV=[
 ];
 /* Grouped menu for the More sheet — every screen, organised, no emoji wall */
 const MENU_GROUPS=[
-  {label:"Club", items:[["tactics","Tactics","Formations & instructions"],["training","Training","Weekly schedule"],["youth","Youth","Academy & intake"],["staff","Staff","Backroom team"]]},
+  {label:"Club", items:[["tactics","Tactics","Formations & instructions"],["training","Training","Weekly schedule"],["youth","Youth","Academy & intake"],["facilities","Facilities","Invest in your ground"],["staff","Staff","Backroom team"]]},
   {label:"Market", items:[["transfers","Transfers","Targets, bids, offers"],["scouting","Scouting","Scouts & knowledge"],["finances","Finances","Budget & ledger"]]},
   {label:"World", items:[["table","Table","League standings"],["comps","Competitions","All tournaments"],["calendar","Calendar","Fixtures by date"],["inbox","News","Inbox & media"]]},
   {label:"Office", items:[["board","Board","Confidence & objectives"],["media","Media","Press & narrative"],["career","Career","History & trophies"]]},
@@ -262,6 +262,7 @@ async function go(screen,sub){
     else if(screen==="finances") await renderFinances();
     else if(screen==="staff") await renderStaff();
     else if(screen==="youth") await renderYouth();
+    else if(screen==="facilities") await renderFacilities();
     else if(screen==="calendar") await renderCalendar();
     else if(screen==="table") await renderTable();
     else if(screen==="stats") await renderStats();
@@ -770,6 +771,29 @@ async function renderStaff(){
 async function renderYouth(){
   const j=await api.get("/api/screen/youth"); await refreshState();
   $("#content").innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:13px"> ACADEMY · recruitment ${j.rating}/20 · facilities ${j.facilities}/20</b></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">${j.players.map(p=>`<button onclick="go('player',${p.id})" style="text-align:left;padding:10px;border-radius:14px;background:var(--panel);border:1px solid var(--line);color:var(--tx)"><div style="display:flex;gap:8px;align-items:center"><span class="pos">${esc(p.pos)}</span><b style="font-size:11px;flex:1">${esc(p.name)}</b><span style="font-size:10px">${p.age}y</span></div><div class="small muted" style="font-size:10px;margin-top:4px">${esc(p.personality)} · CA ${p.ca.toFixed(1)} / PA ${p.pa.toFixed(1)}</div><div style="margin-top:6px;font-size:10px">${stars(p.stars)} now · ${stars(p.stars_pa)} pot</div></button>`).join("")||'<p class="small muted">No youth yet</p>'}</div>`;
+}
+function facBar(lv){ return `<div style="display:flex;gap:3px;margin-top:6px">${Array.from({length:10},(_,i)=>`<span style="width:11px;height:11px;border-radius:3px;background:${i<lv?"linear-gradient(165deg,var(--acc2),var(--acc))":"var(--panel3)"};opacity:${i<lv?1:.55}"></span>`).join("")}</div>`; }
+async function renderFacilities(){
+  const j=await api.get("/api/screen/facilities"); await refreshState();
+  $("#content").innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><b style="font-size:13px">FACILITIES · overall ${j.overall}/20</b><span class="spacer"></span><span class="small muted" style="font-size:11px">cash ${money(j.cash)}</span></div>
+  <div class="small muted" style="font-size:10.5px;margin-bottom:10px">Paid from club cash · one project at a time per area · effects apply when work is done</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px">${j.items.map(it=>{
+    const afford=!it.next_cost||j.cash>=it.next_cost;
+    return `<div class="card tight"><div style="display:flex;justify-content:space-between;align-items:baseline"><h3>${esc(it.label)}</h3><b style="font-size:11px;font-family:var(--ff-mono)">${it.level}/${it.max}</b></div>${facBar(it.level)}
+    <p class="small muted" style="font-size:10.5px;margin-top:8px;line-height:1.45">${esc(it.effect)}</p>
+    ${it.building?`<div style="margin-top:10px"><span class="tag NEW">WORK IN PROGRESS</span><div class="small muted" style="font-size:10px;margin-top:4px">completes ${fmtDate(it.done_date)}</div></div>`
+    :it.next_cost==null?`<div class="small muted" style="margin-top:10px;font-size:10.5px">Fully modernised</div>`
+    :`<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px"><div class="small muted" style="font-size:10.5px">${money(it.next_cost)} · ${it.days} days${!afford?' · <span style="color:#ff8a94">insufficient cash</span>':""}</div><button class="btn sm primary" ${afford?"":"disabled"} onclick="doFacilityUpgrade('${it.key}')">Upgrade</button></div>`}
+    </div>`;
+  }).join("")}</div>
+  <div class="card tight" style="margin-top:10px"><h3>Stadium</h3><div class="kv"><span>Name</span><b style="font-size:11px">${esc(j.stadium)}</b></div><div class="kv"><span>Capacity</span><b>${j.capacity.toLocaleString()}</b></div><div class="kv"><span>Season revenue</span><b>${money(j.season_income)}</b></div><p class="small muted" style="font-size:10.5px;margin-top:6px">Stadium upgrades raise attendance and ticket prices — the new revenue starts with the next monthly accounts.</p></div>`;
+}
+async function doFacilityUpgrade(key){
+  try{ const r=await api.post("/api/facilities/upgrade",{facility:key});
+    if(r.ok){ toast("Work started",4000); Juice.haptic("success"); Juice.play("success"); }
+    else toast(esc(r.msg||"Cannot start that project"),4200);
+    await renderFacilities();
+  }catch(e){ toast("Failed: "+esc(e.message),4000); }
 }
 async function renderCalendar(){
   const j=await api.get("/api/screen/calendar"); await refreshState(); const nextDate=(G.home.next_fixture||{}).date;

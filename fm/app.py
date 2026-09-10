@@ -461,6 +461,8 @@ def api_screen(name: str, id: int = 0):
         return V.staff_screen(c, s) if s["club_id"] else {"error": "no club"}
     if name == "youth":
         return V.youth(c, s) if s["club_id"] else {"error": "no club"}
+    if name == "facilities":
+        return V.facilities(c, s) if s["club_id"] else {"error": "no club"}
     if name == "career":
         return V.career(c, s)
     if name == "calendar":
@@ -928,6 +930,14 @@ def api_release(payload: dict = Body(...)):
 
 
 # ------------------------------------------------------------------- tactics
+@app.post("/api/facilities/upgrade")
+def api_facility_upgrade(payload: dict = Body(default={})):
+    s = need_club()
+    res = E.upgrade_facility(con(), s, str(payload.get("facility") or "").strip())
+    commit()
+    return res
+
+
 @app.post("/api/tactics")
 def api_tactics(payload: dict = Body(...)):
     s = need_club()

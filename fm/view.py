@@ -742,6 +742,41 @@ def youth(con, save):
                          "personality": r["personality"]} for r in rows]}
 
 
+def facilities(con, save):
+    cid = save["club_id"]
+    if not cid:
+        return {"error": "no club"}
+    c = E.club(con, cid)
+    f = E.facility_levels(con, cid)
+    _base_col = {"training": "train_base", "medical": "med_base",
+                 "youth": "youth_base", "stadium": "stad_base"}
+    items = []
+    for key, meta in E.FACILITY_DEFS.items():
+        level = f[key] if f else 1
+        base = f[_base_col[key]] if f else 1
+        done = f[meta["col"]] if f else None
+        items.append({
+            "key": key,
+            "label": meta["label"],
+            "effect": meta["effect"],
+            "level": level,
+            "base": base,
+            "building": bool(done),
+            "done_date": str(done) if done else None,
+            "days": meta["days"],
+            "next_cost": E.facility_cost(con, c, key),
+            "max": E._FAC_LEVEL_MAX,
+        })
+    return {
+        "overall": c["facilities"],
+        "cash": round(c["cash"], 2),
+        "stadium": c["stadium"],
+        "capacity": c["capacity"],
+        "season_income": round(c["season_income"], 2),
+        "items": items,
+    }
+
+
 def career(con, save):
     cid = save["club_id"]
     c = E.club(con, cid) if cid else None

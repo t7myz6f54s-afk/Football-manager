@@ -253,9 +253,12 @@ def team_rating(xi, tactics, opposition=None):
     )
 
 
-def build_lineup(club_players, tactics, n=11, prefer=None, exclude=None, competition="league"):
+def build_lineup(club_players, tactics, n=11, prefer=None, exclude=None,
+                 competition="league", rng=None):
     """Pick a best XI for formation slots, respecting fitness/availability.
     PREMIUM REALISM: Friendlies rotate heavily — youth, reserves, low intensity.
+    rng: the caller's seeded RNG (keeps friendly rotation deterministic per
+    seed); falls back to a fixed seed if none is supplied.
     """
     formation = C.FORMATIONS.get(tactics.get("formation", "4-3-3 DM Wide"))
     if formation is None:
@@ -273,8 +276,7 @@ def build_lineup(club_players, tactics, n=11, prefer=None, exclude=None, competi
         youth = [p for p in club_players if p["id"] not in exclude and p["condition"] == "fit" and p["squad"] in ("U21", "Youth")]
         
         # Mix: 3-4 first team, 4-5 reserves, 2-3 youth for realism
-        import random as _rnd
-        _rng = _rnd.Random()
+        _rng = rng if rng is not None else random.Random(0)
         _rng.shuffle(first_team)
         _rng.shuffle(reserves)
         _rng.shuffle(youth)

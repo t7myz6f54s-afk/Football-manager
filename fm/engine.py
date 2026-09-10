@@ -180,7 +180,8 @@ def new_career(club_code, manager, difficulty="realistic", save_path=DEFAULT_SAV
     con.commit()
     # initial world setup for this career
     setup_club_state(con, save)
-    seed_free_agents(con, save)
+    # deterministically seeded per club, so a given career start is reproducible
+    seed_free_agents(con, save, rng=random.Random(_seed("fa" + str(save["club_id"]))))
     snapshot_youth(con, save)
     con.commit()
     con.close()
@@ -368,6 +369,131 @@ def add_inbox(con, save, cat, priority, subject, body, payload=None):
 def add_news(con, save, cat, text, club_id=None, player_id=None):
     con.execute("INSERT INTO news (date,cat,text,club_id,player_id) VALUES (?,?,?,?,?)",
                 (save["date"], cat, text, club_id, player_id))
+
+
+# --------------------------------------------------------------- facilities
+# Instrumental investment loop: spend club cash to upgrade four facility
+# types. Effects are RELATIVE to each club's derived baseline level
+# (frozen in the *_base columns), so an un-upgraded club behaves exactly
+# like the pre-facilities code — upgrades add on top.
+FACILITY_DEFS = {
+    "training": dict(label="Training ground", base=2.5, days=28, col="train_done",
+                     effect="Raises coaching quality for daily training and player development."),
+    "medical": dict(label="Medical centre", base=1.5, days=28, col="med_done",
+                    effect="Shortens injury recovery times (up to 18% at max)."),
+    "youth": dict(label="Youth academy", base=3.0, days=28, col="youth_done",
+                  effect="Improves the quality of yearly youth intakes."),
+    "stadium": dict(label="Stadium", base=6.0, days=56, col="stadium_done",
+                    effect="Better attendance and ticket prices — adds matchday revenue."),
+}
+_FAC_TIER_COST = {1: 1.0, 2: 0.45, 3: 0.30, 4: 0.20, 5: 0.13}
+_FAC_LEVEL_MAX = 10
+
+
+def facility_levels(con, club_id):
+    """The club's facility row (levels, baselines, in-progress completion dates)."""
+    return con.execute("SELECT * FROM club_facilities WHERE club_id=?", (club_id,)).fetchone()
+
+
+def facility_overall(levels_row):
+    return max(1, min(20, round((levels_row["training"] + levels_row["medical"] +
+                                 levels_row["youth"] + levels_row["stadium"]) / 4.0 * 2)))
+
+
+def facility_cost(con, c, which):
+    """Cost of the NEXT upgrade level in €m (tier-scaled, exponential curve)."""
+    f = facility_levels(con, c["id"])
+    level = f[which] if f else 1
+    if level >= _FAC_LEVEL_MAX:
+        return None
+    base = FACILITY_DEFS[which]["base"] * _FAC_TIER_COST.get(c.get("tier") or 3, 0.3)
+    return round(base * (1.55 ** (level - 1)), 1)
+
+
+def upgrade_facility(con, save, which):
+    """Start an upgrade project. Pays immediately from cash; effect applies
+    after the build time. One project at a time per facility type."""
+    if which not in FACILITY_DEFS:
+        return {"ok": False, "msg": "Unknown facility."}
+    cid = save.get("club_id")
+    if not cid:
+        return {"ok": False, "msg": "No club."}
+    c = club(con, cid)
+    f = facility_levels(con, cid)
+    if not f:
+        return {"ok": False, "msg": "Facilities record missing."}
+    meta = FACILITY_DEFS[which]
+    if f[meta["col"]]:
+        return {"ok": False, "msg": "Work is already under way there."}
+    level = f[which]
+    if level >= _FAC_LEVEL_MAX:
+        return {"ok": False, "msg": "Already at the highest level."}
+    cost = facility_cost(con, c, which)
+    if cost is None:
+        return {"ok": False, "msg": "Already at the highest level."}
+    if c["cash"] < cost:
+        return {"ok": False,
+                "msg": f"Not enough cash — the project costs {money(cost)} but the club holds {money(c['cash'])}."}
+    done = ds(d(save["date"]) + timedelta(days=meta["days"]))
+    con.execute("UPDATE clubs SET cash=cash-?, balance=balance-? WHERE id=?",
+                (round(cost, 2), round(cost, 2), cid))
+    con.execute(f"UPDATE club_facilities SET {meta['col']}=? WHERE club_id=?", (done, cid))
+    add_inbox(con, save, "BOARD", "IMPORTANT",
+              f"Project started: {meta['label']}",
+              f"The {meta['label'].lower()} upgrade costs {money(cost)} and takes {meta['days']} days.\n"
+              f"Completion: {done}.",
+              payload={"screen": "facilities"})
+    return {"ok": True, "msg": f"{meta['label']} upgrade started — {money(cost)}, done {done}.",
+            "cost": cost, "done": done}
+
+
+def _stadium_md(c, level):
+    """Matchday revenue (€m) component for a stadium of the given level —
+    same model as world build, with level scaling fill and ticket price."""
+    tier = c["tier"]
+    fill = 0.94 - 0.011 * max(0, 5 - c["rep"] / 12.0) - 0.02 * (tier - 1)
+    fill = max(0.35, min(0.99, fill + 0.008 * (level - 1)))
+    ticket = {1: 62.0, 2: 36.0, 3: 26.0, 4: 21.0, 5: 14.0}[tier] * (1 + 0.012 * (level - 1))
+    home_games = 19 + (4 if tier <= 2 else 3)
+    return c["capacity"] * fill * ticket * home_games / 1.0e6
+
+
+def _complete_facility(con, save, which, events):
+    meta = FACILITY_DEFS[which]
+    cid = save["club_id"]
+    c = club(con, cid)
+    f = facility_levels(con, cid)
+    new_level = min(_FAC_LEVEL_MAX, f[which] + 1)
+    con.execute(f"UPDATE club_facilities SET {which}=? WHERE club_id=?", (new_level, cid))
+    overall = facility_overall(facility_levels(con, cid))
+    con.execute("UPDATE clubs SET facilities=? WHERE id=?", (overall, cid))
+    extra = ""
+    if which == "stadium":
+        delta = round(_stadium_md(c, new_level) - _stadium_md(c, f[which]), 3)
+        con.execute("UPDATE clubs SET season_income=season_income+? WHERE id=?", (delta, cid))
+        extra = f"\nMatchday revenue grows by {money(abs(delta))} a season."
+    add_inbox(con, save, "BOARD", "URGENT",
+              f"Complete: {meta['label']} upgraded",
+              f"The {meta['label'].lower()} is now level {new_level}/10.{extra}\n"
+              f"Overall club facilities: {overall}/20.",
+              payload={"screen": "facilities"})
+    events.append(dict(kind="facility", text=f"{meta['label']} upgraded to level {new_level}."))
+
+
+def _check_facility_completions(con, save, dt, events):
+    cid = save.get("club_id")
+    if not cid:
+        return
+    f = facility_levels(con, cid)
+    if not f:
+        return
+    today = ds(dt)
+    for which in FACILITY_DEFS:
+        due = f[FACILITY_DEFS[which]["col"]]
+        if due and str(due) <= today:
+            con.execute(f"UPDATE club_facilities SET {FACILITY_DEFS[which]['col']}=NULL WHERE club_id=?",
+                        (cid,))
+            _complete_facility(con, save, which, events)
 
 
 # --------------------------------------------------------------- team ratings
@@ -1046,14 +1172,14 @@ def _setup_human_match(con, save, fx, rng=None, custom_lineup=None, live=False):
     if selected and len(selected) == 11:
         xi, bench = _lineup_from_selection(players, selected, tac)
     else:
-        xi, bench = M.build_lineup(players, tac, competition=comp_for_lineup)
+        xi, bench = M.build_lineup(players, tac, competition=comp_for_lineup, rng=rng)
     if len(xi) < 11:
         return None, None
     hrating = M.team_rating(xi, tac)
     # opposition
     opp_tac = ai_tactics(con, opp_id)
     opp_players = load_players(con, opp_id)
-    oxi, obench = M.build_lineup(opp_players, opp_tac, competition=comp_for_lineup)
+    oxi, obench = M.build_lineup(opp_players, opp_tac, competition=comp_for_lineup, rng=rng)
     if len(oxi) < 11:
         opp_rating = club_strength(con, opp_id, save)
         oxi = []
@@ -1194,7 +1320,8 @@ def _finish_human_match(con, save, fx, ctx, result, mode="key"):
         p = pmap.get(pid_)
         if not p:
             continue
-        sev = _roll_injury(rng, p, save)
+        _flp = facility_levels(con, p["club_id"]) if p.get("club_id") else None
+        sev = _roll_injury(rng, p, save, max(0, _flp["medical"] - _flp["med_base"]) if _flp else 0)
         inj_report.append((p["name"], sev[0], sev[1]))
         con.execute("UPDATE players SET condition='injured', injury_name=?, return_date=?, injured_weeks=? WHERE id=?",
                     (sev[0], ds(d(save["date"]) + timedelta(days=sev[1])), max(1, sev[1] // 7), pid_))
@@ -1308,7 +1435,9 @@ def _lineup_from_selection(players, selected, tac):
     return xi, bench
 
 
-def _roll_injury(rng, p, save):
+def _roll_injury(rng, p, save, medical_bonus=0):
+    """medical_bonus: facility levels above the club's baseline (0 = legacy
+    behaviour); shortens recovery, max 18% at +9."""
     diff = DIFFICULTY.get(save["career"]["difficulty"], DIFFICULTY["realistic"])
     types = C.INJURY_TYPES
     weights = []
@@ -1325,6 +1454,8 @@ def _roll_injury(rng, p, save):
         weights.append(w)
     t = rng.choices(types, weights=weights, k=1)[0]
     days = int(rng.randint(t[1], t[2]) * (0.85 + 0.3 * rng.random()) * diff["injuries"])
+    if medical_bonus > 0:
+        days = int(days * (1 - 0.02 * min(9, medical_bonus)))
     days = max(2, min(340, days))
     return t[0], days
 
@@ -1367,6 +1498,7 @@ def tick_day(con, save, rng, auto_human=False):
     events = []
     diff = DIFFICULTY.get(save["career"]["difficulty"], DIFFICULTY["realistic"])
     cid = save["club_id"]
+    _check_facility_completions(con, save, dt, events)
     if save["flags"].get("unemployed") or not cid:
         return job_market_tick(con, save, dt, rng, events)
     # ---- my squad: condition, injuries, suspensions, contracts
@@ -1391,7 +1523,15 @@ def tick_day(con, save, rng, auto_human=False):
         ('First-Team Coach','Fitness Coach','Assistant Manager','Goalkeeping Coach')""", (cid,)).fetchone()
     cq = ((coaching["t"] or 8) + (coaching["ta"] or 8) + (coaching["f"] or 8)) / 3.0
     c = club(con, cid)
-    cq *= (0.75 + c["facilities"] / 60.0)
+    # training-ground level drives the coaching-quality multiplier. An
+    # un-upgraded club uses its legacy rating verbatim (bit-identical to the
+    # pre-facilities formula); upgrades move it to level*2 (1-20 scale).
+    _fl = facility_levels(con, cid)
+    if _fl and _fl["training"] > _fl["train_base"]:
+        cq *= (0.75 + _fl["training"] * 2 / 60.0)
+    else:
+        cq *= (0.75 + c["facilities"] / 60.0)
+    _med_bonus = max(0, _fl["medical"] - _fl["med_base"]) if _fl else 0
     focus = session and con.execute("SELECT focus FROM training WHERE club_id=? AND day=?",
                                     (cid, weekday)).fetchone()
     focus_pos = (focus["focus"] if focus else "") or ""
@@ -1436,7 +1576,7 @@ def tick_day(con, save, rng, auto_human=False):
         if p["condition"] == "fit" and p["squad"] in ("First Team", "Reserve"):
             risk = 0.0016 * sdef["injury"] * (1 + fat / 90.0) * (1.6 - fit / 100.0) * diff["injuries"]
             if rng.random() < risk:
-                nm, days = _roll_injury(rng, p, save)
+                nm, days = _roll_injury(rng, p, save, _med_bonus)
                 new["condition"] = "injured"
                 new["injury_name"] = nm
                 new["return_date"] = ds(dt + timedelta(days=days))
@@ -1916,7 +2056,10 @@ def _development_tick(con, save, rng, events):
     coaching = con.execute("""SELECT AVG(technical) t, AVG(tactical) ta, AVG(mental) m, AVG(youth) y
         FROM staff WHERE club_id=?""", (cid,)).fetchone()
     cq = ((coaching["t"] or 8) * 0.4 + (coaching["ta"] or 8) * 0.3 + (coaching["m"] or 8) * 0.3)
-    fac = c["facilities"]
+    # training-ground level drives development; un-upgraded clubs keep the
+    # legacy rating verbatim (see tick_day)
+    _fl = facility_levels(con, cid)
+    fac = _fl["training"] * 2 if (_fl and _fl["training"] > _fl["train_base"]) else c["facilities"]
     ps = load_players(con, cid)
     for p in ps:
         if p["age"] >= 30:
@@ -2810,7 +2953,7 @@ def seed_free_agents(con, save, target=140, rng=None):
         JOIN clubs c ON c.id=p.club_id
         WHERE c.code!='FREE' AND p.club_id!=? AND p.squad IN ('First Team','Reserve')
           AND ((p.age>=30 AND p.ca<9.5) OR p.age>=34)
-        ORDER BY RANDOM()""", (cid,)).fetchall()
+        ORDER BY COALESCE(p.hidden_seed, p.id), p.id""", (cid,)).fetchall()
     per_club = {}
     moved = already
     end = f"{save['season'] + 1}-06-30"
@@ -2855,7 +2998,7 @@ def _world_transfer_activity(con, save, rng, events, volume=3):
         r = rng.random()
         pool = con.execute("""SELECT * FROM players WHERE club_id IS NOT NULL AND club_id>0
             AND squad IN ('First Team','Reserve') AND age BETWEEN 17 AND 35
-            AND value > 0.05 ORDER BY RANDOM() LIMIT 60""").fetchall()
+            AND value > 0.05 ORDER BY COALESCE(hidden_seed, id), id LIMIT 60""").fetchall()
         if not pool:
             continue
         p = rng.choice(pool)
@@ -2866,7 +3009,7 @@ def _world_transfer_activity(con, save, rng, events, volume=3):
         # recruitment has been delegated to the assistant
         human_id = -1 if save["delegation"].get("recruitment") else save["club_id"]
         buyers = con.execute("""SELECT * FROM clubs WHERE id!=? AND id!=? AND code!='FREE' AND rep>=?
-            ORDER BY RANDOM() LIMIT 25""",
+            ORDER BY (id*104729 + CAST(rep AS INTEGER)*7919) % 1000003, id LIMIT 25""",
             (p["club_id"], human_id, max(20, seller["rep"] - 25))).fetchall()
         if not buyers:
             continue
@@ -3457,7 +3600,7 @@ def _season_end(con, save, rng, events):
                 if rng.random() < 0.7:
                     human_id = -1 if save["delegation"].get("recruitment") else save["club_id"]
                     buyers = con.execute("""SELECT * FROM clubs WHERE id!=? AND id!=? AND code!='FREE'
-                        AND rep BETWEEN ? AND ? ORDER BY RANDOM() LIMIT 8""",
+                        AND rep BETWEEN ? AND ? ORDER BY (id*104729 + CAST(rep AS INTEGER)*7919) % 1000003, id LIMIT 8""",
                         (p["club_id"], human_id, max(5, sc["rep"] - 25), sc["rep"] + 10)).fetchall()
                     if buyers:
                         b = rng.choice(buyers)
@@ -3628,11 +3771,14 @@ def youth_intake(con, save, rng):
     out = []
     maxid = con.execute("SELECT COALESCE(MAX(id),0) FROM players").fetchone()[0]
     from .world import _attr_vector, fit_ca, pack_attrs
+    # youth-academy levels above baseline raise intake quality (+0.22 CA each)
+    _fly = facility_levels(con, cid)
+    ybonus = max(0, _fly["youth"] - _fly["youth_base"]) if _fly else 0
     for k in range(n):
         maxid += 1
         pos = rng.choice(["GK", "DC", "DC", "DL", "DR", "DM", "MC", "MC", "AMC", "AML", "AMR", "ST", "ST"])
         age = rng.choice([16, 17, 17, 18])
-        base = 4.5 + c["youth"] * 0.28 + rng.gauss(0, 1.6) + (c["rep"] / 100.0)
+        base = 4.5 + c["youth"] * 0.28 + rng.gauss(0, 1.6) + (c["rep"] / 100.0) + ybonus * 0.22
         ca = max(3.0, min(12.5, base))
         pa = min(20.0, ca + abs(rng.gauss(2.4, 1.9)) * (0.55 + c["youth"] / 30.0))
         vec = fit_ca(_attr_vector(rng, pos, ca, age), ca)
