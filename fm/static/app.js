@@ -1744,6 +1744,165 @@ async function renderYouth() {
       </button>`).join("") || '<p class="muted small" style="padding:12px">No youth players yet.</p>'}
     </div>`;
 }
+async function renderCalendar() {
+  const j = await api.get("/api/screen/calendar");
+  await refreshState();
+  const nextDate = (G.home.next_fixture || {}).date;
+  $("#content").innerHTML = `
+    <div class="sec-h"><h3>Calendar</h3><span class="spacer"></span><span class="hint">season ${G.home.season_label}</span></div>
+    <div class="sq-list" style="display:flex">
+      ${j.fixtures.map(f => {
+        const next = !f.played && f.date === nextDate;
+        return `<div class="fxr ${next ? "next" : ""}">
+          <span class="fx-d"><b>${fmtDate(f.date).replace(/, \d{4}$/, "")}</b><i>${esc(compLabel(f))}${f.stage && f.stage !== "league" && f.comp ? " · " + esc(f.stage) : ""}</i></span>
+          <span class="fx-m">${crest(f.home_code)}<b>${esc(f.home_short || f.home)}</b>
+            <span class="fx-s">${f.played ? (f.hg != null ? f.hg + "–" + f.aw : "—") : "v"}</span>
+            <b>${esc(f.away_short || f.away)}</b>${crest(f.away_code)}</span>
+          <span class="fx-r">${f.res ? `<span class="tag ${f.res}">${f.res}</span>` : next ? '<span class="tag NEW">next</span>' : ""}</span>
+        </div>`;
+      }).join("")}
+    </div>`;
+}
+/* -------------------------------------------------------------------- TABLE */
+async function renderTable() {
+  const j = await api.get("/api/screen/table");
+  await refreshState();
+  if (!j.comp) { $("#content").innerHTML = "<h1>League</h1><p class='muted'>No league.</p>"; return; }
+  $("#content").innerHTML = `
+    <div class="sec-h"><h3>${esc(j.comp.name)}</h3><span class="spacer"></span><span class="hint">${G.home.season_label} · ${j.prom_spots} up / ${j.rel_spots} down</span></div>
+    <div class="card" style="padding:0;overflow:auto">
+      <table><thead><tr><th class="num">#</th><th>Club</th><th class="num">P</th><th class="num">W</th>
+        <th class="num">D</th><th class="num">L</th><th class="num">GF</th><th class="num">GA</th>
+        <th class="num">GD</th><th class="num">Pts</th><th>Form</th></tr></thead>
+      <tbody>${j.rows.map(r => `<tr class="${r.club_id === j.my_club ? "me" : ""} ${r.zone === "promotion" ? "zp" : r.zone === "relegation" ? "zr" : ""}">
+        <td class="num">${r.pos}${r.zone === "promotion" ? ' <span style="color:var(--good)">▲</span>' : r.zone === "relegation" ? ' <span style="color:var(--bad)">▼</span>' : ""}</td>
+        <td><span class="cellclub">${crest(r.code)}<span>${esc(r.name)} <i class="muted small">${r.rep}</i></span></span></td>
+        <td class="num">${r.p}</td><td class="num">${r.w}</td><td class="num">${r.d}</td><td class="num">${r.l}</td>
+        <td class="num">${r.gf}</td><td class="num">${r.ga}</td>
+        <td class="num">${r.gf - r.ga > 0 ? "+" : ""}${r.gf - r.ga}</td><td class="num"><b>${r.pts}</b></td>
+        <td><span class="frm">${(r.form || "").split("").map(x => `<i class="fm-i ${x}">${x}</i>`).join("")}</span></td></tr>`).join("")}</tbody></table>
+    </div>
+      <div class="small muted" style="padding:8px 12px;display:flex;gap:14px">
+        <span><i class="zdot zp"></i>promotion</span><span><i class="zdot zr"></i>relegation</span>
+        <span class="spacer"></span><span>${j.prom_spots} up · ${j.rel_spots} down</span></div>
+    `;
+}
+
+/* -------------------------------------------------------------------- COMPS */
+function compMono(code) {
+  const m = { UCL: "UCL", UEL: "UEL", UECL: "UECL", ENG1: "PL", ESP1: "LaL", ITA1: "SA",
+    GER1: "BL", FRA1: "L1", FACUP: "FA", EFLCUP: "EFL", COPADELREY: "CdR", COPPAITALIA: "CI",
+    DFBPOKAL: "DFB", COUPEDEFRANCE: "CdF" };
+  if (m[code]) return m[code];
+  return String(code || "?").slice(0, 3);
+}
+function compBand(c, right) {
+  return `<div class="comp-band" style="--comp:${compColor(c.code)}">
+    <span class="ci">${esc(compMono(c.code))}</span>
+    <span style="min-width:0"><b>${esc(c.name)}</b><br><span class="sub">${esc(c.ctype === "continental" ? "Europe" : c.ctype === "cup" ? "Knockout cup" : "League")}${c.tier ? " · tier " + c.tier : ""}</span></span>
+    <span class="spacer"></span>${right || ""}</div>`;
+}
+async function renderComps() {
+  const j = await api.get("/api/screen/comps");
+  await refreshState();
+  const my = G.home && G.home.club ? G.home.club.id : 0;
+  $("#content").innerHTML = `
+    <div class="sec-h"><h3>Competitions</h3><span class="spacer"></span><span class="hint">season ${G.home ? G.home.season_label : ""}</span></div>
+    <div style="display:grid;gap:8px">
+    ${j.comps.map(c => {
+      let status = "";
+      if (c.table && c.table.length) {
+        const r = c.table.find(x => x.club_id === my);
+        status = r && r.pos ? `<span class="tag">${r.pos}${ord(r.pos)}</span>` : "";
+      } else status = '<span class="tag">KO</span>';
+      return `<button class="comp-head" style="text-align:left;width:100%" onclick="renderCompHub(${c.comp.id})">
+        ${compBand(c.comp, status + '<span class="muted" style="font-size:16px"> ▸</span>')}</button>`;
+    }).join("")}
+    </div>`;
+}
+function ord(n) {
+  if (n % 100 >= 11 && n % 100 <= 13) return "th";
+  return ["th", "st", "nd", "rd"][n % 10] || "th";
+}
+async function renderCompHub(id) {
+  const j = await api.get("/api/screen/comp?id=" + id);
+  if (!j || j.error) { toast("Competition not found"); return; }
+  const k = j.comp, my = G.home && G.home.club ? G.home.club.id : 0;
+  const tbl = j.table || [];
+  const me = tbl.find(r => r.club_id === my);
+  const played = j.fixtures.filter(f => f.played), todo = j.fixtures.filter(f => !f.played);
+  const rowHtml = r => `<tr class="${r.club_id === my ? "me" : ""} ${r.zone === "promotion" ? "zp" : r.zone === "relegation" ? "zr" : ""}">
+      <td class="num muted">${r.pos || "–"}</td>
+      <td><span class="cellclub">${crest(r.code)}<span>${esc(r.name)}</span></span></td>
+      <td class="num">${r.p}</td><td class="num">${r.w}</td><td class="num">${r.d}</td><td class="num">${r.l}</td>
+      <td class="num">${r.gf - r.ga > 0 ? "+" : ""}${r.gf - r.ga}</td><td class="num"><b>${r.pts}</b></td></tr>`;
+  const fxRow = f => {
+    const myW = f.played && ((f.home_id === my && f.hg > f.ag) || (f.away_id === my && f.ag > f.hg));
+    const myD = f.played && f.hg === f.ag;
+    return `<div class="kv"><span class="cellclub" style="flex:1;min-width:0">${f.played
+      ? `<span class="tag ${myW ? "W" : myD ? "D" : "L"}">${f.hg}–${f.ag}</span>`
+      : `<span class="muted small">${fmtDate(f.date)}</span>`}
+      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${crest(f.home_code)}&nbsp;${esc(f.home_short || f.home)} v ${esc(f.away_short || f.away)}&nbsp;${crest(f.away_code)}</span></span>
+      <b class="small muted">${f.stage !== "league" ? esc(f.stage) : ""}</b></div>`;
+  };
+  $("#content").innerHTML = `
+    <button class="btn sm" onclick="renderComps()" style="margin-bottom:10px">◂ All competitions</button>
+    <div class="comp-head">${compBand(k, me && me.pos ? `<span class="tag">${me.pos}${ord(me.pos)}</span>` : "")}</div>
+    ${tbl.length ? `<div class="card tight" style="padding:0;margin-top:10px">
+      <div class="sec-h" style="padding:10px 12px 4px"><h3>${k.ctype === "continental" ? "League phase" : "Standings"}</h3>
+        <span class="spacer"></span>${k.code === (G.home.club && G.home.club.league_code) ? '<button class="btn sm" onclick="go(\'table\')">Full</button>' : ""}</div>
+      <div class="tw"><table><thead><tr><th class="num">#</th><th>Club</th><th class="num">P</th><th class="num">W</th>
+        <th class="num">D</th><th class="num">L</th><th class="num">GD</th><th class="num">Pts</th></tr></thead>
+        <tbody>${tbl.map(rowHtml).join("")}</tbody></table></div>
+    </div>` : ""}
+    ${(j.ko || []).length ? `<div class="card tight" style="margin-top:10px">
+      <div class="sec-h"><h3>Knockout progression</h3></div>
+      <div class="brk">${j.ko.map(r => `<div class="brk-r">
+        <div class="stat-l">${esc(r.stage === "F" ? "Final" : r.stage === "SF" ? "Semi-finals" : r.stage === "QF" ? "Quarter-finals" : r.stage === "R16" ? "Round of 16" : r.stage === "R32" ? "Round of 32" : r.stage)}</div>
+        ${r.ties.map(t => {
+          const hw = t.played && t.hg > t.ag, aw = t.played && t.ag > t.hg;
+          return `<div class="brk-m"><span class="${hw ? "w" : ""}">${crest(t.home_code)} ${esc(t.home_short || t.home)}</span>
+            <span class="sc">${t.played ? t.hg + "–" + t.ag : fmtDate(t.date)}</span>
+            <span class="${aw ? "w" : ""}" style="text-align:right">${esc(t.away_short || t.away)} ${crest(t.away_code)}</span></div>`;
+        }).join("")}</div>`).join("")}</div>
+    </div>` : ""}
+    <div class="grid g2" style="margin-top:10px">
+      <div class="card tight">
+        <div class="sec-h"><h3>Results</h3></div>
+        ${played.length ? played.slice().reverse().slice(0, 8).map(fxRow).join("") : '<p class="muted small">No results yet.</p>'}
+      </div>
+      <div class="card tight">
+        <div class="sec-h"><h3>Fixtures</h3></div>
+        ${todo.length ? todo.slice(0, 8).map(fxRow).join("") : '<p class="muted small">No fixtures left.</p>'}
+      </div>
+    </div>`;
+}
+async function renderClub() {
+  await refreshState();
+  const c = G.home.club;
+  $("#content").innerHTML = `
+    <div class="card tight">
+      <div class="p-head">${crest(c.code, "xl")}
+        <div style="min-width:0"><h2>${esc(c.name)}</h2>
+          <p class="small muted">${esc(c.league)} · tier ${c.tier} · reputation ${c.rep}</p></div>
+      </div>
+      <div class="divider"></div>
+      <div class="kv"><span>Stadium</span><b>${esc(c.stadium)}</b></div>
+      <div class="kv"><span>Capacity</span><b>${(c.capacity || 0).toLocaleString()}</b></div>
+      <div class="kv"><span>Season</span><b>${G.home.season_label}</b></div>
+    </div>
+    <div class="grid g2" style="margin-top:10px">
+      ${[["board", "Board & objectives", "Confidence, warnings and what the hierarchy expects."],
+         ["media", "Media", "Press conferences and headlines."],
+         ["staff", "Backroom staff", "Coaches, scouts, medical — roles and wages."],
+         ["youth", "Academy", "Intake, prospects and development."],
+         ["career", "Career & trophies", "Your record, honours and history."],
+         ["finances", "Finances", "Budgets, wages, commercial and matchday."]]
+        .map(([id, t, d]) => `<button class="card tight" style="text-align:left" onclick="go('${id}')">
+          <div class="row" style="gap:8px">${svg(id)}<b style="font-size:13.5px">${t}</b></div>
+          <p class="small muted" style="margin-top:4px">${d}</p></button>`).join("")}
+    </div>`;
+}
 /* -------------------------------------------------------------------- BOARD */
 async function renderBoard() {
   const j = await api.get("/api/screen/board");
@@ -1887,22 +2046,20 @@ async function renderJobs() {
   const j = await api.get("/api/career/jobs");
   await refreshState();
   $("#content").innerHTML = `
-    <h1>Managerial job market</h1>
-    <p class="sub">You are unemployed. Offers may arrive in your inbox, or you can apply directly — your reputation determines how likely clubs are to say yes.</p>
+    <div class="sec-h"><h3>Job market</h3><span class="spacer"></span><span class="hint">unemployed</span></div>
+    <p class="small muted">Offers arrive in your inbox, or apply directly — reputation decides who says yes.</p>
     ${j.offers.length ? `<div class="card" style="margin-bottom:12px;border-color:#1d5a45"><h3>Offers received</h3>
       ${j.offers.map(o => `<div class="list-item"><div style="flex:1"><b>${esc(o.name)}</b>
         <div class="small muted">${esc(o.league)} · tier ${o.tier} · rep ${Math.round(o.rep)} · offered ${fmtDate(o.date)}</div></div>
         <button class="btn primary sm" onclick="acceptJob(${o.club_id})">Accept</button></div>`).join("")}</div>` : ""}
-    <div class="card" style="padding:0;overflow:auto">
-      <table><thead><tr><th>Club</th><th>League</th><th class="num">Tier</th><th class="num">Rep</th>
-        <th class="num">Income</th><th>Interest</th><th class="num">Your chance</th><th></th></tr></thead>
-      <tbody>${j.jobs.map(v => `<tr><td><b>${esc(v.name)}</b></td><td>${esc(v.league)}</td>
-        <td class="num">${v.tier}</td><td class="num">${Math.round(v.rep)}</td>
-        <td class="num">${money(v.season_income || 0)}</td>
-        <td><span class="tag ${v.interest === "high" ? "W" : v.interest === "medium" ? "D" : "L"}">${esc(v.interest)}</span></td>
-        <td class="num">${Math.round(v.chance * 100)}%</td>
-        <td><button class="btn sm" onclick="acceptJob(${v.id})">Apply</button></td></tr>`).join("")
-        || '<tr><td colspan="8" class="muted">No vacancies right now. Keep advancing time.</td></tr>'}</tbody></table>
+    <div class="sq-list" style="margin-top:10px;display:flex">
+      ${j.jobs.map(v => `<div class="sqr" style="cursor:default">
+        <span class="tag">T${v.tier}</span>
+        <span class="sqr-n"><b>${esc(v.name)}</b><i>${esc(v.league)} · rep ${Math.round(v.rep)} · ${money(v.season_income || 0)}/yr</i></span>
+        <span class="sqr-r"><span class="tag ${v.interest === "high" ? "W" : v.interest === "medium" ? "D" : "L"}">${esc(v.interest)}</span>
+          <b class="small">${Math.round(v.chance * 100)}%</b>
+          <button class="btn sm" onclick="acceptJob(${v.id})">Apply</button></span>
+      </div>`).join("") || '<p class="muted small" style="padding:12px">No vacancies right now. Keep advancing time.</p>'}
     </div>
     <div class="row" style="margin-top:12px"><button class="btn primary" onclick="doContinue()">Advance time ▸</button></div>`;
 }
