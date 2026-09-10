@@ -304,7 +304,11 @@ def api_inbox(cat: str = "", unread: bool = False):
 @app.get("/api/advice")
 def api_advice():
     s = need_save()
-    return {"ok": True, "on": bool(s["flags"].get("godfather")), "items": E.advise(con(), s)}
+    on = bool(s["flags"].get("godfather"))
+    out = {"ok": True, "on": on, "items": E.advise(con(), s) if on else []}
+    if on:
+        out["plan"] = E.godfather_plan(con(), s)
+    return out
 
 
 @app.post("/api/godfather")

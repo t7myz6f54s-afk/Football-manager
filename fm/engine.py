@@ -3717,3 +3717,97 @@ def advise(con, save):
                           b="Sell or release high earners before the board forces fire sales.",
                           go="finances"))
     return items[:5]
+
+
+_GOD_GRP = {"GK": "GK", "DC": "DEF", "DL": "DEF", "DR": "DEF", "DM": "MID", "MC": "MID",
+            "AMC": "AM", "AML": "AM", "AMR": "AM", "ST": "ATT"}
+
+
+def godfather_plan(con, save):
+    """Concrete actionable plan: best XI, match tactics, transfer targets."""
+    cid = save.get("club_id")
+    plan = {"xi": [], "xi_names": [], "tactics": None, "sign": [], "opp": None}
+    if not cid or save["flags"].get("unemployed"):
+        return plan
+    tac = get_tactics(con, save)
+    slots = C.FORMATIONS.get(tac["formation"], list(C.FORMATIONS.values())[0])
+    rows = [dict(r) for r in con.execute(
+        "SELECT id,name,pos,pos2,ca,fitness,suspended,injured_weeks FROM players "
+        "WHERE club_id=? AND squad IN ('First Team','Reserve')", (cid,))]
+    avail = [p for p in rows if not p["suspended"] and not p["injured_weeks"]
+             and p["fitness"] >= 75]
+    used, xi = set(), []
+
+    def fits(p, slot):
+        g = _GOD_GRP.get(slot)
+        return (p["pos"] == slot or p["pos2"] == slot
+                or _GOD_GRP.get(p["pos"]) == g or _GOD_GRP.get(p["pos2"]) == g)
+
+    for slot in slots:
+        cands = [p for p in avail if p["id"] not in used and fits(p, slot)]
+        if not cands:
+            cands = [p for p in avail if p["id"] not in used]
+        if not cands:
+            break
+        pick = max(cands, key=lambda p: p["ca"])
+        used.add(pick["id"])
+        xi.append(pick)
+    plan["xi"] = [p["id"] for p in xi]
+    plan["xi_names"] = [f"{p['pos']} · {p['name']}" for p in xi]
+    nf = con.execute("""SELECT f.home_id,f.away_id,c1.name hn,c2.name an FROM fixtures f
+        JOIN clubs c1 ON c1.id=f.home_id JOIN clubs c2 ON c2.id=f.away_id
+        WHERE (f.home_id=? OR f.away_id=?) AND f.played=0 AND f.match_date>=?
+        ORDER BY f.match_date LIMIT 1""", (cid, cid, save["date"])).fetchone()
+    if nf:
+        opp = nf["away_id"] if nf["home_id"] == cid else nf["home_id"]
+        q = ("SELECT AVG(ca) c FROM (SELECT ca FROM players WHERE club_id=? "
+             "AND squad='First Team' ORDER BY ca DESC LIMIT 11)")
+        my = con.execute(q, (cid,)).fetchone()["c"] or 10.0
+        op = con.execute(q, (opp,)).fetchone()["c"] or 10.0
+        diff = my - op
+        plan["opp"] = {"name": nf["an"] if nf["home_id"] == cid else nf["hn"],
+                       "my": round(my, 1), "their": round(op, 1), "diff": round(diff, 1)}
+        instr = dict(C.INSTR_DEFAULT)
+        if diff >= 1.2:
+            ment = "Attacking"
+            instr.update(line_of_engagement=3, defensive_line=3, tempo=3, width=3,
+                         pressing_intensity=3, counter_press=True, work_ball_into_box=True)
+            why = "we are the stronger side — press high and pin them in"
+        elif diff <= -0.8:
+            ment = "Cautious"
+            instr.update(line_of_engagement=1, defensive_line=1, tempo=1, width=1,
+                         pressing_intensity=1, counter_attack=True, counter_press=False)
+            why = "they are stronger — stay compact, hurt them on the break"
+        else:
+            ment = "Balanced"
+            instr.update(pressing_intensity=3, counter_press=True)
+            why = "evenly matched — control the middle with a measured press"
+        plan["tactics"] = {"mentality": ment, "instr": instr, "why": why,
+                           "formation": tac["formation"]}
+    fin = con.execute("SELECT transfer_budget, wage_budget - wage_bill AS head FROM clubs "
+                      "WHERE id=?", (cid,)).fetchone()
+    budget = (fin["transfer_budget"] if fin else 0) or 0
+    head = (fin["head"] if fin else 0) or 0
+    need = {}
+    for p in rows:
+        g = _GOD_GRP.get(p["pos"], "MID")
+        need[g] = need.get(g, 0) + 1
+    cands = con.execute("""SELECT p.id,p.name,p.pos,p.age,p.ca,p.pa,p.value,p.wage,c.name AS club
+        FROM players p JOIN clubs c ON c.id=p.club_id
+        WHERE p.club_id<>? AND p.squad='First Team' AND p.age BETWEEN 17 AND 29
+          AND p.loaned_to IS NULL AND p.value <= ? ORDER BY p.ca DESC LIMIT 300""",
+        (cid, max(budget * 0.6, 500.0))).fetchall()
+    scored = []
+    for r in cands:
+        if r["value"] > budget * 0.6 or r["wage"] * 0.052 > max(head * 0.4, 1.0):
+            continue
+        g = _GOD_GRP.get(r["pos"], "MID")
+        nb = 2.0 if need.get(g, 0) < 4 else 0.0
+        scored.append((r["ca"] + 0.4 * r["pa"] + nb, dict(r), g, nb))
+    scored.sort(key=lambda x: -x[0])
+    for _sc, r, g, nb in scored[:3]:
+        plan["sign"].append({"pid": r["id"], "name": r["name"], "pos": r["pos"],
+                             "age": r["age"], "ca": round(r["ca"], 1), "pa": round(r["pa"], 1),
+                             "club": r["club"], "value": r["value"], "wage": r["wage"],
+                             "why": ("covers our thin " + g) if nb else "best quality we can afford"})
+    return plan

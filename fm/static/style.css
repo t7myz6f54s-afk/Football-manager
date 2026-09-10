@@ -606,3 +606,14 @@ select { min-width: 0; max-width: 100%; }
   table.mc:not(.mh) tbody td, table.mc:not(.mh) thead th { padding: 8px 3px; }
   table.mc:not(.mh) th.num, table.mc:not(.mh) td.num { font-size: 12px; }
 }
+/* godfather concrete plan */
+.god-plan { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px;
+  display: flex; flex-direction: column; gap: 12px; }
+.gp-h { font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--tx2); margin-bottom: 6px; }
+.gp-b { display: flex; flex-direction: column; gap: 8px; }
+.gp-x { display: flex; flex-wrap: wrap; gap: 4px; }
+.gp-x span { font-size: 11px; background: var(--sf); border: 1px solid var(--line);
+  border-radius: 6px; padding: 3px 7px; color: var(--tx2); }
+.gp-s { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.gp-s:last-child { border-bottom: 0; }

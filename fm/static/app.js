@@ -613,8 +613,57 @@ function godCard(adv) {
       </div>
       <label class="sw"><input type="checkbox" ${adv.on ? "checked" : ""} onchange="toggleGod(this.checked)"><span></span></label>
     </div>
-    ${adv.on ? `<div class="god-list">${items || '<p class="small muted" style="margin:10px 0 2px">Nothing needs you right now. Continue and let the world turn.</p>'}</div>` : items}
+    ${adv.on ? `<div class="god-list">${items || '<p class="small muted" style="margin:10px 0 2px">Nothing needs you right now. Continue and let the world turn.</p>'}</div>${godPlan(adv.plan)}` : items}
   </div>`;
+}
+
+function godPlan(pl) {
+  if (!pl) return "";
+  const t = pl.tactics;
+  return `
+    <div class="god-plan">
+      <div class="gp-b">
+        <div class="gp-h">Best XI right now</div>
+        <div class="gp-x">${(pl.xi_names || []).map(n => `<span>${esc(n)}</span>`).join("") || '<i class="muted">No fit players.</i>'}</div>
+        <button class="btn sm primary" onclick="godXI()">Select this XI ▸</button>
+      </div>
+      ${t ? `<div class="gp-b">
+        <div class="gp-h">Plan v ${esc((pl.opp || {}).name || "next opponent")}</div>
+        <p class="small muted" style="margin:2px 0 8px">${esc(t.mentality)} · ${esc(t.formation)} — ${esc(t.why)}
+          (our XI ${(pl.opp || {}).my || "?"} v their ${(pl.opp || {}).their || "?"})</p>
+        <button class="btn sm primary" onclick="godTactics()">Apply tactic plan ▸</button>
+      </div>` : ""}
+      ${(pl.sign || []).length ? `<div class="gp-b">
+        <div class="gp-h">Sign these players</div>
+        ${pl.sign.map(g => `<div class="gp-s">
+          <div style="flex:1;min-width:0"><b>${esc(g.name)}</b> <span class="muted small">${esc(g.pos)} · ${g.age}y · CA ${g.ca} / PA ${g.pa}</span>
+            <div class="small muted">${esc(g.club)} · ~${money(g.value)} · ${esc(g.why)}</div></div>
+          <button class="btn sm" onclick="go('player',${g.pid})">Profile</button>
+          <button class="btn sm primary" onclick="godBid(${g.pid},${Math.round(g.value)},${Math.round(g.wage)})">Bid</button>
+        </div>`).join("")}
+      </div>` : ""}
+    </div>`;
+}
+async function godXI() {
+  const adv = await api.get("/api/advice");
+  const ids = (adv.plan || {}).xi || [];
+  if (!ids.length) return toast("No XI available.", 4000);
+  const r = await api.post("/api/match/select", { ids });
+  toast(r.ok ? "Godfather's XI selected — check the match centre." : (r.msg || "Selection failed"), 5000);
+  if (r.ok) go("match");
+}
+async function godTactics() {
+  const adv = await api.get("/api/advice");
+  const t = (adv.plan || {}).tactics;
+  if (!t) return toast("No tactic plan available.", 4000);
+  const r = await api.post("/api/tactics", { mentality: t.mentality, instr: t.instr });
+  toast(r.ok ? "Tactic plan applied: " + t.mentality : (r.msg || "Failed"), 5000);
+  if (r.ok) renderHome();
+}
+async function godBid(pid, fee, wage) {
+  const r = await api.post("/api/transfer/offer", { pid, fee, wage: Math.max(wage, 1), years: 3 });
+  toast(r.ok ? "Offer sent. The club will respond." : (r.msg || r.error || "Offer refused"), 6000);
+  if (r.ok) renderHome();
 }
 async function toggleGod(on) {
   await api.post("/api/godfather", { on });
