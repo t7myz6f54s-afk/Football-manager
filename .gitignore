@@ -45,3 +45,9 @@ release/
 .sudo_as_admin_successful
 shots/
 .shots/
+
+# --- local tooling caches (never part of the game) ---
+.local/
+.pptr/
+
+node_modules/
