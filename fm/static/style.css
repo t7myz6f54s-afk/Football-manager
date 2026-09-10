@@ -536,3 +536,21 @@ tbody tr.tap { cursor: pointer; } tbody tr.tap:active td { background: var(--sf2
 .escore { margin-left: 6px; font-weight: 800; color: var(--tx); background: var(--sf3);
   padding: 1px 6px; border-radius: 5px; font-size: 11px; font-variant-numeric: tabular-nums; }
 #splash .slogo svg { width: 100%; height: 100%; }
+
+/* fixture rows */
+.fxr { display: grid; grid-template-columns: 84px 1fr auto; gap: 10px; padding: 9px 12px;
+  border-bottom: 1px solid var(--line); align-items: center; }
+.fxr:last-child { border-bottom: 0; }
+.fxr.next { background: rgba(53,224,138,.05); box-shadow: inset 2px 0 0 var(--acc); }
+.fx-d b { font-size: 12px; font-weight: 650; }
+.fx-d i { display: block; font-style: normal; font-size: 10px; color: var(--tx3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fx-m { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.fx-m b { font-size: 12px; font-weight: 600; flex: 1; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.fx-m b:first-of-type { text-align: right; }
+.fx-m .crest { width: 18px; height: 18px; }
+.fx-s { font-weight: 800; font-size: 12.5px; min-width: 34px; text-align: center;
+  font-variant-numeric: tabular-nums; }
+tbody tr.zp td:first-child { box-shadow: inset 2px 0 0 var(--blue); }
+tbody tr.zr td:first-child { box-shadow: inset 2px 0 0 var(--red); }

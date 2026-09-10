@@ -1723,21 +1723,22 @@ async function renderYouth() {
 async function renderCalendar() {
   const j = await api.get("/api/screen/calendar");
   await refreshState();
+  const nextDate = (G.home.next_fixture || {}).date;
   $("#content").innerHTML = `
-    <div class="sec-h"><h3>Calendar</h3></div>
-    <p class="sub">Season ${G.home.season_label} · all your fixtures, played and upcoming.</p>
-    <div class="card" style="padding:0;overflow:auto">
-      <table><thead><tr><th>Date</th><th>Competition</th><th>Home</th><th class="num">Score</th><th>Away</th><th>Venue</th><th></th></tr></thead>
-      <tbody>${j.fixtures.map(f => `<tr class="${!f.played && f.date >= G.home.date ? "me" : ""}">
-        <td>${fmtDate(f.date)}</td><td class="small">${esc(f.comp || "Friendly")}${f.stage && f.stage !== "league" ? " " + esc(f.stage) : ""}</td>
-        <td>${esc(f.home)}</td>
-        <td class="num"><b>${f.played ? (f.hg != null ? f.hg + "–" + f.aw : "—") : "v"}</b>
-          ${f.res ? ` <span class="tag ${f.res}">${f.res}</span>` : ""}</td>
-        <td>${esc(f.away)}</td><td class="small muted">${esc(f.venue || "")}</td>
-        <td class="small">${!f.played && f.date === (G.home.next_fixture || {}).date ? '<b class="muted">next</b>' : ""}</td></tr>`).join("")}</tbody></table>
+    <div class="sec-h"><h3>Calendar</h3><span class="spacer"></span><span class="hint">season ${G.home.season_label}</span></div>
+    <div class="sq-list" style="display:flex">
+      ${j.fixtures.map(f => {
+        const next = !f.played && f.date === nextDate;
+        return `<div class="fxr ${next ? "next" : ""}">
+          <span class="fx-d"><b>${fmtDate(f.date).replace(/, \d{4}$/, "")}</b><i>${esc(compLabel(f))}${f.stage && f.stage !== "league" && f.comp ? " · " + esc(f.stage) : ""}</i></span>
+          <span class="fx-m">${crest(f.home_code)}<b>${esc(f.home_short || f.home)}</b>
+            <span class="fx-s">${f.played ? (f.hg != null ? f.hg + "–" + f.aw : "—") : "v"}</span>
+            <b>${esc(f.away_short || f.away)}</b>${crest(f.away_code)}</span>
+          <span class="fx-r">${f.res ? `<span class="tag ${f.res}">${f.res}</span>` : next ? '<span class="tag NEW">next</span>' : ""}</span>
+        </div>`;
+      }).join("")}
     </div>`;
 }
-
 /* -------------------------------------------------------------------- TABLE */
 async function renderTable() {
   const j = await api.get("/api/screen/table");
@@ -1749,7 +1750,7 @@ async function renderTable() {
       <table><thead><tr><th class="num">#</th><th>Club</th><th class="num">P</th><th class="num">W</th>
         <th class="num">D</th><th class="num">L</th><th class="num">GF</th><th class="num">GA</th>
         <th class="num">GD</th><th class="num">Pts</th><th>Form</th></tr></thead>
-      <tbody>${j.rows.map(r => `<tr class="${r.club_id === j.my_club ? "me" : ""}">
+      <tbody>${j.rows.map(r => `<tr class="${r.club_id === j.my_club ? "me" : ""} ${r.zone === "promotion" ? "zp" : r.zone === "relegation" ? "zr" : ""}">
         <td class="num">${r.pos}${r.zone === "promotion" ? ' <span style="color:var(--good)">▲</span>' : r.zone === "relegation" ? ' <span style="color:var(--bad)">▼</span>' : ""}</td>
         <td><span class="cellclub">${crest(r.code)}<span>${esc(r.name)} <i class="muted small">${r.rep}</i></span></span></td>
         <td class="num">${r.p}</td><td class="num">${r.w}</td><td class="num">${r.d}</td><td class="num">${r.l}</td>
@@ -1802,7 +1803,7 @@ async function renderCompHub(id) {
   const tbl = j.table || [];
   const me = tbl.find(r => r.club_id === my);
   const played = j.fixtures.filter(f => f.played), todo = j.fixtures.filter(f => !f.played);
-  const rowHtml = r => `<tr class="${r.club_id === my ? "me" : ""}">
+  const rowHtml = r => `<tr class="${r.club_id === my ? "me" : ""} ${r.zone === "promotion" ? "zp" : r.zone === "relegation" ? "zr" : ""}">
       <td class="num muted">${r.pos || "–"}</td>
       <td><span class="cellclub">${crest(r.code)}<span>${esc(r.name)}</span></span></td>
       <td class="num">${r.p}</td><td class="num">${r.w}</td><td class="num">${r.d}</td><td class="num">${r.l}</td>
