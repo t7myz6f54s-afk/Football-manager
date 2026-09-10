@@ -248,8 +248,18 @@ def pack_attrs(vec):
     return ",".join(str(vec.get(a, 5)) for a in C.ATTRS)
 
 
+_ATTRS_PARSE_CACHE = {}
+
+
 def unpack_attrs(s):
-    vals = [int(x) for x in s.split(",")]
+    # attribute strings are immutable per player-state; cache the parsed value
+    # tuple and build a fresh dict each call (callers may mutate the dict).
+    vals = _ATTRS_PARSE_CACHE.get(s)
+    if vals is None:
+        vals = tuple([int(x) for x in s.split(",")])
+        if len(_ATTRS_PARSE_CACHE) > 30000:
+            _ATTRS_PARSE_CACHE.clear()
+        _ATTRS_PARSE_CACHE[s] = vals
     return dict(zip(C.ATTRS, vals))
 
 

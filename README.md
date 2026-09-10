@@ -179,7 +179,23 @@ Massive overhaul addressing **"It still feels like a browser trying to act like 
 
 A standalone build of the same game is published as a release asset:
 
-**[Touchline-1.13.0-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.13.0/Touchline-1.13.0-arm64.apk)** — ~14 MB, Android 7.0+, 64-bit ARM, versionCode 16.
+**[Touchline-1.13.1-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.13.1/Touchline-1.13.1-arm64.apk)** — ~14 MB, Android 7.0+, 64-bit ARM, versionCode 17.
+
+### What changed in 1.13.1 — MATCHDAY SPEED
+The "clunk" you felt when CONTINUE landed on a matchday is gone. The world simulation's
+matchday tick (400 clubs, ~200 fixtures) used to cost 350–420 ms per tap (~1.2–2 s on a
+mid-range phone); it now runs in ~100–120 ms after the first matchday of a session:
+
+- club squad/best-XI data is now verified per matchday with one batched structural hash
+  instead of being thrown away globally every day — a club is only recomputed when an
+  injury, transfer, promotion or age-up actually changed it
+- goal/assist distribution reuses the cached squad (was: fresh DB read + attribute re-parse
+  per goal, per team); the random-sequence is byte-identical, so results are unchanged
+- attribute string parsing memoized; redundant best-XI re-sorts removed
+- world transfers no longer bust the whole world's cache three times a day
+
+Verified: 3-season integration 283 s → 250 s, league goal-rates drift ≤ ±0.08
+goals/match (within simulation noise), all test suites green. No UI or API changes.
 
 ### What changed in 1.13 — SAVE SLOTS & BACKUP
 - **Three careers at once** — each slot is a fully separate world+career; switching loads exactly the right one (verified by test)

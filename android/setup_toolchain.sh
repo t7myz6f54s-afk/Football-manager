@@ -10,12 +10,6 @@ set -e
 PREFIX=/usr/local
 mkdir -p "$PREFIX"
 
-# make sure the fresh JDK17 is the one on PATH for sdkmanager/gradle
-if [ -d "$PREFIX/jdk17" ]; then
-  export JAVA_HOME="$PREFIX/jdk17"
-  export PATH="$JAVA_HOME/bin:$PATH"
-fi
-
 echo "[1/3] Temurin JDK 17"
 if [ ! -x "$PREFIX/jdk17/bin/java" ]; then
   curl -sL -o /tmp/jdk17.tar.gz \
@@ -25,6 +19,11 @@ if [ ! -x "$PREFIX/jdk17/bin/java" ]; then
   rm -f /tmp/jdk17.tar.gz
 fi
 "$PREFIX/jdk17/bin/java" -version
+
+# make sure the fresh JDK17 is the one on PATH for sdkmanager/gradle
+# (must happen AFTER the download so a fresh machine also gets it)
+export JAVA_HOME="$PREFIX/jdk17"
+export PATH="$JAVA_HOME/bin:$PATH"
 
 echo "[2/3] Gradle 8.9"
 if [ ! -x "$PREFIX/gradle-8.9/bin/gradle" ]; then

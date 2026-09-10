@@ -371,22 +371,77 @@ def add_news(con, save, cat, text, club_id=None, player_id=None):
 
 
 # --------------------------------------------------------------- team ratings
-STRENGTH_CACHE = {}
-SQUAD_CACHE = {}
+STRENGTH_CACHE = {}      # club_id -> (squad_hash, strength dict)
+SQUAD_CACHE = {}         # club_id -> (squad_hash, rows)
 _VERSION = [0]
 
 
 def bump():
+    """Worldwide invalidation of the squad/strength caches (rare events:
+    new career, sack/resign, new season)."""
     _VERSION[0] += 1
+    STRENGTH_CACHE.clear()
+    SQUAD_CACHE.clear()
 
 
-def _squad_rows(con, club_id):
-    """Cached lightweight squad rows (with parsed attribute vectors)."""
-    v = _VERSION[0]
-    key = (club_id, v)
-    hit = SQUAD_CACHE.get(key)
-    if hit is not None:
-        return hit
+def bump_clubs(*club_ids):
+    """Targeted invalidation — only the clubs whose squads actually changed.
+    (The per-matchday structural-hash check is the backstop that catches any
+    club we forget; this keeps the hot cache entries fresh anyway.)"""
+    for cid in club_ids:
+        if cid is None:
+            continue
+        STRENGTH_CACHE.pop(cid, None)
+        SQUAD_CACHE.pop(cid, None)
+
+
+# Structural inputs that actually change who plays and how strong a team is:
+# ca, position, squad tier, fitness status. Pure daily drift (fitness/
+# fatigue/form/morale) is deliberately EXCLUDED — it feeds only the small
+# "condition" multiplier, and letting it go up to a week stale shifts AI
+# expected goals by <1%, far below the simulation's own noise. Everything
+# structural (injuries, transfers, promotions, age-up) flips the hash and
+# forces a fresh best-XI, so no call site has to remember to invalidate.
+_POS_HASH = {"GK": 1, "DC": 2, "DL": 3, "DR": 4, "DM": 5, "MC": 6,
+             "AMC": 7, "AML": 8, "AMR": 9, "ST": 10}
+_SQUAD_HASH = {"First Team": 1, "Reserve": 2}
+
+
+def _squad_hash(rows):
+    h = 0
+    for p in rows:
+        h += (int(p["ca"] * 100) * 1000003
+              + (0 if p["condition"] == "fit" else 1234567)
+              + _POS_HASH.get(p["pos"], 0) * 77777
+              + _SQUAD_HASH.get(p["squad"], 4) * 99991)
+    return h
+
+
+def squad_hashes(con, club_ids):
+    """One batched structural-hash lookup for many clubs (cache verification)."""
+    if not club_ids:
+        return {}
+    ph = ",".join("?" for _ in club_ids)
+    rows = con.execute(f"""SELECT club_id, SUM(CAST(ca*100 AS INTEGER)*1000003
+            + CASE WHEN condition='fit' THEN 0 ELSE 1234567 END
+            + CASE pos WHEN 'GK' THEN 1 WHEN 'DC' THEN 2 WHEN 'DL' THEN 3 WHEN 'DR' THEN 4
+                     WHEN 'DM' THEN 5 WHEN 'MC' THEN 6 WHEN 'AMC' THEN 7 WHEN 'AML' THEN 8
+                     WHEN 'AMR' THEN 9 WHEN 'ST' THEN 10 ELSE 0 END*77777
+            + CASE squad WHEN 'First Team' THEN 1 WHEN 'Reserve' THEN 2 ELSE 4 END*99991) AS h
+            FROM players WHERE club_id IN ({ph}) GROUP BY club_id""",
+            tuple(club_ids)).fetchall()
+    return {r["club_id"]: r["h"] for r in rows}
+
+
+def _squad_rows(con, club_id, verify_hash=None):
+    """Cached lightweight squad rows (with parsed attribute vectors).
+
+    With verify_hash the DB state is checked in O(1) against the hash; the
+    rows are only reloaded when something structural actually changed.
+    """
+    ent = SQUAD_CACHE.get(club_id)
+    if ent is not None and verify_hash is not None and ent[0] == verify_hash:
+        return ent[1]
     cols = ("id,name,attrs,ca,pa,pos,pos2,age,fitness,fatigue,form,morale,sharpness,condition,"
             "suspended,squad,value,wage,height,injury_prone,minutes,goals,assists,apps,avg_rating,"
             "personality,professionalism,contract_end,promise")
@@ -396,18 +451,18 @@ def _squad_rows(con, club_id):
         p = dict(r)
         p["_vec"] = unpack_attrs(p["attrs"])
         out.append(p)
-    if len(SQUAD_CACHE) > 60:
+    if len(SQUAD_CACHE) > 600:
         SQUAD_CACHE.clear()
-    SQUAD_CACHE[key] = out
+    SQUAD_CACHE[club_id] = (_squad_hash(out), out)
     return out
 
 
-def club_strength(con, club_id, save=None):
+def club_strength(con, club_id, save=None, verify_hash=None):
     """Fast cached team strength (attack/defence/overall) for AI matches."""
-    key = (club_id, _VERSION[0])
-    if key in STRENGTH_CACHE:
-        return STRENGTH_CACHE[key]
-    allrows = _squad_rows(con, club_id)
+    ent = STRENGTH_CACHE.get(club_id)
+    if ent is not None and verify_hash is not None and ent[0] == verify_hash:
+        return ent[1]
+    allrows = _squad_rows(con, club_id, verify_hash)
     rows = [p for p in allrows if p["squad"] in ("First Team", "Reserve")][:16]
     if len(rows) < 11:
         for p in allrows:
@@ -416,9 +471,10 @@ def club_strength(con, club_id, save=None):
             if len(rows) >= 14:
                 break
     # simple best-XI: 1 GK, 4 DEF, 4 MID, 2 ATT
+    # rows is already ordered by ca DESC (see _squad_rows), no re-sort needed
     def pick(pred, n, taken):
         out = []
-        for p in sorted(rows, key=lambda x: -x["ca"]):
+        for p in rows:
             if p["id"] in taken:
                 continue
             if pred(p):
@@ -456,9 +512,9 @@ def club_strength(con, club_id, save=None):
                morale=sum(p["morale"] for p in xi) / max(1, len(xi)),
                mentality="Balanced", mshift=0, line=0, loe=0, direct=0, familiar=70.0, n=len(xi),
                ids=[p["id"] for p in xi])
-    if len(STRENGTH_CACHE) > 3000:
+    if len(STRENGTH_CACHE) > 600:
         STRENGTH_CACHE.clear()
-    STRENGTH_CACHE[key] = out
+    STRENGTH_CACHE[club_id] = (SQUAD_CACHE[club_id][0], out)
     return out
 
 
@@ -631,10 +687,11 @@ KO_NAMES = {"R16": "Round of 16", "R32": "Round of 32", "R64": "First Round", "Q
 
 
 # ------------------------------------------------------------------ AI matches
-def ai_sim(con, save, fx, rng, difficulty="realistic"):
+def ai_sim(con, save, fx, rng, difficulty="realistic", verify_hashes=None):
     """PREMIUM REALISM: Stronger teams win consistently, prevents Fulham topping PL."""
-    hs = club_strength(con, fx["home_id"], save)
-    aws = club_strength(con, fx["away_id"], save)
+    vh = verify_hashes or {}
+    hs = club_strength(con, fx["home_id"], save, vh.get(fx["home_id"]))
+    aws = club_strength(con, fx["away_id"], save, vh.get(fx["away_id"]))
     ctype = fx.get("ctype") or "league"
     comp_row = comp(con, fx["comp_id"]) if fx["comp_id"] else None
     pres = (comp_row["prestige"] / 100.0) if comp_row else 0.6
@@ -1538,7 +1595,9 @@ def tick_day(con, save, rng, auto_human=False):
         if _last and ds(dt) >= _last:
             _season_end(con, save, rng, events)
             save["flags"][f"season_done_{save['season'] - 1}"] = True
-    bump()
+    # NOTE: no global bump() here anymore — the squad/strength caches are
+    # verified per matchday via structural hashes (see squad_hashes), so a
+    # daily worldwide invalidation was pure waste.
     return events
 
 
@@ -1576,6 +1635,14 @@ def _simulate_day_matches(con, save, dt, rng, include_human=False):
     rows = con.execute("""SELECT f.*, k.ctype, k.code AS comp_code, k.name AS comp_name, k.prestige
         FROM fixtures f LEFT JOIN competitions k ON k.id=f.comp_id
         WHERE f.match_date=? AND f.played=0""", (ds(dt),)).fetchall()
+    # one batched structural-hash lookup verifies the squad/strength caches
+    # for every club playing today (catches injuries, transfers, promotions)
+    club_ids = []
+    for r in rows:
+        for t in (r["home_id"], r["away_id"]):
+            if t != cid and t not in club_ids:
+                club_ids.append(t)
+    verify_hashes = squad_hashes(con, club_ids)
     n = 0
     for r in rows:
         fx = dict(r)
@@ -1588,34 +1655,39 @@ def _simulate_day_matches(con, save, dt, rng, include_human=False):
             if rng.random() < 0.5:
                 con.execute("UPDATE fixtures SET played=1, hg=NULL, aw=NULL WHERE id=?", (fx["id"],))
                 continue
-        hg, ag, data = ai_sim(con, save, fx, rng, diff)
+        hg, ag, data = ai_sim(con, save, fx, rng, diff, verify_hashes)
         data["rating_h"] = None
         data["rating_a"] = None
         apply_result(con, save, fx, hg, ag, data, rng)
-        # distribute goals to AI players
+        # distribute goals to AI players — reuses the cached squad rows
+        # (already sorted by ca DESC, attrs already parsed) instead of fresh
+        # SELECTs; weight vectors are precomputed per team so the RNG call
+        # sequence (and therefore the results) are unchanged.
         for side, team_id, gcount in (("H", fx["home_id"], hg), ("A", fx["away_id"], ag)):
             if gcount <= 0:
                 continue
-            rows2 = con.execute("""SELECT id, pos, ca, attrs FROM players WHERE club_id=?
-                AND squad IN ('First Team','Reserve') AND condition='fit' ORDER BY ca DESC LIMIT 14""",
-                (team_id,)).fetchall()
-            if not rows2:
+            pool = [p for p in _squad_rows(con, team_id, verify_hashes.get(team_id))
+                    if p["squad"] in ("First Team", "Reserve") and p["condition"] == "fit"][:14]
+            if not pool:
                 continue
+            n2 = len(pool)
             ws = []
-            for p in rows2:
-                v = unpack_attrs(p["attrs"])
+            aw = []
+            for p in pool:
+                v = p["_vec"]
                 w = (0.15 + v.get("finishing", 5) / 22.0) * (1.5 if p["pos"] in ("ST", "AMC") else 1.0)
                 if p["pos"] in ("DC", "GK"):
                     w *= 0.12
                 ws.append(max(0.01, w))
+                aw.append(max(0.01, (0.2 + v.get("passing", 5) / 20.0)))
             for _ in range(gcount):
-                idx = rng.choices(range(len(rows2)), weights=ws, k=1)[0]
+                idx = rng.choices(range(n2), weights=ws, k=1)[0]
                 con.execute("UPDATE players SET goals=goals+1, apps=apps+1, minutes=minutes+80, form=MIN(2.5,form+0.25), sharpness=MIN(100,sharpness+6) WHERE id=?",
-                            (rows2[idx]["id"],))
+                            (pool[idx]["id"],))
                 # assist
                 if rng.random() < 0.75:
-                    j = rng.choices(range(len(rows2)), weights=[max(0.01, (0.2 + unpack_attrs(x["attrs"]).get("passing", 5) / 20.0)) if x["id"] != rows2[idx]["id"] else 0.0001 for x in rows2], k=1)[0]
-                    con.execute("UPDATE players SET assists=assists+1 WHERE id=?", (rows2[j]["id"],))
+                    j = rng.choices(range(n2), weights=[aw[k] if k != idx else 0.0001 for k in range(n2)], k=1)[0]
+                    con.execute("UPDATE players SET assists=assists+1 WHERE id=?", (pool[j]["id"],))
         # squad-wide fatigue/sharpness for participants
         for team_id in (fx["home_id"], fx["away_id"]):
             con.execute("""UPDATE players SET fatigue=MIN(100, fatigue+18), sharpness=MIN(100,sharpness+7),
@@ -2673,7 +2745,7 @@ def complete_transfer(con, save, pid, to_id, fee, wage, years, promise, rng,
                   payload={"screen": "transfers"})
         if not save["flags"].get("record_sale") or fee > save["flags"]["record_sale"]["fee"]:
             save["flags"]["record_sale"] = {"name": p["name"], "fee": fee, "season": save["season"]}
-    bump()
+    bump_clubs(from_id, to_id)
     return True
 
 
@@ -2718,7 +2790,7 @@ def release_player(con, save, pid):
                 (round(comp_fee, 3), round(comp_fee, 3), round(p["wage"] * 52 / 1000.0, 3), save["club_id"]))
     add_inbox(con, save, "SQUAD", "ROUTINE", f"Released: {p['name']}",
               f"{p['name']} has been released. Compensation paid: {money(comp_fee)}.")
-    bump()
+    bump_clubs(save["club_id"])
     return {"ok": True, "msg": f"{p['name']} released for {money(comp_fee)} compensation."}
 
 

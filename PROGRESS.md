@@ -144,3 +144,40 @@ verified in-browser; repo pushed; release shipped.
 - UI: slot strip on launcher, Saves manager modal (switch/delete/export/import), Career screen entry, TLAndroid JS bridge hooks.
 - Android: bootstrap → FM_DATA model (auto-migrates old installs); MainActivity bridge — export via share sheet (FileProvider), import via system file picker; androidx.core dep + manifest provider.
 - Tests: tests/slots_test.py — 3 careers isolated, switching returns right world every time, export→delete→import→identical state: ALL PASS. Browser walkthrough extended (saves modal, switch both ways, back in-game verified via MATCH CENTRE): all green, zero errors. live_match + smoke PASS.
+
+## v1.13.1 — MATCHDAY SPEED + WORKFLOW RESTRUCTURE (2026-09-11)
+
+**Task:** stop the heavy-in-workspace build loop; make the game itself run smoothly.
+
+**Environment reality check:** no separate 20 GB-RAM environment exists here — the "20 GB"
+is this box's free disk (1.9 GB RAM, 2 vCPUs). Workflow restructured around that:
+- 3 GB swapfile added (`/swapfile`) → OOM kills during build peaks are gone (the old
+  kill-Java/rebuild loop was the symptom; this is the fix)
+- `android/gradle.properties`: build cache ON (disk-backed), workers.max=1, 900m heap,
+  daemon OFF (memory returns after each build) — warm rebuilds reuse .so/dex/aapt outputs
+- `setup_toolchain.sh` fresh-machine bug fixed: JAVA_HOME export happened BEFORE the JDK
+  download, so sdkmanager ran on Java 11 and died (class file 61 vs 55); export moved
+  after the install
+- full phase map + rationale in **WORKFLOW.md**
+
+**In-game lag — found and fixed (no rewrites, no UI changes):**
+- Profiling: `tests/perf_probe.py` (real HTTP, temp DB) + cProfile on `tick_day`.
+  Live match steps: 8 ms p50 (fine). Screen payloads: 1–8 ms (fine). The clunk = the
+  matchday CONTINUE tick: 350–420 ms desktop / ~1.2–2 s on a mid-range phone.
+- Causes: (1) global `bump()` at end of every tick_day invalidated all 430 clubs'
+  cached squads+strengths daily even though each club plays once a week; (2) goal
+  distribution re-SELECTed each scoring team's squad and re-parsed attrs per goal
+  (23,794 unpacks/matchday); (3) `unpack_attrs` re-parsed the same strings; (4)
+  redundant best-XI re-sorts; (5) `complete_transfer` (called ~3×/day by world transfer
+  activity) did a global cache bust.
+- Fixes: per-club structural content hash (ca/pos/squad/condition) verified with ONE
+  batched query per matchday — catches every structural mutation by construction
+  (no invalidation call sites to audit); goal distribution reuses cached squad rows with
+  precomputed weight vectors (RNG call sequence byte-identical); unpack memoized
+  (fresh dict per call = mutation-safe); targeted `bump_clubs()` for transfers/releases;
+  daily global bump removed. Fatigue/fitness drift deliberately excluded from the hash
+  (<1% shift in AI expected goals, below Poisson noise — documented in WORKFLOW.md).
+- Result: warm matchday tick 350–420 ms → 100–129 ms; cold ~350 ms; 3-season run
+  283 s → 250 s; league goal-rates drift ≤ ±0.08/match; ALL tests pass (season_test 3
+  seasons, smoke, live_match e2e, order_effect statistical, ui_sanity 21/52/17).
+- `tests/perf_probe.py` added to the repo for future regressions.
