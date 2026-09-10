@@ -640,3 +640,10 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 @keyframes scr-in { from { opacity: 0; transform: translateY(5px); } }
 .topbar { padding-top: env(safe-area-inset-top); }
 .tabbar { padding-bottom: env(safe-area-inset-bottom); }
+@media (max-width: 620px) {
+  .strip { display: grid; grid-template-columns: repeat(3, 1fr); overflow: visible; }
+  .strip .st { min-width: 0; border-right: 0; border-bottom: 1px solid var(--line); }
+  .strip .st:nth-child(3n-1), .strip .st:nth-child(3n) { border-left: 1px solid var(--line); }
+  .strip .st:nth-last-child(-n+3) { border-bottom: 0; }
+  .tabs { flex-wrap: wrap; overflow: visible; }
+}
