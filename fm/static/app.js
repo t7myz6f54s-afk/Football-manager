@@ -1771,7 +1771,7 @@ async function renderTable() {
   $("#content").innerHTML = `
     <div class="sec-h"><h3>${esc(j.comp.name)}</h3><span class="spacer"></span><span class="hint">${G.home.season_label} · ${j.prom_spots} up / ${j.rel_spots} down</span></div>
     <div class="card" style="padding:0;overflow:auto">
-      <table><thead><tr><th class="num">#</th><th>Club</th><th class="num">P</th><th class="num">W</th>
+      <table class="mc"><thead><tr><th class="num">#</th><th>Club</th><th class="num">P</th><th class="num">W</th>
         <th class="num">D</th><th class="num">L</th><th class="num">GF</th><th class="num">GA</th>
         <th class="num">GD</th><th class="num">Pts</th><th>Form</th></tr></thead>
       <tbody>${j.rows.map(r => `<tr class="${r.club_id === j.my_club ? "me" : ""} ${r.zone === "promotion" ? "zp" : r.zone === "relegation" ? "zr" : ""}">
@@ -1851,7 +1851,7 @@ async function renderCompHub(id) {
     ${tbl.length ? `<div class="card tight" style="padding:0;margin-top:10px">
       <div class="sec-h" style="padding:10px 12px 4px"><h3>${k.ctype === "continental" ? "League phase" : "Standings"}</h3>
         <span class="spacer"></span>${k.code === (G.home.club && G.home.club.league_code) ? '<button class="btn sm" onclick="go(\'table\')">Full</button>' : ""}</div>
-      <div class="tw"><table><thead><tr><th class="num">#</th><th>Club</th><th class="num">P</th><th class="num">W</th>
+      <div class="tw"><table class="mc"><thead><tr><th class="num">#</th><th>Club</th><th class="num">P</th><th class="num">W</th>
         <th class="num">D</th><th class="num">L</th><th class="num">GD</th><th class="num">Pts</th></tr></thead>
         <tbody>${tbl.map(rowHtml).join("")}</tbody></table></div>
     </div>` : ""}
