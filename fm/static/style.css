@@ -578,3 +578,4 @@ tbody tr.zr td:first-child { box-shadow: inset 2px 0 0 var(--red); }
   table.mp th:nth-child(6), table.mp td:nth-child(6),
   table.mp th:nth-child(7), table.mp td:nth-child(7) { display: none; }
 }
+@media (max-width: 980px) { .grid.pitchwide { grid-template-columns: 1fr; } }

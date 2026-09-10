@@ -1214,7 +1214,7 @@ async function renderMatch() {
       </div>
     </div>
 
-    <div class="grid g2" style="margin-top:12px">
+    <div class="grid g2 pitchwide" style="margin-top:12px">
       <div class="card tight"><div class="sec-h"><h3>Selected XI</h3></div>${pitchHTML(p.xi, false)}</div>
       <div class="card tight" style="padding:0">
         <div class="sec-h" style="padding:10px 12px 4px"><h3>Bench</h3></div>
