@@ -77,3 +77,10 @@ Design tokens in style.css; nav restructure (bottom bar: Home/Squad/Tactics/Matc
 - NEW-CAREER FLOW tested end-to-end in UI: splash -> search/pick club (rich club card) -> manager name -> onboarding checklist (step-list CSS was missing, fixed) -> dashboard w/ explainer card. Arsenal career now live in dev server.
 - Tablet 768 pass: pitch/bench stack below 980px (label collisions fixed).
 - Pushed: overflow fixes + step-list.
+
+## Update ~04:15 UTC (pre-freeze)
+- New-career Arsenal flow verified: splash, club search/pick card, onboarding checklist (step-list CSS added), dashboard explainer, friendly FT graphic (MOTM/stats/events), HT team-talk screen.
+- Live/HT scoreboard names now wrap instead of truncating ("Nottingham Forest").
+- Engine 1-season test PASSED (temp DB): finances/inbox/progression sane.
+- audit2 16/16 clean; ui_sanity green; make_apk.sh re-stages fm/ + static at build time (final build will include everything).
+- FREEZE 05:27: no more feature edits; final regression -> APK -> release -> report.
