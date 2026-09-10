@@ -1696,199 +1696,52 @@ function cashSpark(hist) {
 }
 
 /* -------------------------------------------------------------------- STAFF */
+function staffAbbr(role) {
+  const r = role || "";
+  if (/Assistant/.test(r)) return "AM";
+  if (/Chief/.test(r)) return "CS";
+  if (/Scout/.test(r)) return "SC";
+  if (/Physio|Medical/.test(r)) return "PH";
+  if (/Coach/.test(r)) return "CO";
+  return "ST";
+}
+function staffKey(s) {
+  const r = s.role || "";
+  if (/Scout/.test(r)) return [["judge", Math.round(s.judging || 0)], ["pot", Math.round(s.judging_pot || 0)]];
+  if (/Physio|Medical/.test(r)) return [["fit", Math.round(s.fitness || 0)], ["men", Math.round(s.mental || 0)]];
+  return [["att", Math.round(s.attacking || 0)], ["tac", Math.round(s.tactical || 0)], ["fit", Math.round(s.fitness || 0)]];
+}
 async function renderStaff() {
   const j = await api.get("/api/screen/staff");
   await refreshState();
   $("#content").innerHTML = `
-    <div class="sec-h"><h3>Staff</h3></div>
-    <p class="sub">Coaching quality drives training gains. Scouting quality drives knowledge. Physios reduce injury time.</p>
-    <div class="card" style="padding:0;overflow:auto">
-      <table><thead><tr><th>Name</th><th>Role</th><th class="num">Age</th><th class="num">Att</th>
-        <th class="num">Def</th><th class="num">Fit</th><th class="num">Tac</th><th class="num">Tec</th>
-        <th class="num">Men</th><th class="num">Youth</th><th class="num">Man mgmt</th>
-        <th class="num">Judge</th><th class="num">Judge pot</th><th class="num">Wage</th><th class="num">Contract</th></tr></thead>
-      <tbody>${j.map(s => `<tr><td><b>${esc(s.name)}</b><div class="muted small">${esc(s.nat)}</div></td>
-        <td>${esc(s.role)}</td><td class="num">${s.age}</td>
-        ${["attacking", "defending", "fitness", "tactical", "technical", "mental", "youth", "man_mgmt", "judging"]
-          .map(k => `<td class="num">${Math.round(s[k] || 0)}</td>`).join("")}
-        <td class="num">${Math.round(s.judging_pot || 0)}</td>
-        <td class="num small">${wk(s.wage)}</td><td class="num small">${esc(s.contract_end)}</td></tr>`).join("")}</tbody></table>
+    <div class="sec-h"><h3>Backroom staff</h3><span class="spacer"></span>
+      <span class="hint">${j.length} staff · wages ${money(j.reduce((a, b) => a + (b.wage || 0) * 52 / 1000, 0))}/yr</span></div>
+    <p class="small muted">Coaching drives training gains · scouting drives knowledge · physios cut injury time.</p>
+    <div class="sq-list" style="margin-top:10px;display:flex">
+      ${j.map(s => `<div class="sqr" style="cursor:default;flex-wrap:wrap">
+        <span class="tag">${staffAbbr(s.role)}</span>
+        <span class="sqr-n"><b>${esc(s.name)}</b><i>${esc(s.role)} · ${esc(s.nat)} · ${s.age}y</i></span>
+        <span class="sqr-r"><span class="small muted">${wk(s.wage)}</span></span>
+        <span class="stf-k">${staffKey(s).map(([k, v]) => `${k} <b>${v}</b>`).join(" · ")}</span>
+      </div>`).join("")}
     </div>`;
 }
-
 /* -------------------------------------------------------------------- YOUTH */
 async function renderYouth() {
   const j = await api.get("/api/screen/youth");
   await refreshState();
   $("#content").innerHTML = `
-    <div class="sec-h"><h3>Academy</h3></div>
-    <p class="sub">Youth recruitment ${j.rating}/20 · facilities ${j.facilities}/20. A new intake signs each summer; the best prospects are listed first.</p>
-    <div class="card" style="padding:0;overflow:auto">
-      <table><thead><tr><th>Name</th><th class="num">Age</th><th>Pos</th><th class="num">CA</th>
-        <th class="num">PA</th><th class="num">Now</th><th class="num">Potential</th><th>Personality</th><th></th></tr></thead>
-      <tbody>${j.players.map(p => `<tr><td><b>${esc(p.name)}</b></td><td class="num">${p.age}</td>
-        <td><span class="pos">${esc(p.pos)}</span></td><td class="num">${p.ca.toFixed(1)}</td>
-        <td class="num muted">${p.pa.toFixed(1)}</td><td class="num">${stars(p.stars)}</td>
-        <td class="num">${stars(p.stars_pa)}</td><td class="small">${esc(p.personality)}</td>
-        <td><button class="btn sm" onclick="go('player',${p.id})">View</button></td></tr>`).join("")
-        || '<tr><td colspan="9" class="muted">No academy players.</td></tr>'}</tbody></table>
-    </div>`;
-}
-
-/* ----------------------------------------------------------------- CALENDAR */
-async function renderCalendar() {
-  const j = await api.get("/api/screen/calendar");
-  await refreshState();
-  const nextDate = (G.home.next_fixture || {}).date;
-  $("#content").innerHTML = `
-    <div class="sec-h"><h3>Calendar</h3><span class="spacer"></span><span class="hint">season ${G.home.season_label}</span></div>
-    <div class="sq-list" style="display:flex">
-      ${j.fixtures.map(f => {
-        const next = !f.played && f.date === nextDate;
-        return `<div class="fxr ${next ? "next" : ""}">
-          <span class="fx-d"><b>${fmtDate(f.date).replace(/, \d{4}$/, "")}</b><i>${esc(compLabel(f))}${f.stage && f.stage !== "league" && f.comp ? " · " + esc(f.stage) : ""}</i></span>
-          <span class="fx-m">${crest(f.home_code)}<b>${esc(f.home_short || f.home)}</b>
-            <span class="fx-s">${f.played ? (f.hg != null ? f.hg + "–" + f.aw : "—") : "v"}</span>
-            <b>${esc(f.away_short || f.away)}</b>${crest(f.away_code)}</span>
-          <span class="fx-r">${f.res ? `<span class="tag ${f.res}">${f.res}</span>` : next ? '<span class="tag NEW">next</span>' : ""}</span>
-        </div>`;
-      }).join("")}
-    </div>`;
-}
-/* -------------------------------------------------------------------- TABLE */
-async function renderTable() {
-  const j = await api.get("/api/screen/table");
-  await refreshState();
-  if (!j.comp) { $("#content").innerHTML = "<h1>League</h1><p class='muted'>No league.</p>"; return; }
-  $("#content").innerHTML = `
-    <div class="sec-h"><h3>${esc(j.comp.name)}</h3><span class="spacer"></span><span class="hint">${G.home.season_label} · ${j.prom_spots} up / ${j.rel_spots} down</span></div>
-    <div class="card" style="padding:0;overflow:auto">
-      <table><thead><tr><th class="num">#</th><th>Club</th><th class="num">P</th><th class="num">W</th>
-        <th class="num">D</th><th class="num">L</th><th class="num">GF</th><th class="num">GA</th>
-        <th class="num">GD</th><th class="num">Pts</th><th>Form</th></tr></thead>
-      <tbody>${j.rows.map(r => `<tr class="${r.club_id === j.my_club ? "me" : ""} ${r.zone === "promotion" ? "zp" : r.zone === "relegation" ? "zr" : ""}">
-        <td class="num">${r.pos}${r.zone === "promotion" ? ' <span style="color:var(--good)">▲</span>' : r.zone === "relegation" ? ' <span style="color:var(--bad)">▼</span>' : ""}</td>
-        <td><span class="cellclub">${crest(r.code)}<span>${esc(r.name)} <i class="muted small">${r.rep}</i></span></span></td>
-        <td class="num">${r.p}</td><td class="num">${r.w}</td><td class="num">${r.d}</td><td class="num">${r.l}</td>
-        <td class="num">${r.gf}</td><td class="num">${r.ga}</td>
-        <td class="num">${r.gf - r.ga > 0 ? "+" : ""}${r.gf - r.ga}</td><td class="num"><b>${r.pts}</b></td>
-        <td><span class="frm">${(r.form || "").split("").map(x => `<i class="fm-i ${x}">${x}</i>`).join("")}</span></td></tr>`).join("")}</tbody></table>
-    </div>`;
-}
-
-/* -------------------------------------------------------------------- COMPS */
-function compMono(code) {
-  const m = { UCL: "UCL", UEL: "UEL", UECL: "UECL", ENG1: "PL", ESP1: "LaL", ITA1: "SA",
-    GER1: "BL", FRA1: "L1", FACUP: "FA", EFLCUP: "EFL", COPADELREY: "CdR", COPPAITALIA: "CI",
-    DFBPOKAL: "DFB", COUPEDEFRANCE: "CdF" };
-  if (m[code]) return m[code];
-  return String(code || "?").slice(0, 3);
-}
-function compBand(c, right) {
-  return `<div class="comp-band" style="--comp:${compColor(c.code)}">
-    <span class="ci">${esc(compMono(c.code))}</span>
-    <span style="min-width:0"><b>${esc(c.name)}</b><br><span class="sub">${esc(c.ctype === "continental" ? "Europe" : c.ctype === "cup" ? "Knockout cup" : "League")}${c.tier ? " · tier " + c.tier : ""}</span></span>
-    <span class="spacer"></span>${right || ""}</div>`;
-}
-async function renderComps() {
-  const j = await api.get("/api/screen/comps");
-  await refreshState();
-  const my = G.home && G.home.club ? G.home.club.id : 0;
-  $("#content").innerHTML = `
-    <div class="sec-h"><h3>Competitions</h3><span class="spacer"></span><span class="hint">season ${G.home ? G.home.season_label : ""}</span></div>
-    <div style="display:grid;gap:8px">
-    ${j.comps.map(c => {
-      let status = "";
-      if (c.table && c.table.length) {
-        const r = c.table.find(x => x.club_id === my);
-        status = r && r.pos ? `<span class="tag">${r.pos}${ord(r.pos)}</span>` : "";
-      } else status = '<span class="tag">KO</span>';
-      return `<button class="comp-head" style="text-align:left;width:100%" onclick="renderCompHub(${c.comp.id})">
-        ${compBand(c.comp, status + '<span class="muted" style="font-size:16px"> ▸</span>')}</button>`;
-    }).join("")}
-    </div>`;
-}
-function ord(n) {
-  if (n % 100 >= 11 && n % 100 <= 13) return "th";
-  return ["th", "st", "nd", "rd"][n % 10] || "th";
-}
-async function renderCompHub(id) {
-  const j = await api.get("/api/screen/comp?id=" + id);
-  if (!j || j.error) { toast("Competition not found"); return; }
-  const k = j.comp, my = G.home && G.home.club ? G.home.club.id : 0;
-  const tbl = j.table || [];
-  const me = tbl.find(r => r.club_id === my);
-  const played = j.fixtures.filter(f => f.played), todo = j.fixtures.filter(f => !f.played);
-  const rowHtml = r => `<tr class="${r.club_id === my ? "me" : ""} ${r.zone === "promotion" ? "zp" : r.zone === "relegation" ? "zr" : ""}">
-      <td class="num muted">${r.pos || "–"}</td>
-      <td><span class="cellclub">${crest(r.code)}<span>${esc(r.name)}</span></span></td>
-      <td class="num">${r.p}</td><td class="num">${r.w}</td><td class="num">${r.d}</td><td class="num">${r.l}</td>
-      <td class="num">${r.gf - r.ga > 0 ? "+" : ""}${r.gf - r.ga}</td><td class="num"><b>${r.pts}</b></td></tr>`;
-  const fxRow = f => {
-    const myW = f.played && ((f.home_id === my && f.hg > f.ag) || (f.away_id === my && f.ag > f.hg));
-    const myD = f.played && f.hg === f.ag;
-    return `<div class="kv"><span class="cellclub" style="flex:1;min-width:0">${f.played
-      ? `<span class="tag ${myW ? "W" : myD ? "D" : "L"}">${f.hg}–${f.ag}</span>`
-      : `<span class="muted small">${fmtDate(f.date)}</span>`}
-      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${crest(f.home_code)}&nbsp;${esc(f.home_short || f.home)} v ${esc(f.away_short || f.away)}&nbsp;${crest(f.away_code)}</span></span>
-      <b class="small muted">${f.stage !== "league" ? esc(f.stage) : ""}</b></div>`;
-  };
-  $("#content").innerHTML = `
-    <button class="btn sm" onclick="renderComps()" style="margin-bottom:10px">◂ All competitions</button>
-    <div class="comp-head">${compBand(k, me && me.pos ? `<span class="tag">${me.pos}${ord(me.pos)}</span>` : "")}</div>
-    ${tbl.length ? `<div class="card tight" style="padding:0;margin-top:10px">
-      <div class="sec-h" style="padding:10px 12px 4px"><h3>${k.ctype === "continental" ? "League phase" : "Standings"}</h3>
-        <span class="spacer"></span>${k.code === (G.home.club && G.home.club.league_code) ? '<button class="btn sm" onclick="go(\'table\')">Full</button>' : ""}</div>
-      <div class="tw"><table><thead><tr><th class="num">#</th><th>Club</th><th class="num">P</th><th class="num">W</th>
-        <th class="num">D</th><th class="num">L</th><th class="num">GD</th><th class="num">Pts</th></tr></thead>
-        <tbody>${tbl.map(rowHtml).join("")}</tbody></table></div>
-    </div>` : ""}
-    ${(j.ko || []).length ? `<div class="card tight" style="margin-top:10px">
-      <div class="sec-h"><h3>Knockout progression</h3></div>
-      <div class="brk">${j.ko.map(r => `<div class="brk-r">
-        <div class="stat-l">${esc(r.stage === "F" ? "Final" : r.stage === "SF" ? "Semi-finals" : r.stage === "QF" ? "Quarter-finals" : r.stage === "R16" ? "Round of 16" : r.stage === "R32" ? "Round of 32" : r.stage)}</div>
-        ${r.ties.map(t => {
-          const hw = t.played && t.hg > t.ag, aw = t.played && t.ag > t.hg;
-          return `<div class="brk-m"><span class="${hw ? "w" : ""}">${crest(t.home_code)} ${esc(t.home_short || t.home)}</span>
-            <span class="sc">${t.played ? t.hg + "–" + t.ag : fmtDate(t.date)}</span>
-            <span class="${aw ? "w" : ""}" style="text-align:right">${esc(t.away_short || t.away)} ${crest(t.away_code)}</span></div>`;
-        }).join("")}</div>`).join("")}</div>
-    </div>` : ""}
-    <div class="grid g2" style="margin-top:10px">
-      <div class="card tight">
-        <div class="sec-h"><h3>Results</h3></div>
-        ${played.length ? played.slice().reverse().slice(0, 8).map(fxRow).join("") : '<p class="muted small">No results yet.</p>'}
-      </div>
-      <div class="card tight">
-        <div class="sec-h"><h3>Fixtures</h3></div>
-        ${todo.length ? todo.slice(0, 8).map(fxRow).join("") : '<p class="muted small">No fixtures left.</p>'}
-      </div>
-    </div>`;
-}
-async function renderClub() {
-  await refreshState();
-  const c = G.home.club;
-  $("#content").innerHTML = `
-    <div class="card tight">
-      <div class="p-head">${crest(c.code, "xl")}
-        <div style="min-width:0"><h2>${esc(c.name)}</h2>
-          <p class="small muted">${esc(c.league)} · tier ${c.tier} · reputation ${c.rep}</p></div>
-      </div>
-      <div class="divider"></div>
-      <div class="kv"><span>Stadium</span><b>${esc(c.stadium)}</b></div>
-      <div class="kv"><span>Capacity</span><b>${(c.capacity || 0).toLocaleString()}</b></div>
-      <div class="kv"><span>Season</span><b>${G.home.season_label}</b></div>
-    </div>
-    <div class="grid g2" style="margin-top:10px">
-      ${[["board", "Board & objectives", "Confidence, warnings and what the hierarchy expects."],
-         ["media", "Media", "Press conferences and headlines."],
-         ["staff", "Backroom staff", "Coaches, scouts, medical — roles and wages."],
-         ["youth", "Academy", "Intake, prospects and development."],
-         ["career", "Career & trophies", "Your record, honours and history."],
-         ["finances", "Finances", "Budgets, wages, commercial and matchday."]]
-        .map(([id, t, d]) => `<button class="card tight" style="text-align:left" onclick="go('${id}')">
-          <div class="row" style="gap:8px">${svg(id)}<b style="font-size:13.5px">${t}</b></div>
-          <p class="small muted" style="margin-top:4px">${d}</p></button>`).join("")}
+    <div class="sec-h"><h3>Academy</h3><span class="spacer"></span>
+      <span class="hint">recruitment ${j.rating}/20 · facilities ${j.facilities}/20</span></div>
+    <p class="small muted">A new intake signs each summer; best prospects first.</p>
+    <div class="sq-list" style="margin-top:10px;display:flex">
+      ${j.players.map(p => `<button class="sqr" onclick="go('player',${p.id})">
+        <span class="pos">${esc(p.pos)}</span>
+        <span class="sqr-n"><b>${esc(p.name)}</b><i>${p.age}y · ${esc(p.personality)} · CA ${p.ca.toFixed(1)} / PA ${p.pa.toFixed(1)}</i></span>
+        <span class="sqr-r"><span class="small muted">now</span> ${stars(p.stars)}
+          <span class="small muted">pot</span> ${stars(p.stars_pa)}</span>
+      </button>`).join("") || '<p class="muted small" style="padding:12px">No youth players yet.</p>'}
     </div>`;
 }
 /* -------------------------------------------------------------------- BOARD */
