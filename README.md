@@ -179,7 +179,17 @@ Massive overhaul addressing **"It still feels like a browser trying to act like 
 
 A standalone build of the same game is published as a release asset:
 
-**[Touchline-1.12.0-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.12.0/Touchline-1.12.0-arm64.apk)** — ~14 MB, Android 7.0+, 64-bit ARM, versionCode 15.
+**[Touchline-1.13.0-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.13.0/Touchline-1.13.0-arm64.apk)** — ~14 MB, Android 7.0+, 64-bit ARM, versionCode 16.
+
+### What changed in 1.13 — SAVE SLOTS & BACKUP
+- **Three careers at once** — each slot is a fully separate world+career; switching loads exactly the right one (verified by test)
+- **Slot picker** on the launcher (your old career is migrated automatically on first launch of this version)
+- **Saves manager** (launcher + Career screen): switch, delete, export, import
+- **Export** — one tap produces a single backup file; on Android it opens the system share sheet (save to Drive, send to yourself on WhatsApp, anything). In a browser it downloads as a .zip
+- **Import** — restore a backup into a free slot; the career comes back exactly as it left (state-verified round trip)
+- Small print: "New career" now only wipes the *selected slot*; paused matches block slot switching (finish the match first)
+
+v1.12.0 was Stats Center + the interface declutter. v1.11.0 was Match Day Live+.
 
 ### What changed in 1.12 — STATS CENTER + the declutter
 **New: Stats Center** (its own tab):

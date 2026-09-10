@@ -4,6 +4,7 @@ Simulation lives in fm/engine.py + fm/match.py; projections in fm/view.py.
 This module only wires them to HTTP. It uses fm/mini.py, a tiny stdlib-only
 router, so the game has no third-party dependencies.
 """
+import io
 import json
 import os
 import random
@@ -16,24 +17,53 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fm import constants as C
 from fm import engine as E
 from fm import view as V
+import fm.mini as mini_module
 from fm.mini import HTTPError, MiniApp, serve
-from fm.world import DB_PATH, build_world, connect
+from fm.world import build_world, connect
+from fm.world import DB_PATH as _WORLD_DB_DEFAULT
+import fm.world as _world_mod
+from fm import slots as SL
 
 # Optional pristine world shipped with the app (Android assets). Copying a
 # prebuilt database is instant; building from scratch is the fallback.
 SEED_DB = os.environ.get("FM_SEED_DB", "")
 
 
+def _set_db_path(path):
+    _world_mod.DB_PATH = path
+
+
+def active_paths():
+    return SL.paths(SL.active_id())
+
+
 def seed_or_build():
+    db = active_paths()["db"]
+    _set_db_path(db)
+    os.makedirs(os.path.dirname(db) or ".", exist_ok=True)
     if SEED_DB and os.path.exists(SEED_DB):
         for suffix in ("", "-wal", "-shm"):
-            p = DB_PATH + suffix
+            p = db + suffix
             if os.path.exists(p):
                 os.remove(p)
-        shutil.copyfile(SEED_DB, DB_PATH)
+        shutil.copyfile(SEED_DB, db)
         return True
-    build_world()
+    if not os.path.exists(db):
+        build_world()
+        return False
     return False
+
+
+def init_slots():
+    """Legacy layout migration + make sure the active slot has a world."""
+    if SL.migrate_legacy():
+        print("Migrated existing career into save slot 1.", flush=True)
+    p = active_paths()
+    _set_db_path(p["db"])
+    if not os.path.exists(p["db"]):
+        print("Preparing save slot world (first run)…", flush=True)
+        seed_or_build()
+    os.makedirs(os.path.dirname(p["career"]) or ".", exist_ok=True)
 
 # All three can be overridden by environment variables so the same code runs
 # unchanged on a desktop and inside the Android WebView wrapper (see android/).
@@ -60,16 +90,16 @@ S = {"con": None, "save": None, "rng": random.Random(), "pending_match": None, "
 # --------------------------------------------------------------------- helpers
 def con():
     if S["con"] is None:
-        if not os.path.exists(DB_PATH):
+        if not os.path.exists(_world_mod.DB_PATH):
             seed_or_build()
         S["con"] = connect()
     return S["con"]
 
 
 def save():
-    if S["save"] is None and os.path.exists(SAVE_PATH):
+    if S["save"] is None and os.path.exists(active_paths()["career"]):
         try:
-            S["save"] = E.load(SAVE_PATH)
+            S["save"] = E.load(active_paths()["career"])
         except Exception:
             S["save"] = None
     return S["save"]
@@ -99,7 +129,8 @@ def commit():
     c = con()
     c.commit()
     if S["save"]:
-        E.persist(c, S["save"])
+        E.persist(c, S["save"], path=active_paths()["career"])
+        SL.record(SL.active_id(), club=None)
 
 
 def _captain_name(s):
@@ -162,25 +193,29 @@ def api_career_new(payload: dict = Body(...)):
             raise HTTPException(400, "club_code required")
         if not mgr.get("name"):
             raise HTTPException(400, "manager name required")
-        # a brand-new career starts from a pristine world
+        # a brand-new career starts from a pristine world (in the ACTIVE slot)
+        no_pending()
+        slot_id = SL.active_id()
+        sp = SL.paths(slot_id)
         if S["con"]:
             S["con"].close()
         S["con"] = None
         for suffix in ("", "-wal", "-shm"):
-            p = DB_PATH + suffix
+            p = sp["db"] + suffix
             if os.path.exists(p):
                 os.remove(p)
-        if os.path.exists(SAVE_PATH):
-            os.remove(SAVE_PATH)
+        if os.path.exists(sp["career"]):
+            os.remove(sp["career"])
         seed_or_build()
         S["con"] = connect()
         S["seed"] = random.randrange(1, 10 ** 9)
         S["rng"] = random.Random(S["seed"])
         s = E.new_career(code, mgr, difficulty=payload.get("difficulty", "realistic"),
-                         save_path=SAVE_PATH)
+                         save_path=sp["career"])
         S["save"] = s
         commit()
         c = E.club(S["con"], s["club_id"])
+        SL.record(slot_id, club=c["name"])
         lg = S["con"].execute("SELECT name FROM competitions WHERE code=?", (c["league"],)).fetchone()
         steps = [
             ("Club loaded", f"{c['name']} — {lg['name'] if lg else c['league']}"),
@@ -220,7 +255,7 @@ def api_career_new(payload: dict = Body(...)):
 
 @app.post("/api/career/load")
 def api_career_load(payload: dict = Body(default={})):
-    path = payload.get("path") or SAVE_PATH
+    path = payload.get("path") or active_paths()["career"]
     if not os.path.exists(path):
         raise HTTPException(404, "No saved career found")
     S["save"] = E.load(path)
@@ -233,9 +268,146 @@ def api_career_load(payload: dict = Body(default={})):
 def api_career_reset():
     S["save"] = None
     S["pending_match"] = None
-    if os.path.exists(SAVE_PATH):
-        os.remove(SAVE_PATH)
+    sp = active_paths()
+    if os.path.exists(sp["career"]):
+        os.remove(sp["career"])
     return {"ok": True}
+
+
+# --------------------------------------------------------------------- save slots
+@app.get("/api/slots")
+def api_slots():
+    try:
+        return {"ok": True, **SL.summary(), "pending": bool(S["pending_match"])}
+    except Exception as e:
+        return err(e)
+
+
+@app.post("/api/slots/switch")
+def api_slots_switch(payload: dict = Body(default={})):
+    """Persist the current career and load another slot (world + career)."""
+    try:
+        # NOTE: the source slot may be empty (no career yet) — switching is always allowed
+        no_pending()
+        sid = payload.get("slot") or ""
+        import re as _re
+        m = _re.fullmatch(r"slot([1-9]\d*)", sid)
+        if not m or int(m.group(1)) > SL.MAX_SLOTS:
+            raise HTTPException(404, "No such slot.")
+        if sid == SL.active_id():
+            return {"ok": True, "msg": "Already on that slot.", **SL.summary()}
+        # save + close current world
+        if S["save"]:
+            commit()
+        if S["con"]:
+            S["con"].close()
+        S["con"] = None
+        S["save"] = None
+        S["pending_match"] = None
+        SL.set_active(sid)
+        sp = active_paths()
+        if not os.path.exists(sp["db"]):
+            seed_or_build()
+        _set_db_path(sp["db"])
+        S["con"] = connect()
+        S["rng"] = random.Random(S["seed"])
+        s = E.load(sp["career"])
+        if s:
+            S["save"] = s
+        return {"ok": True, **SL.summary(), "loaded": bool(s)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return err(e)
+
+
+@app.post("/api/slots/delete")
+def api_slots_delete(payload: dict = Body(default={})):
+    try:
+        no_pending()
+        sid = payload.get("slot") or ""
+        ok, msg = SL.delete(sid)
+        if not ok:
+            return {"ok": False, "msg": msg}
+        return {"ok": True, **SL.summary()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return err(e)
+
+
+@app.get("/api/slots/export")
+def api_slots_export(slot: str = None):
+    """Download a slot as a single .zip (world.db + career.json + meta)."""
+    try:
+        import io
+        import zipfile
+        from datetime import datetime as _dt
+        sid = slot or SL.active_id()
+        sp = SL.paths(sid)
+        if not os.path.exists(sp["career"]):
+            raise HTTPException(404, "That slot has no career to export.")
+        # checkpoint WAL so the db file is complete on disk
+        try:
+            con().execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            con().commit()
+        except Exception:
+            pass
+        meta_info = SL.meta(sid)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            z.write(sp["db"], "world.db")
+            z.write(sp["career"], "career.json")
+            z.writestr("meta.json", json.dumps({
+                "app": "touchline", "slot": sid, "exported": _dt.utcnow().isoformat(),
+                "club": meta_info.get("club"), "season": meta_info.get("season"),
+                "date": meta_info.get("date")}))
+        name = "touchline-%s-%s.zip" % (sid, meta_info.get("club") or "career")
+        name = "".join(ch for ch in name if ch.isalnum() or ch in "-._")
+        return mini_module.Binary("application/zip", buf.getvalue(), download=name)
+    except HTTPException:
+        raise
+    except Exception as e:
+        return err(e)
+
+
+@app.post("/api/slots/import")
+def api_slots_import(payload: dict = Body(default={})):
+    """Import a previously exported .zip (base64) into a free (or chosen) slot."""
+    try:
+        import base64
+        import zipfile
+        no_pending()
+        b64 = (payload.get("data_b64") or "").strip()
+        if not b64:
+            raise HTTPException(400, "No file data received.")
+        raw = base64.b64decode(b64)
+        with zipfile.ZipFile(io.BytesIO(raw)) as z:
+            names = set(z.namelist())
+            if not {"world.db", "career.json"} <= names:
+                raise HTTPException(400, "Not a Touchline save file.")
+            career = json.loads(z.read("career.json"))
+            cl = ((career.get("career") or {}).get("clubs") or [{}])[-1].get("name")
+            sid = payload.get("slot") or SL.free_id()
+            if not sid:
+                raise HTTPException(400, "All slots are in use — delete one first.")
+            p = SL.paths(sid)
+            os.makedirs(p["dir"], exist_ok=True)
+            for suffix in ("", "-wal", "-shm"):
+                if os.path.exists(p["db"] + suffix):
+                    os.remove(p["db"] + suffix)
+            if os.path.exists(p["career"]):
+                os.remove(p["career"])
+            with open(p["db"], "wb") as f:
+                f.write(z.read("world.db"))
+            with open(p["career"], "wb") as f:
+                f.write(z.read("career.json"))
+            SL.record(sid, club=cl)
+        return {"ok": True, "slot": sid, **SL.summary()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return err(e)
 
 
 # ------------------------------------------------------------------ game views
@@ -245,7 +417,8 @@ def api_state():
     return {"home": V.home(con(), s), "inbox_preview": V.inbox(con(), s, limit=6)["items"],
             "pending_match": bool(S["pending_match"]),
             "pending_mode": (S["pending_match"] or {}).get("mode"),
-            "pending_phase": (S["pending_match"] or {}).get("phase")}
+            "pending_phase": (S["pending_match"] or {}).get("phase"),
+            "slots": SL.summary()}
 
 
 @app.get("/api/screen/{name}")
@@ -910,10 +1083,7 @@ def api_press(payload: dict = Body(default={})):
 
 def main():
     os.makedirs(STATIC, exist_ok=True)
-    os.makedirs(SAVE_DIR, exist_ok=True)
-    if not os.path.exists(DB_PATH):
-        print("Building the world database (first run)…", flush=True)
-        seed_or_build()
+    init_slots()
     port = int(os.environ.get("PORT", 8000))
     serve(app, host=HOST, port=port)
 

@@ -15,7 +15,7 @@ const api = {
     return j;
   }
 };
-const VERSION = "1.12.0";
+const VERSION = "1.13.0";
 let DEAD = false;
 function deadScreen() { if (DEAD) return; DEAD = true; const d = $("#dead"); if (d) d.classList.remove("hidden"); }
 const G = { boot: null, home: null, screen: "home", sub: null, static: null, busy: false, prevScreen: null };
@@ -82,8 +82,97 @@ const NAV_START=[];
 function showStartScreen(){
   renderNav(NAV_START);
   $("#content").innerHTML=`
-    <div style="min-height:78vh;display:grid;place-items:center;padding:20px 14px"> <div style="width:100%;max-width:380px;text-align:center"> <svg viewBox="0 0 40 40" style="width:56px;height:56px;color:var(--acc)"><path d="M20 2 L36 8 V20 C36 30 29 36 20 38 C11 36 4 30 4 20 V8 Z" fill="rgba(44,255,138,.08)"/><path d="M20 2 L36 8 V20 C36 30 29 36 20 38 C11 36 4 30 4 20 V8 Z" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="20" cy="19" r="7" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M20 12v14M13 19h14M15 14.5l10 9M25 14.5l-10 9" stroke="currentColor" stroke-width=".9" opacity=".8"/></svg> <h1 style="font-size:26px;letter-spacing:.28em;text-indent:.28em;margin:14px 0 4px;color:var(--tx)">TOUCHLINE</h1> <p class="small muted" style="font-size:12px;margin:0">A football management simulation</p> <div style="margin:26px 0 0;display:grid;gap:8px"> <button class="btn primary" style="min-height:50px;border-radius:12px" onclick="Juice.haptic('light');stepChooseClub()">New career</button> </div> <p class="small muted" style="margin-top:22px;font-size:11px;line-height:1.7">402 clubs · 21 leagues · 15,000 players<br>Simulated world — transfers, sackings, trophies</p> <p class="small muted" style="margin-top:10px;opacity:.45;font-size:10px">v${VERSION} · offline</p> </div> </div>`;
+    <div style="min-height:78vh;display:grid;place-items:center;padding:20px 14px"> <div style="width:100%;max-width:380px;text-align:center"> <svg viewBox="0 0 40 40" style="width:56px;height:56px;color:var(--acc)"><path d="M20 2 L36 8 V20 C36 30 29 36 20 38 C11 36 4 30 4 20 V8 Z" fill="rgba(44,255,138,.08)"/><path d="M20 2 L36 8 V20 C36 30 29 36 20 38 C11 36 4 30 4 20 V8 Z" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="20" cy="19" r="7" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M20 12v14M13 19h14M15 14.5l10 9M25 14.5l-10 9" stroke="currentColor" stroke-width=".9" opacity=".8"/></svg> <h1 style="font-size:26px;letter-spacing:.28em;text-indent:.28em;margin:14px 0 4px;color:var(--tx)">TOUCHLINE</h1> <p class="small muted" style="font-size:12px;margin:0">A football management simulation</p> <div id="slot-strip" style="margin:18px 0 0;display:grid;gap:6px"></div> <div style="margin:10px 0 0;display:grid;gap:8px"> <button class="btn primary" style="min-height:50px;border-radius:12px" onclick="Juice.haptic('light');stepChooseClub()">New career</button> <button class="btn" style="min-height:40px;border-radius:12px" onclick="openSaves()">Saved games &amp; backup</button> </div> <p class="small muted" style="margin-top:22px;font-size:11px;line-height:1.7">402 clubs · 21 leagues · 15,000 players<br>Simulated world — transfers, sackings, trophies</p> <p class="small muted" style="margin-top:10px;opacity:.45;font-size:10px">v${VERSION} · offline</p> </div> </div>`;
+  renderSlotStrip();
 }
+/* ---------- Save slots ---------- */
+async function renderSlotStrip(){
+  const host=$("#slot-strip"); if(!host) return;
+  let j; try{ j=await api.get("/api/slots"); }catch(e){ return; }
+  host.innerHTML=j.slots.map(s=>{
+    const label=s.has_save?`${esc(s.club||"Career")} · ${s.season?s.season+"/"+String(s.season+1).slice(2):""}`:"Empty";
+    return `<button class="slot-chip${s.active?" on":""}" onclick="${s.active?"":`switchSlot('${s.id}')`}">
+      <span class="sc-n">${s.id.replace("slot","SLOT ")}</span><span class="sc-i">${label}${s.active?" · selected":""}</span></button>`;
+  }).join("")+`<p class="small muted" style="font-size:9.5px;text-align:center;margin:4px 0 0">A new career starts in the selected slot</p>`;
+}
+async function switchSlot(id){
+  Juice.haptic("light"); setBusy(true);
+  try{
+    const j=await api.post("/api/slots/switch",{slot:id});
+    if(!j.ok){ toast(esc(j.msg||j.error||"Could not switch"),5000); setBusy(false); return; }
+    G.home=null; G.boot=null; closeModal();
+    if(j.loaded){ toast("Career loaded"); await enterGame(); }
+    else { toast("Slot selected — start a new career"); $("#app").classList.remove("hidden"); $("#splash").classList.add("hidden"); showStartScreen(); }
+  }catch(e){ toast("Switch failed: "+esc(e.message),5000); }
+  setBusy(false);
+}
+async function openSaves(){
+  Juice.haptic("light");
+  let j; try{ j=await api.get("/api/slots"); }catch(e){ toast("Could not read slots",4000); return; }
+  const rows=j.slots.map(s=>{
+    const label=s.has_save?`${esc(s.club||"Career")} · season ${s.season}${s.date?" · "+esc(s.date):""}`:"Empty slot";
+    const btns=[];
+    if(s.has_save&&!s.active) btns.push(`<button class="btn sm" onclick="switchSlot('${s.id}');openSaves()">Open</button>`);
+    if(s.has_save) btns.push(`<button class="btn sm" onclick="exportSlot('${s.id}')">Export</button>`);
+    if(!s.has_save) btns.push(`<button class="btn sm" onclick="switchSlot('${s.id}');closeModal();toast('Slot selected — start a new career')">Select</button>`);
+    if(s.has_save&&!s.active) btns.push(`<button class="btn sm danger" onclick="deleteSlot('${s.id}')">Delete</button>`);
+    return `<div class="slot-row${s.active?" on":""}">
+      <div style="flex:1;min-width:0"><b style="font-size:12px">${s.id.replace("slot","SLOT ")}${s.active?" · in use":""}</b>
+      <div class="small muted" style="font-size:10.5px">${label}${s.size?` · ${(s.size/1e6).toFixed(1)} MB`:""}</div></div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">${btns.join("")}</div></div>`;
+  }).join("");
+  modal(`<h2>Saved games</h2>
+    <p class="small muted" style="font-size:11px">Three independent careers. Export makes a backup file you can keep or share; Import restores one.</p>
+    <div style="display:grid;gap:6px;margin-top:10px">${rows}</div>
+    <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+      <button class="btn" onclick="pickImportFile()">Import backup file…</button>
+      <input type="file" id="import-file" accept=".zip" style="display:none" onchange="importFilePicked(this)">
+      <span class="spacer"></span>
+      <button class="btn" onclick="closeModal()">Close</button>
+    </div>`);
+}
+async function deleteSlot(id){
+  modal(`<h2>Delete slot?</h2><p class="small muted">The career in ${esc(id)} will be permanently deleted. Export it first if you want a backup.</p>
+    <div style="display:flex;gap:8px;margin-top:12px"><button class="btn danger" onclick="confirmDeleteSlot('${id}')">Delete</button><button class="btn" onclick="openSaves()">Cancel</button></div>`);
+}
+async function confirmDeleteSlot(id){
+  const j=await api.post("/api/slots/delete",{slot:id});
+  if(j.ok){ toast("Slot deleted"); openSaves(); } else toast(esc(j.msg||"Could not delete"),5000);
+}
+async function exportSlot(id){
+  Juice.haptic("light");
+  try{
+    if(window.TLAndroid&&window.TLAndroid.exportSlot){ window.TLAndroid.exportSlot(id); toast("Saving to your device…"); return; }
+    const r=await fetch(`/api/slots/export?slot=${id}`);
+    if(!r.ok){ const j=await r.json().catch(()=>({})); toast(esc(j.error||"Export failed"),5000); return; }
+    const blob=await r.blob();
+    const cd=r.headers.get("Content-Disposition")||"";
+    const m=cd.match(/filename="?([^";]+)"?/);
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download=m?m[1]:`touchline-${id}.zip`;
+    document.body.appendChild(a); a.click(); a.remove();
+    toast("Backup downloaded");
+  }catch(e){ toast("Export failed: "+esc(e.message),5000); }
+}
+function pickImportFile(){
+  if(window.TLAndroid&&window.TLAndroid.importSlot){ window.TLAndroid.importSlot(); return; }
+  const inp=$("#import-file"); if(inp) inp.click();
+}
+async function importFilePicked(inp){
+  const f=inp.files&&inp.files[0]; if(!f) return;
+  setBusy(true);
+  try{
+    const buf=await f.arrayBuffer();
+    let bin=""; const bytes=new Uint8Array(buf);
+    for(let i=0;i<bytes.length;i+=8192) bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+8192));
+    const j=await api.post("/api/slots/import",{data_b64:btoa(bin)});
+    if(j.ok){ toast("Backup restored into "+j.slot); G.boot=null; G.home=null; closeModal(); openSaves(); }
+    else toast(esc(j.error||j.msg||"Import failed"),6000);
+  }catch(e){ toast("Import failed: "+esc(e.message),6000); }
+  setBusy(false); inp.value="";
+}
+window.TLImportDone=function(ok,msg){ toast(msg||(ok?"Backup imported":"Import failed"),5000); if(ok){ G.boot=null; closeModal(); openSaves(); } };
 let CLUB_PICK=null;
 async function stepChooseClub(){
   renderNav(NAV_START);
@@ -750,7 +839,7 @@ async function press(answer){ const r=await api.post("/api/media/press",{answer}
 async function renderCareer(){
   const j=await api.get("/api/screen/career"); await refreshState();
   $("#content").innerHTML=`
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:13px"> CAREER · ${esc(j.manager.name)} · rep ${j.reputation}/95</b></div> <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px"><div style="padding:8px;border-radius:10px;background:var(--panel);border:1px solid var(--line);text-align:center"><div style="font-size:9px;color:var(--tx3);font-weight:900">CLUB</div><div style="font-weight:900;font-size:11px">${j.club?esc(j.club.name):"Unemployed"}</div></div><div style="padding:8px;border-radius:10px;background:var(--panel);border:1px solid var(--line);text-align:center"><div style="font-size:9px;color:var(--tx3);font-weight:900">TROPHIES</div><div style="font-weight:950;font-size:16px">${j.trophies.length}</div></div><div style="padding:8px;border-radius:10px;background:var(--panel);border:1px solid var(--line);text-align:center"><div style="font-size:9px;color:var(--tx3);font-weight:900">SEASONS</div><div style="font-weight:950">${j.season-2026+1}</div></div><div style="padding:8px;border-radius:10px;background:var(--panel);border:1px solid var(--line);text-align:center"><div style="font-size:9px;color:var(--tx3);font-weight:900">REP</div><div style="font-weight:950">${j.reputation}</div></div></div> <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div class="card"><h3>Club history</h3><div style="margin-top:8px;display:grid;gap:4px">${j.clubs.map(c=>`<div style="display:flex;gap:8px;padding:6px 8px;border-radius:8px;background:var(--panel2);font-size:11px"><b style="flex:1">${esc(c.name)}</b><span>${fmtDate(c.from).split(",")[0]}</span><span>${c.to?fmtDate(c.to).split(",")[0]:"—"}</span><span class="small muted">${esc(c.reason||"")}</span></div>`).join("")}</div>${j.unemployed?`<button class="btn primary sm" style="margin-top:8px" onclick="go('jobs')">Find job</button>`:""}</div><div class="card"><h3>Trophy room</h3><div style="margin-top:8px;display:grid;gap:6px">${j.trophies.length?j.trophies.map(t=>`<div style="padding:8px;border-radius:10px;background:linear-gradient(135deg,#2a1e0a,#1e1608);border:1px solid #5a4222"><div style="color:var(--gold);font-weight:900;font-size:12px"> ${esc(t.comp)}</div><div class="small muted" style="font-size:10px">${t.season}/${String(t.season+1).slice(2)} · ${esc(t.type||"")}</div></div>`).join(""):'<p class="small muted">No trophies yet</p>'}</div></div></div> <div class="card" style="margin-top:8px"><h3>Season record</h3><div style="margin-top:8px;max-height:40vh;overflow:auto;display:grid;gap:3px">${j.history.map(h=>`<div style="display:grid;grid-template-columns:40px 1fr 1fr 32px 1fr;gap:6px;padding:6px 8px;border-radius:8px;background:var(--panel2);font-size:10px"><span style="font-family:var(--ff-mono)">${h.season}</span><span>${esc(h.comp||"")}</span><span>${esc(h.club||"")}</span><span>${h.pos||""}</span><span>${esc(h.note||"")} ${h.trophy?'':""}</span></div>`).join("")||'<div class="small muted">No history</div>'}</div></div> <div class="card" style="margin-top:8px;border-color:rgba(255,59,74,.18);background:#2a1218"><h3 style="color:#ff8a94">Danger zone</h3><p class="small muted" style="font-size:11px">New career rebuilds world and deletes save</p><button class="btn danger sm" style="margin-top:8px" onclick="confirmNewCareer()">Start new career</button></div>`;
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:13px"> CAREER · ${esc(j.manager.name)} · rep ${j.reputation}/95</b></div> <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px"><div style="padding:8px;border-radius:10px;background:var(--panel);border:1px solid var(--line);text-align:center"><div style="font-size:9px;color:var(--tx3);font-weight:900">CLUB</div><div style="font-weight:900;font-size:11px">${j.club?esc(j.club.name):"Unemployed"}</div></div><div style="padding:8px;border-radius:10px;background:var(--panel);border:1px solid var(--line);text-align:center"><div style="font-size:9px;color:var(--tx3);font-weight:900">TROPHIES</div><div style="font-weight:950;font-size:16px">${j.trophies.length}</div></div><div style="padding:8px;border-radius:10px;background:var(--panel);border:1px solid var(--line);text-align:center"><div style="font-size:9px;color:var(--tx3);font-weight:900">SEASONS</div><div style="font-weight:950">${j.season-2026+1}</div></div><div style="padding:8px;border-radius:10px;background:var(--panel);border:1px solid var(--line);text-align:center"><div style="font-size:9px;color:var(--tx3);font-weight:900">REP</div><div style="font-weight:950">${j.reputation}</div></div></div> <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div class="card"><h3>Club history</h3><div style="margin-top:8px;display:grid;gap:4px">${j.clubs.map(c=>`<div style="display:flex;gap:8px;padding:6px 8px;border-radius:8px;background:var(--panel2);font-size:11px"><b style="flex:1">${esc(c.name)}</b><span>${fmtDate(c.from).split(",")[0]}</span><span>${c.to?fmtDate(c.to).split(",")[0]:"—"}</span><span class="small muted">${esc(c.reason||"")}</span></div>`).join("")}</div>${j.unemployed?`<button class="btn primary sm" style="margin-top:8px" onclick="go('jobs')">Find job</button>`:""}</div><div class="card"><h3>Trophy room</h3><div style="margin-top:8px;display:grid;gap:6px">${j.trophies.length?j.trophies.map(t=>`<div style="padding:8px;border-radius:10px;background:linear-gradient(135deg,#2a1e0a,#1e1608);border:1px solid #5a4222"><div style="color:var(--gold);font-weight:900;font-size:12px"> ${esc(t.comp)}</div><div class="small muted" style="font-size:10px">${t.season}/${String(t.season+1).slice(2)} · ${esc(t.type||"")}</div></div>`).join(""):'<p class="small muted">No trophies yet</p>'}</div></div></div> <div class="card" style="margin-top:8px"><h3>Season record</h3><div style="margin-top:8px;max-height:40vh;overflow:auto;display:grid;gap:3px">${j.history.map(h=>`<div style="display:grid;grid-template-columns:40px 1fr 1fr 32px 1fr;gap:6px;padding:6px 8px;border-radius:8px;background:var(--panel2);font-size:10px"><span style="font-family:var(--ff-mono)">${h.season}</span><span>${esc(h.comp||"")}</span><span>${esc(h.club||"")}</span><span>${h.pos||""}</span><span>${esc(h.note||"")} ${h.trophy?'':""}</span></div>`).join("")||'<div class="small muted">No history</div>'}</div></div> <div class="card" style="margin-top:8px"><h3>Saved games</h3><p class="small muted" style="font-size:11px">Three slots. Switch career, export a backup file, or restore one.</p><button class="btn sm" style="margin-top:8px" onclick="openSaves()">Manage saves</button></div> <div class="card" style="margin-top:8px;border-color:rgba(255,59,74,.18);background:#2a1218"><h3 style="color:#ff8a94">Danger zone</h3><p class="small muted" style="font-size:11px">New career rebuilds world and deletes save — in this slot only</p><button class="btn danger sm" style="margin-top:8px" onclick="confirmNewCareer()">Start new career</button></div>`;
 }
 function confirmNewCareer(){ modal(`<h2>Start new career?</h2><p class="small muted">Current career — every season, trophy, record — will be permanently deleted. World rebuilt from scratch.</p><div style="display:flex;gap:8px;margin-top:12px"><button class="btn danger" onclick="doResetCareer()">Yes, erase</button><button class="btn" onclick="closeModal()">Cancel</button></div>`); }
 async function doResetCareer(){ closeModal(); setBusy(true); try{ await api.post("/api/career/reset",{}); G.home=null; G.boot.has_save=false; G.pendingMatch=false; $("#crest").textContent="TL"; showStartScreen(); toast("Save erased"); } catch(e){ toast("Reset failed: "+esc(e.message),6000); } setBusy(false); }

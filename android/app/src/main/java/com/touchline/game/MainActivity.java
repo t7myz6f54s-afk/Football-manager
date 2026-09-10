@@ -20,15 +20,27 @@ import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 
+import android.content.Intent;
+import android.net.Uri;
+import android.util.Base64;
+import android.widget.Toast;
+
+import androidx.core.content.FileProvider;
+
 import com.chaquo.python.Python;
 import com.chaquo.python.android.AndroidPlatform;
 
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Minimal Android shell for the Touchline web game.
@@ -147,6 +159,7 @@ public class MainActivity extends Activity {
                 }
             }
         });
+        w.addJavascriptInterface(new TlBridge(), "TLAndroid");
         w.setWebChromeClient(new WebChromeClient() {
             @Override
             public boolean onConsoleMessage(ConsoleMessage cm) {
@@ -280,5 +293,164 @@ public class MainActivity extends Activity {
             web.destroy();
         }
         super.onDestroy();
+    }
+
+    /* -------------------------------------------------- save-slot bridge */
+
+    private static final int IMPORT_REQUEST = 9001;
+
+    private void js(final String code) {
+        runOnUiThread(new Runnable() {
+            @Override public void run() {
+                if (web != null) web.evaluateJavascript(code, null);
+            }
+        });
+    }
+
+    private void toastUi(final String msg) {
+        runOnUiThread(new Runnable() {
+            @Override public void run() {
+                Toast.makeText(MainActivity.this, msg, Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private byte[] httpGetBytes(String url) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        try {
+            c.setConnectTimeout(4000);
+            c.setReadTimeout(120000);
+            java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+            InputStream in = c.getInputStream();
+            byte[] chunk = new byte[65536];
+            int n;
+            while ((n = in.read(chunk)) > 0) buf.write(chunk, 0, n);
+            in.close();
+            return buf.toByteArray();
+        } finally {
+            c.disconnect();
+        }
+    }
+
+    private String httpGet(String url) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        try {
+            c.setConnectTimeout(4000);
+            c.setReadTimeout(120000);
+            BufferedReader r = new BufferedReader(new InputStreamReader(c.getInputStream(), StandardCharsets.UTF_8));
+            StringBuilder b = new StringBuilder();
+            String line;
+            while ((line = r.readLine()) != null) b.append(line);
+            r.close();
+            return b.toString();
+        } finally {
+            c.disconnect();
+        }
+    }
+
+    private String httpPostJson(String url, JSONObject body) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        try {
+            c.setRequestMethod("POST");
+            c.setDoOutput(true);
+            c.setConnectTimeout(4000);
+            c.setReadTimeout(120000);
+            c.setFixedLengthStreamingMode(body.toString().getBytes(StandardCharsets.UTF_8).length);
+            c.setRequestProperty("Content-Type", "application/json");
+            OutputStream os = c.getOutputStream();
+            os.write(body.toString().getBytes(StandardCharsets.UTF_8));
+            os.close();
+            BufferedReader r = new BufferedReader(new InputStreamReader(c.getInputStream(), StandardCharsets.UTF_8));
+            StringBuilder b = new StringBuilder();
+            String line;
+            while ((line = r.readLine()) != null) b.append(line);
+            r.close();
+            return b.toString();
+        } finally {
+            c.disconnect();
+        }
+    }
+
+    private class TlBridge {
+
+        /** Export a slot: fetch the zip from the local server, save it, open the share sheet. */
+        @android.webkit.JavascriptInterface
+        public void exportSlot(final String slot) {
+            new Thread(new Runnable() {
+                @Override public void run() {
+                    try {
+                        byte[] zip = httpGetBytes(HOME + "api/slots/export?slot=" + slot);
+                        String club = "career";
+                        File dir = getExternalFilesDir(null);
+                        final File out = new File(dir, "touchline-" + slot + "-" + club + ".zip");
+                        FileOutputStream fos = new FileOutputStream(out);
+                        fos.write(zip);
+                        fos.close();
+                        Uri uri = FileProvider.getUriForFile(MainActivity.this,
+                                getPackageName() + ".files", out);
+                        Intent share = new Intent(Intent.ACTION_SEND);
+                        share.setType("application/zip");
+                        share.putExtra(Intent.EXTRA_STREAM, uri);
+                        share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        startActivity(Intent.createChooser(share, "Save or share backup"));
+                        toastUi("Backup ready");
+                    } catch (final Exception e) {
+                        toastUi("Export failed: " + e.getMessage());
+                    }
+                }
+            }, "tl-export").start();
+        }
+
+        /** Import: pick a backup file, POST it into a free slot. */
+        @android.webkit.JavascriptInterface
+        public void importSlot() {
+            runOnUiThread(new Runnable() {
+                @Override public void run() {
+                    Intent pick = new Intent(Intent.ACTION_GET_CONTENT);
+                    pick.addCategory(Intent.CATEGORY_OPENABLE);
+                    pick.setType("*/*");
+                    try {
+                        startActivityForResult(Intent.createChooser(pick, "Pick a backup file"), IMPORT_REQUEST);
+                    } catch (Exception e) {
+                        toastUi("No file picker available");
+                    }
+                }
+            });
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != IMPORT_REQUEST || resultCode != RESULT_OK || data == null || data.getData() == null) {
+            return;
+        }
+        final Uri uri = data.getData();
+        new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    InputStream in = getContentResolver().openInputStream(uri);
+                    java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+                    byte[] chunk = new byte[65536];
+                    int n;
+                    while ((n = in.read(chunk)) > 0) buf.write(chunk, 0, n);
+                    in.close();
+                    JSONObject body = new JSONObject();
+                    body.put("data_b64", Base64.encodeToString(buf.toByteArray(), Base64.NO_WRAP));
+                    String resp = httpPostJson(HOME + "api/slots/import", body);
+                    JSONObject j = new JSONObject(resp);
+                    final boolean ok = j.optBoolean("ok", false);
+                    final String msg = ok ? ("Backup restored into " + j.optString("slot", "a slot"))
+                                          : ("Import failed: " + j.optString("error", "unknown error"));
+                    js("window.TLImportDone && window.TLImportDone(" + ok + "," +
+                       JSONObject.quote(msg) + ")");
+                    toastUi(msg);
+                } catch (final Exception e) {
+                    js("window.TLImportDone && window.TLImportDone(false," +
+                       JSONObject.quote("Import failed: " + e.getMessage()) + ")");
+                    toastUi("Import failed: " + e.getMessage());
+                }
+            }
+        }, "tl-import").start();
     }
 }

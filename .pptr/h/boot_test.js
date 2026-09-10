@@ -126,6 +126,33 @@ const puppeteer = require('puppeteer');
       });
       console.log((menuOk ? 'PASS: ' : 'FAIL: ') + 'grouped More menu (Club/Market/World/Office, no emoji)');
       await page.evaluate(() => closeSheet());
+      // ---- Save slots: manager modal, switch, switch back ----
+      await page.evaluate(() => openSaves());
+      await new Promise(r => setTimeout(r, 800));
+      const savesOk = await page.evaluate(() => {
+        const t = ((document.querySelector('#modal-box') || {innerText: ''}).innerText || '').toUpperCase();
+        return t.includes('SLOT 1') && t.includes('SLOT 2') && t.includes('SLOT 3') && t.includes('IMPORT');
+      });
+      console.log((savesOk ? 'PASS: ' : 'FAIL: ') + 'saves manager shows 3 slots + import');
+      await page.evaluate(() => exportSlot('slot1'));
+      await new Promise(r => setTimeout(r, 2500));
+      await page.evaluate(() => closeModal());
+      await page.evaluate(() => switchSlot('slot2'));
+      await new Promise(r => setTimeout(r, 2500));
+      const onEmpty = await page.evaluate(() => {
+        const t = ((document.querySelector('#content') || {innerText: ''}).innerText || '').toUpperCase();
+        const strip = ((document.querySelector('#slot-strip') || {innerText: ''}).innerText || '').toUpperCase();
+        return t.includes('TOUCHLINE') && strip.includes('SLOT 2') && strip.includes('SELECTED');
+      });
+      console.log((onEmpty ? 'PASS: ' : 'FAIL: ') + 'switched to empty slot 2 (start screen, slot selected)');
+      await page.evaluate(() => switchSlot('slot1'));
+      await new Promise(r => setTimeout(r, 3000));
+      const backIn = await page.evaluate(() => {
+        const t = ((document.querySelector('#content') || {innerText: ''}).innerText || '').toUpperCase();
+        const inGame = !document.querySelector('#app.hidden') && !document.querySelector('#splash:not(.hidden)');
+        return inGame && t.includes('MATCH CENTRE');   // home hero only renders in-game
+      });
+      console.log((backIn ? 'PASS: ' : 'FAIL: ') + 'switched back to slot 1 (career loaded, in-game)');
       // transfer flow end-to-end (exercises the fixed would_sell / player_willing)
       const bid = await page.evaluate(async () => {
         const sr = await fetch('/api/transfer/search?max_fee=60&age_max=24').then(x => x.json());

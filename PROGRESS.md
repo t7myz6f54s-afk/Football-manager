@@ -135,3 +135,12 @@ verified in-browser; repo pushed; release shipped.
 - Stats Center (/api/screen/stats + tab): golden boot w/ bars, assists, clean sheets, xG-vs-actual league table (aggregated from fixture reports, over/under-performance deltas), squad leaders, form guide. clubs.league is a CODE — resolve comps by code (bug fixed during build).
 - Declutter: 108 emoji stripped from UI chrome and headings; nav = Home/Squad/Match/Stats + grouped More (Club/Market/World/Office with descriptions); launcher cleaned (no float/bubble/badges); home gauges → compact season strip; marketing strips removed; flat primary buttons; fixed broken \U escape that rendered "U0001F501 SUB" in the live HUD.
 - Browser walkthrough extended (stats + grouped menu assertions): all green, zero console errors. smoke PASS.
+
+## v1.13.0 — FEATURE #3: Save Slots & Backup (2026-09-10)
+- fm/slots.py: slot registry + paths (slot1 honours legacy FM_DB/FM_SAVE; slots 2-3 under base/slots/), legacy one-time migration, meta summaries.
+- Slot-aware app.py: boot init, commit/persist, career new/load/reset; world.DB_PATH repointed per slot; switching refused while a match is paused.
+- API: GET /api/slots, POST /api/slots/switch (auto-materialises empty slots), /api/slots/delete, GET /api/slots/export (zip, WAL-checkpointed, Content-Disposition), POST /api/slots/import (zip base64 → free slot, validated).
+- mini.py: Binary response passthrough for raw downloads.
+- UI: slot strip on launcher, Saves manager modal (switch/delete/export/import), Career screen entry, TLAndroid JS bridge hooks.
+- Android: bootstrap → FM_DATA model (auto-migrates old installs); MainActivity bridge — export via share sheet (FileProvider), import via system file picker; androidx.core dep + manifest provider.
+- Tests: tests/slots_test.py — 3 careers isolated, switching returns right world every time, export→delete→import→identical state: ALL PASS. Browser walkthrough extended (saves modal, switch both ways, back in-game verified via MATCH CENTRE): all green, zero errors. live_match + smoke PASS.

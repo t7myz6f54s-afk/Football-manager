@@ -19,6 +19,14 @@ from urllib.parse import parse_qs, unquote, urlparse
 DB_LOCK = threading.RLock()
 
 
+class Binary:
+    """Return this from a handler to send raw bytes with a content type."""
+    def __init__(self, ctype, data, download=None):
+        self.ctype = ctype
+        self.data = data
+        self.download = download
+
+
 class HTTPError(Exception):
     def __init__(self, status, detail):
         super().__init__(detail)
@@ -118,6 +126,8 @@ class MiniApp:
             res = self.call(method, path, query, body)
             if res is None:
                 return 404, {"ok": False, "error": "Not found: %s" % path}
+            if isinstance(res, Binary):
+                return ("binary", res)
             return 200, _jsonable(res)
         except HTTPError as e:
             return e.status, {"ok": False, "error": e.detail, "detail": e.detail}
@@ -179,6 +189,11 @@ def make_handler(app):
             query = parse_qs(parsed.query)
             with DB_LOCK:
                 status, payload = app.handle(self.command, path, query, body)
+            if status == "binary":
+                extra = {"Access-Control-Allow-Origin": "*"}
+                if payload.download:
+                    extra["Content-Disposition"] = 'attachment; filename="%s"' % payload.download
+                return self._send(200, payload.ctype, payload.data, extra)
             data = json.dumps(payload).encode("utf-8")
             return self._send(status, "application/json", data,
                               {"Access-Control-Allow-Origin": "*"})

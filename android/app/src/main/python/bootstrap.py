@@ -2,6 +2,10 @@
 
 The game code is unmodified: we only point its environment variables at the
 app's private storage (writable) and bind the server to the loopback interface.
+
+Save slots live under <filesDir>/data/slots/<slotN>/ (world.db + career.json);
+a pre-slots install (filesDir/data/world.db + saves/career1.json) is migrated
+automatically on first boot of this version.
 """
 import os
 import threading
@@ -20,20 +24,13 @@ def start(files_dir, www_dir, port=8000):
         _started = True
 
     data = os.path.join(files_dir, "data")
-    saves = os.path.join(data, "saves")
-    os.makedirs(saves, exist_ok=True)
+    os.makedirs(data, exist_ok=True)
 
+    # slot-aware storage (fm/slots.py reads FM_DATA as the base directory)
+    os.environ["FM_DATA"] = data
     # must be set before fm.world / fm.app are imported (they read env at import)
-    db = os.path.join(data, "world.db")
-    os.environ["FM_DB"] = db
-    seed = os.path.join(www_dir, "world.seed.db")
-    os.environ["FM_SEED_DB"] = seed
-    # first launch: drop in the pristine world that ships in the assets
-    if os.path.exists(seed) and not os.path.exists(db):
-        import shutil
-        shutil.copyfile(seed, db)
-    os.environ["FM_SAVE_DIR"] = saves
-    os.environ["FM_SAVE"] = os.path.join(saves, "career1.json")
+    os.environ["FM_SEED_DB"] = os.path.join(www_dir, "world.seed.db")
+    os.environ["FM_SAVE_DIR"] = os.path.join(data, "saves")
     os.environ["FM_STATIC"] = www_dir
     os.environ["FM_HOST"] = "127.0.0.1"
     os.environ["PORT"] = str(port)
@@ -53,7 +50,7 @@ def _run():
 
 def status():
     return {"started": _started,
-            "db": os.environ.get("FM_DB"),
+            "data": os.environ.get("FM_DATA"),
             "static": os.environ.get("FM_STATIC"),
             "host": os.environ.get("FM_HOST"),
             "port": os.environ.get("PORT")}
