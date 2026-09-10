@@ -351,7 +351,7 @@ tbody tr.tap { cursor: pointer; } tbody tr.tap:active td { background: var(--sf2
 .live-bar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px;
   padding: 12px 14px; background: var(--sf2); border: 1px solid var(--line); border-radius: var(--r-m); }
 .lb-team { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; font-weight: 700; }
-.lb-team b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb-team b { min-width: 0; white-space: normal; line-height: 1.15; overflow-wrap: break-word; }
 .lb-team.r { justify-content: flex-end; text-align: right; }
 .lb-mid { display: grid; justify-items: center; gap: 2px; }
 .live-bar .clock { font-size: 15px; font-weight: 800; color: var(--acc); min-width: 44px;
