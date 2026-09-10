@@ -44,3 +44,11 @@ Design tokens in style.css; nav restructure (bottom bar: Home/Squad/Tactics/Matc
 - Phases 5-8 DONE: comp hubs+identities, club hub, nav restructure (Dashboard/Squad/Tactics/Matches/Comps tabs + More sheet), profile redesign (avatar/strip/attr bars/recent perfs), squad overview+compact list, tactics effect notes, transfers/training/career/finances rebuilds, global input/select styling, tcard label fix.
 - Audits: 16 screens @393px zero JS errors zero h-overflow; season_test passed post engine changes.
 - Next: APK dry-run, desktop pass, inbox detail polish, final regression, then final-hour APK v1.6.0 code 8 + release.
+
+## Update ~00:15-00:20 UTC
+- Start screen redesigned (shield logo, wordmark, stat strip, feature cards).
+- Tactics pitch CSS restored + slot spacing tuned; mentality effect notes live.
+- Transfers/training/career/finances heads+strips; global input/select/a styling; tcard labels fixed.
+- Goal event graphics now carry running score chips; shot commentary humanised.
+- APK v1.6.0 versionCode 8 dry-run BUILT+SIGNED+VERIFIED (assets include new app.js).
+- Next: final regression sweep, hold, final-hour rebuild+release+report.
