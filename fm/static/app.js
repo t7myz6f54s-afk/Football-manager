@@ -1321,7 +1321,7 @@ function showHalftime(st) {
       </div>
       <div class="card tight" style="padding:0">
         <div class="sec-h" style="padding:10px 12px 4px"><h3>Your players at the break</h3></div>
-        <table><thead><tr><th>Pos</th><th>Name</th><th class="num">Rating</th><th class="num">Fatigue</th></tr></thead>
+        <table class="mc"><thead><tr><th>Pos</th><th>Name</th><th class="num">Rating</th><th class="num">Fatigue</th></tr></thead>
         <tbody>${st.xi.map(p => `<tr><td><span class="pos">${esc(p.pos)}</span></td><td>${esc(p.name)}</td>
           <td class="num"><b>${p.rating.toFixed(2)}</b></td><td class="num">${Math.round(p.fatigue)}</td></tr>`).join("")}</tbody></table>
       </div>
@@ -1426,7 +1426,7 @@ function showResult(r) {
 
     <div class="card tight" style="margin-top:12px;padding:0">
       <div class="sec-h" style="padding:10px 12px 4px"><h3>Your players</h3></div>
-      <div class="tw"><table><thead><tr><th>Pos</th><th>Name</th><th class="num">Min</th><th class="num">G</th>
+      <div class="tw"><table class="mc mp"><thead><tr><th>Pos</th><th>Name</th><th class="num">Min</th><th class="num">G</th>
         <th class="num">A</th><th class="num">Sh</th><th class="num">xG</th><th class="num">Rating</th></tr></thead>
       <tbody>${(r.players || []).map(p => `<tr class="${p.pid === r.motm ? "me" : ""}">
         <td><span class="pos">${esc(p.pos)}</span></td>
@@ -2271,8 +2271,9 @@ function polish(root) {
   tables.forEach(t => {
     if (t.closest(".tw")) return;
     if (t.querySelector("tbody[id]")) { wrapTw(t); return; }   // live-updated tables stay tables
+    if (t.classList.contains("mc")) { wrapTw(t); return; }     // explicit: keep as table
     const cols = t.querySelectorAll("thead th").length;
-    if (cols >= 4 || t.classList.contains("mc")) tableToCards(t); else wrapTw(t);
+    if (cols >= 4) tableToCards(t); else wrapTw(t);
   });
 }
 window.addEventListener("resize", () => { /* re-layout on rotate happens on next render */ });

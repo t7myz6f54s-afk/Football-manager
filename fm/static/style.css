@@ -570,3 +570,8 @@ tbody tr.zr td:first-child { box-shadow: inset 2px 0 0 var(--red); }
   table.mc th:nth-child(8), table.mc td:nth-child(8) { display: none; }
   table.mc tbody td, table.mc thead th { padding: 7px 6px; font-size: 12.5px; }
 }
+@media (max-width: 620px) {
+  table.mp th:nth-child(3), table.mp td:nth-child(3),
+  table.mp th:nth-child(6), table.mp td:nth-child(6),
+  table.mp th:nth-child(7), table.mp td:nth-child(7) { display: none; }
+}
