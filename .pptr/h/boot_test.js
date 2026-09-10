@@ -65,6 +65,49 @@ const puppeteer = require('puppeteer');
       // CONTINUE once (engine day tick through the UI path)
       const cont = await page.evaluate(async () => { await doContinue(); return true; }).catch(e => String(e));
       console.log(cont === true ? 'PASS: doContinue executed' : 'FAIL: doContinue ' + cont);
+      // ---- Match Day Live+: play a full match through the real UI loop ----
+      await page.evaluate(() => playMatch('full'));
+      await new Promise(r => setTimeout(r, 2500));
+      const liveHud = await page.evaluate(() => !!document.querySelector('#lv-feed') && !!document.querySelector('#lv-clock'));
+      console.log(liveHud ? 'PASS: live HUD rendered (feed + clock)' : 'FAIL: live HUD missing');
+      await page.evaluate(() => { if (LIVE) LIVE.fast = true; });  // fast-forward the sim
+      // wait for half-time (talk screen) or full-time, up to 150s
+      let reachedHT = false, reachedFT = false;
+      for (let i = 0; i < 150; i++) {
+        await new Promise(r => setTimeout(r, 1000));
+        const st = await page.evaluate(() => ({
+          ht: !!document.querySelector('#ht-talk'),
+          ft: (document.querySelector('#content') || {innerText: ''}).innerText.includes('FULL-TIME'),
+          min: LIVE ? LIVE.clockMin : -1,
+        }));
+        if (st.ht) { reachedHT = true; break; }
+        if (st.ft) { reachedFT = true; break; }
+      }
+      console.log(reachedHT ? 'PASS: reached half-time' : (reachedFT ? 'PASS: straight to full-time' : 'FAIL: stuck before half-time'));
+      if (reachedHT) {
+        await page.evaluate(() => submitHalftime(true));   // send them back out
+        await new Promise(r => setTimeout(r, 7000));       // normal pace: reach ~minute 60
+        const midState = await page.evaluate(() => ({ live: !!LIVE && !LIVE.stopped, min: LIVE ? LIVE.clockMin : -1 }));
+        let sentOrder = false;
+        if (midState.live && midState.min > 45) {
+          await page.evaluate(() => sendOrder('press_hard'));
+          sentOrder = true;
+        }
+        await page.evaluate(() => { if (LIVE) LIVE.fast = true; });
+        for (let i = 0; i < 150; i++) {
+          await new Promise(r => setTimeout(r, 1000));
+          const st = await page.evaluate(() => ({
+            live: !!LIVE && !LIVE.stopped,
+            ft: (document.querySelector('#content') || {innerText: ''}).innerText.includes('FULL-TIME'),
+          }));
+          if (st.ft) { reachedFT = true; break; }
+          if (!st.live) break;
+        }
+        console.log((sentOrder ? 'PASS: ' : 'WARN: ') + 'touchline order sent mid-half');
+      }
+      console.log(reachedFT ? 'PASS: reached full-time through live UI' : 'FAIL: never reached full-time');
+      const liveErrs = errors.filter(e => !/favicon/i.test(e));
+      if (liveErrs.length) { console.log('LIVE PAGE ERRORS:'); liveErrs.forEach(e => console.log('  ' + e)); }
       // transfer flow end-to-end (exercises the fixed would_sell / player_willing)
       const bid = await page.evaluate(async () => {
         const sr = await fetch('/api/transfer/search?max_fee=60&age_max=24').then(x => x.json());

@@ -968,10 +968,11 @@ def _ko_winners(con, save, comp_id, stage, rng):
 
 
 # --------------------------------------------------------- human match engine
-def _setup_human_match(con, save, fx, rng=None, custom_lineup=None):
+def _setup_human_match(con, save, fx, rng=None, custom_lineup=None, live=False):
     """Build both teams and start the match simulation.
 
     Returns (runner, ctx) or (None, None) if the fixture cannot be played.
+    live=True skips simulating the first half (Match Day Live+ stepping).
     """
     rng = rng or random.Random()
     cid = save["club_id"]
@@ -1018,7 +1019,8 @@ def _setup_human_match(con, save, fx, rng=None, custom_lineup=None):
     runner = M.MatchRunner(home, away, rng=rng, home_adv=True, weather=weather, referee=ref,
                            competition=comp_type,
                            extra_time_allowed=ctype in ("cup", "continental") and fx.get("stage") != "league")
-    runner.run_first_half()
+    if not live:
+        runner.run_first_half()
     ctx = dict(cid=cid, is_home=is_home, opp_id=opp_id, players=players, tac=tac, xi=xi, bench=bench,
                hrating=hrating, oxi=oxi, ctype=ctype, rng=rng)
     return runner, ctx

@@ -445,6 +445,13 @@ class MatchRunner:
         self.finished = False
         self.halftime_applied = False
 
+        # Match Day Live+: per-minute momentum log + touchline orders
+        self.mom = []                                  # [{"m":min,"H":x,"A":y}]
+        self._mom_cur = {"H": 0.0, "A": 0.0}
+        self.orders_used = {"H": set(), "A": set()}    # each order once per side
+        self.order_cd = {"H": 0, "A": 0}               # minute until which no new order
+        self.touchline_events = []
+
     def side_stats(self, side):
             return self.stats["home" if side == "H" else "away"]
 
@@ -518,6 +525,7 @@ class MatchRunner:
                 return
             st["progressive"] += 1
             st["passes"] += self.rng.randint(3, 9)
+            self._mom_cur[side] += 0.6
             # zone reached
             zr = self.rng.random()
             width_bonus = 0.12 * (tr["width"] - 0.5)
@@ -547,6 +555,7 @@ class MatchRunner:
             op = self.opp_of(side)
             st = self.side_stats(side)
             ost = self.side_stats("A" if side == "H" else "H")
+            self._mom_cur[side] += 1.0 + 2.5 * xg
             # choose shooter
             xi = self.xi_of(side)
             cands = [i for i in range(len(xi)) if self.active[side][i] and i not in self.injured_out[side]]
@@ -848,8 +857,8 @@ class MatchRunner:
             if self.minute > 75:
                 tr["fatigue"] += 0.10
         # attacks
-        r_h = self.rate_h * (1 + adj["H"]) * (1 - 0.08 * self.reds["H"]) * (1 + 0.05 * self.reds["A"])
-        r_a = self.rate_a * (1 + adj["A"]) * (1 - 0.08 * self.reds["A"]) * (1 + 0.05 * self.reds["H"])
+        r_h = self.chance_rate("H") * (1 + adj["H"]) * (1 - 0.08 * self.reds["H"]) * (1 + 0.05 * self.reds["A"])
+        r_a = self.chance_rate("A") * (1 + adj["A"]) * (1 - 0.08 * self.reds["A"]) * (1 + 0.05 * self.reds["H"])
         fat_h_mod = 1 - max(0, (self.H["fatigue"] - 34) / 320.0)
         fat_a_mod = 1 - max(0, (self.A["fatigue"] - 34) / 320.0)
         if self.rng.random() < min(0.62, r_h * fat_h_mod):
@@ -881,6 +890,147 @@ class MatchRunner:
                 if trig and (self.home.get("bench") if side == "H" else self.away.get("bench")):
                     self.ai_sub(side, self.minute)
         # self.ratings drift from possession/game state
+        # momentum bookkeeping (Match Day Live+): one entry per minute
+        self.mom.append({"m": self.minute, "H": round(self._mom_cur["H"], 3),
+                         "A": round(self._mom_cur["A"], 3)})
+        self._mom_cur = {"H": 0.0, "A": 0.0}
+
+    # -------------------------------------------------- Match Day Live+ API
+    KEY_TYPES = ("goal", "red", "penalty", "penalties", "var", "var_disallowed",
+                 "injury", "touchline")
+
+    def momentum_pct(self, k=12):
+        """Share of recent pressure for the HOME side (0-100), last k minutes."""
+        tail = self.mom[-k:] if self.mom else []
+        th = sum(m["H"] for m in tail)
+        ta = sum(m["A"] for m in tail)
+        tot = th + ta
+        if tot <= 0:
+            return 50
+        return max(4, min(96, round(100 * th / tot)))
+
+    def apply_order(self, side, order):
+        """Touchline instruction from the human manager. Returns (ok, msg).
+
+        Orders mutate the live tactical model (mshift/tempo/press/attack/defence)
+        so they genuinely change what the simulation does from that minute on.
+        """
+        tr = self.rating_of(side)
+        opp_side = "A" if side == "H" else "H"
+        gm = self.goals[side] - self.goals[opp_side]
+        if order in self.orders_used[side]:
+            return False, "Already asked for that today — the players would ignore it."
+        if self.minute < self.order_cd[side]:
+            return False, "Too soon after the last instruction — wait a few minutes."
+        if len(self.orders_used[side]) >= 3:
+            return False, "That's your third instruction — they've stopped listening."
+        if order == "all_out_attack":
+            if gm > 0:
+                return False, "You're winning — going all-out attack throws it away."
+            if self.half == 1 and self.minute < 30:
+                return False, "Too early for the nuclear option."
+            tr["mshift"] = min(2, tr["mshift"] + 1.5); tr["tempo"] = min(1.0, tr["tempo"] + 0.18)
+            tr["press"] = min(1.0, tr["press"] + 0.14)
+            tr["attack"] *= 1.10; tr["defence"] *= 0.88
+            note = "EVERYONE FORWARD. Chances will come — so will counters."
+        elif order == "sit_deep":
+            if gm < 0:
+                return False, "You're losing — sitting deep only invites the siege."
+            tr["mshift"] = max(-2, tr["mshift"] - 1.0); tr["press"] = max(0.2, tr["press"] - 0.10)
+            tr["tempo"] = max(0.2, tr["tempo"] - 0.10)
+            tr["defence"] *= 1.06; tr["attack"] *= 0.96
+            note = "Drop, stay compact, make them play in front of you."
+        elif order == "press_hard":
+            tr["press"] = min(1.0, tr["press"] + 0.15); tr["tempo"] = min(1.0, tr["tempo"] + 0.05)
+            note = "Press them into the carpet. Legs will be gone by 80'."
+        elif order == "time_waste":
+            if gm <= 0:
+                return False, "You can't kill a game you're not winning."
+            tr["tempo"] = max(0.15, tr["tempo"] - 0.14)
+            tr["defence"] *= 1.04; tr["attack"] *= 0.97
+            note = "Slow it all down. The away end hates it."
+        elif order == "go_long":
+            tr["width"] = min(0.9, tr.get("width", 0.5) + 0.08)
+            tr["attack"] *= 1.04; tr["defence"] *= 0.97; tr["tempo"] = min(1.0, tr["tempo"] + 0.04)
+            note = "Switch it long, win the second ball, run."
+        elif order == "calm_down":
+            tr["press"] = max(0.2, tr["press"] - 0.08)
+            tr["defence"] *= 1.02; tr["attack"] *= 0.98
+            note = "Steady. Keep your feet, keep your discipline."
+        else:
+            return False, "Unknown instruction."
+        self.orders_used[side].add(order)
+        self.order_cd[side] = self.minute + 10
+        ev = dict(minute=self.minute, side=side, type="touchline", order=order,
+                  text="Touchline — " + note)
+        self.events.append(ev)
+        self.touchline_events.append(ev)
+        return True, note
+
+    def live_step(self, ev_i=0, mode="full", max_minutes=None):
+        """Advance the match by a small chunk. Returns a payload for the UI.
+
+        mode 'full' plays ~2 minutes; 'key' jumps to the next notable event;
+        'fast' covers ground (skip button). Never crosses a half boundary.
+        """
+        self.start()
+        boundary = (45 + self.stoppage[1]) if self.half == 1 else self.max_min
+        if self.minute >= boundary:
+            return dict(minute=self.minute, boundary=True, half=self.half,
+                        new_events=list(self.events[ev_i:]), ev_i=len(self.events),
+                        score=(self.goals["H"], self.goals["A"]), momentum=self.momentum_pct(),
+                        mom_tail=self.mom[-24:], stats=self._stats_snapshot(), colour=[])
+        start_min, start_ev = self.minute, ev_i
+        cap = max_minutes or (12 if mode == "key" else (14 if mode == "fast" else 2))
+        while self.minute < boundary:
+            self._play_minute()
+            self.minute += 1
+            if mode == "key" and self.minute > start_min:
+                if any(e["type"] in self.KEY_TYPES for e in self.events[start_ev:]):
+                    break
+            if max_minutes is None and (self.minute - start_min) >= cap:
+                break
+        at_boundary = self.minute >= boundary
+        new_events = list(self.events[start_ev:])
+        # colour commentary: fill quiet gaps with grounded flavour (narration only)
+        colour = []
+        if mode != "key" and not any(e["type"] in ("goal", "red", "var", "var_disallowed") for e in new_events):
+            colour = self._colour_lines(start_min, self.minute)
+        return dict(minute=self.minute, boundary=at_boundary, half=self.half,
+                    new_events=new_events, colour=colour, ev_i=len(self.events),
+                    score=(self.goals["H"], self.goals["A"]), momentum=self.momentum_pct(),
+                    mom_tail=self.mom[-24:], stats=self._stats_snapshot())
+
+    def _stats_snapshot(self):
+        return {k: dict(v) for k, v in self.stats.items()}
+
+    def _colour_lines(self, m0, m1):
+        """Grounded filler commentary between real events (narration only)."""
+        lines = []
+        span = max(1, m1 - m0)
+        th = sum(m["H"] for m in self.mom[-span:])
+        ta = sum(m["A"] for m in self.mom[-span:])
+        hot = self.home["name"] if th >= ta else self.away["name"]
+        cold = self.away["name"] if th >= ta else self.home["name"]
+        gm = self.goals["H"] - self.goals["A"]
+        if self.minute >= 82 and abs(gm) <= 1:
+            lines.append("Every boot, every clearance — the crowd drags it higher. %d on the clock." % self.minute)
+        if th + ta > span * 0.9:
+            lines.append(hot + " turning the screw — one-way traffic right now.")
+        elif self.minute % 5 == 0:
+            lines.append(cold + " are happy to keep the ball and wait. Patient stuff.")
+        if self.minute == 60:
+            lines.append("An hour gone. Both benches are doing the maths.")
+        if self.minute == 75:
+            lines.append("Twenty to go — the fourth official is warming up.")
+        # fatigue callout: a live, real reading from the human side's XI
+        side = self.my_side
+        tired = [i for i in range(len(self.xi_of(side)))
+                 if self.active[side][i] and self.rating_of(side)["fatigue"] > 46]
+        if tired and self.rng.random() < 0.5:
+            p = self.xi_of(side)[self.rng.choice(tired)]["player"]
+            lines.append(p["name"] + " looks leggy — hands on hips after that sprint.")
+        return lines[:2]
 
     def run_first_half(self):
         """Play up to and including first-half stoppage time."""
@@ -928,6 +1078,66 @@ class MatchRunner:
             if self.manual_sub(self.my_side, 46, off_id, on_id):
                 done += 1
         return done
+
+    def begin_second_half(self, instr=None):
+        """Apply half-time decisions WITHOUT playing (Match Day Live+ flow)."""
+        self.apply_halftime(instr or {})
+        self.half = 2
+        if self.minute < 46:
+            self.minute = 46
+
+    def run_rest(self):
+        """Finish whatever remains, deterministically (auto-finish/abandon)."""
+        if self.finished:
+            return
+        if self.half == 1:
+            self.run_second_half()
+        else:
+            self.apply_halftime()
+            while self.minute <= self.max_min:
+                self._play_minute()
+                self.minute += 1
+
+    def live_sides(self):
+        """(my rating dict, opp rating dict, my side letter) for the human side."""
+        side = self.my_side
+        return (self.rating_of(side), self.rating_of("A" if side == "H" else "H"), side)
+
+    def live_my_xi(self):
+        """Human side's XI with live ratings/fatigue, shaped for the UI."""
+        side = self.my_side
+        out = []
+        for i, x in enumerate(self.xi_of(side)):
+            if not self.active[side][i]:
+                continue
+            p = x["player"]
+            out.append(dict(pid=p["id"], name=p["name"], pos=x["slot"],
+                            rating=round(self.ratings[side][i], 2),
+                            fatigue=round(p.get("fatigue", 0) + self.rating_of(side)["fatigue"] * 0.25, 1),
+                            goals=self.goals_p[side][i], yellow=p.get("_yellow", 0)))
+        return out
+
+    def live_bench(self):
+        side = self.my_side
+        bench = (self.home.get("bench") if side == "H" else self.away.get("bench")) or []
+        return [dict(pid=b["id"], name=b["name"], pos=b["pos"], ca=round(b.get("ca", 8), 1))
+                for b in bench]
+
+    def live_orders(self):
+        """Order catalogue with live availability, for the UI."""
+        used = self.orders_used[self.my_side]
+        catalogue = [("all_out_attack", "⚡ ALL-OUT ATTACK", "Throw everyone forward. More chances both ways."),
+                     ("sit_deep", "🛡 SIT DEEP", "Protect the lead, soak up pressure."),
+                     ("press_hard", "🔥 PRESS HARD", "Suffocate them. Costs legs, risks cards."),
+                     ("time_waste", "⏱ KILL THE GAME", "Slow everything down. Winning only."),
+                     ("go_long", "🎯 GO LONG & WIDE", "Direct balls, second balls, runners."),
+                     ("calm_down", "🧊 CALM IT DOWN", "Steady heads, stop the cards.")]
+        out = []
+        for key, label, desc in catalogue:
+            out.append(dict(key=key, label=label, desc=desc, used=key in used,
+                            cd=max(0, self.order_cd[self.my_side] - self.minute),
+                            left=3 - len(used)))
+        return out
 
     def run_second_half(self):
         self.apply_halftime()

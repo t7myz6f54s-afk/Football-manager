@@ -571,3 +571,18 @@ img.crest { object-fit: contain; background: transparent; }
 .gp-s:last-child { border-bottom: 0; }
 .escore { margin-left: 8px; font-weight: 900; color: var(--tx); background: var(--panel3); padding: 2px 8px; border-radius: 8px; font-size: 10px; border: 1px solid var(--line); font-family: var(--ff-mono); }
 @media (max-width: 640px) { .transfer-grid { grid-template-columns: 1fr; } .mhero-body { padding: 16px 12px 14px; } .mhero-club .nm { font-size: 12px; } #content { padding: 10px 10px calc(88px + env(safe-area-inset-bottom)); } }
+
+/* ---------------- Match Day Live+ ---------------- */
+.mom-wrap { padding: 4px 14px 2px; display: flex; align-items: center; gap: 8px; }
+.mom-lb { font-size: 8.5px; letter-spacing: .14em; color: var(--tx3); font-weight: 900; min-width: 64px; }
+.mom-bar { flex: 1; height: 8px; border-radius: 99px; overflow: hidden; display: flex; background: rgba(255,255,255,.06); border: 1px solid var(--line); }
+.mom-bar i { display: block; height: 100%; transition: width .6s cubic-bezier(.2,.8,.2,1); }
+.lv-colour .et { font-style: italic; }
+.ev.ev-tl .ei { background: linear-gradient(165deg, #3d2a08, #241804); color: #ffcc33; }
+.order-row { display: grid; gap: 2px; text-align: left; padding: 10px 12px; border-radius: 12px; background: var(--panel2); border: 1px solid var(--line); cursor: pointer; width: 100%; }
+.order-row .ol { font-weight: 900; font-size: 12px; color: var(--tx); }
+.order-row .od { font-size: 10.5px; color: var(--tx3); }
+.order-row.used { opacity: .45; }
+.order-row:disabled { opacity: .45; cursor: not-allowed; }
+body.tension #content::after { content: ""; position: fixed; inset: 0; pointer-events: none; box-shadow: inset 0 0 90px rgba(255,45,85,.3); animation: tension-pulse 1.6s ease-in-out infinite; z-index: 60; }
+@keyframes tension-pulse { 0%,100% { opacity: .45; } 50% { opacity: 1; } }

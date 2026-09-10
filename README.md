@@ -179,10 +179,21 @@ Massive overhaul addressing **"It still feels like a browser trying to act like 
 
 A standalone build of the same game is published as a release asset:
 
-**[Touchline-1.10.0-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.10.0/Touchline-1.10.0-arm64.apk)** — ~14 MB, Android 7.0+, 64-bit ARM, versionCode 13.
-v1.10.0 is the fix release for v1.9.0: the ULTRA GAME UI shipped with a JavaScript syntax error that left the app stuck on the loading screen; this one boots (verified in a headless browser: splash → launcher → career → all screens), and fixes two engine crashes in transfer negotiations (`would_sell`, `player_willing`).
+**[Touchline-1.11.0-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.11.0/Touchline-1.11.0-arm64.apk)** — ~14 MB, Android 7.0+, 64-bit ARM, versionCode 14.
 
-Previous: [v1.9.0-ULTRA](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.9.0-ULTRA/Touchline-1.9.0-ULTRA-arm64.apk) (broken — do not use) · [v1.8.0-GAME](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.8.0-GAME/Touchline-1.8.0-GAME-arm64.apk)
+### What changed in 1.11 — MATCH DAY LIVE+
+You're on the touchline now, not in the stands:
+- **True live stepping** — the server simulates the match in small chunks while you watch; nothing is pre-computed anymore.
+- **Momentum bar** — real per-minute pressure data, sliding 12-minute window, club colours.
+- **⚡ Touchline shouts that matter** — ALL-OUT ATTACK, SIT DEEP, PRESS HARD, KILL THE GAME, GO LONG, CALM IT DOWN. Each mutates the live tactical model (mentality/tempo/press/risk), max 3 per match, 10-minute cooldown, context rules ("you can't kill a game you're not winning"). Statistically verified to change outcomes.
+- **🔁 Live substitutions** — up to 5 total (3 at the break + 2 in play), fatigue read live.
+- **Live commentary feed** — grounded colour lines between real events (possession reads, tired-player callouts, crowd tension) — the narration never invents facts.
+- **85'+ drama mode** — tension vignette + haptics when it's still all to play for.
+- **FAST forward** toggle and match recovery after an app restart mid-match.
+
+v1.10.0 remains the boot-fix release (v1.9 shipped a JS syntax error that stuck the app on the loading screen; also fixed two transfer-engine crashes).
+
+Previous: [v1.10.0](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.10.0/Touchline-1.10.0-arm64.apk) · [v1.9.0-ULTRA](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.9.0-ULTRA/Touchline-1.9.0-ULTRA-arm64.apk) (broken — do not use)
 
 It embeds CPython (Chaquopy) and runs `fm/` unmodified on `127.0.0.1` inside a WebView, so the
 whole simulation works with no internet connection. Career saves live in app-private storage.

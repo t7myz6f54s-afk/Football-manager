@@ -123,3 +123,10 @@ verified in-browser; repo pushed; release shipped.
 - Verification: smoke PASS, season_test (WXC, 1 season) PASS, headless-browser boot test PASS (splash→launcher→career→6 screens→CONTINUE→transfer bid; zero console errors).
 - v1.10.0 (versionCode 13), make_apk.sh now emits a single correctly-named APK (was copying one APK under two version names).
 - android/setup_toolchain.sh added: one-shot JDK17+Gradle 8.9+SDK34 installer for reproducible builds on any fresh machine.
+
+## v1.11.0 — FEATURE #1: Match Day Live+ (2026-09-10)
+- Live stepping: server simulates in chunks (live_step API); first half is no longer pre-computed before the UI shows it.
+- Momentum bar from a real per-minute pressure log (progressions + 2.5·xG), 12-min sliding window.
+- Touchline orders (all_out_attack / sit_deep / press_hard / time_waste / go_long / calm_down): mutate the live tactical model; max 3 + 10' cooldown + context rules; chance rates now computed live each minute (was cached at kickoff — orders could not affect volume before this change).
+- Live subs (5 total incl. HT 3). Match recovery after restart (/api/match/live_state + boot pending_phase).
+- Tests: tests/live_match_test.py (black-box API, end-to-end PASS), tests/order_effect_test.py (paired-seed statistical proof: +0.71 shots / +0.12 xG for ALL-OUT ATTACK, PASS), browser walkthrough (live HUD → HT → mid-half order → FT, zero errors, PASS), smoke + season PASS.

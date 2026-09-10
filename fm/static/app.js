@@ -15,7 +15,7 @@ const api = {
     return j;
   }
 };
-const VERSION = "1.10.0";
+const VERSION = "1.11.0";
 let DEAD = false;
 function deadScreen() { if (DEAD) return; DEAD = true; const d = $("#dead"); if (d) d.classList.remove("hidden"); }
 const G = { boot: null, home: null, screen: "home", sub: null, static: null, busy: false, prevScreen: null };
@@ -86,7 +86,7 @@ function showStartScreen(){
       <div style="width:100%;max-width:480px;text-align:center">
         <div style="position:relative;width:88px;height:88px;margin:0 auto 16px;border-radius:22px;background:linear-gradient(135deg,#0d2818,#123a22);border:1.5px solid rgba(44,255,138,.35);box-shadow:0 16px 40px rgba(44,255,138,.25),inset 0 1px 0 rgba(255,255,255,.08);display:grid;place-items:center;animation:logo-float 3s ease-in-out infinite">
           <svg viewBox="0 0 40 40" style="width:50px;height:50px;filter:drop-shadow(0 0 10px rgba(44,255,138,.6))"><path d="M20 2 L36 8 V20 C36 30 29 36 20 38 C11 36 4 30 4 20 V8 Z" fill="#0d3b26"/><path d="M20 2 L36 8 V20 C36 30 29 36 20 38 C11 36 4 30 4 20 V8 Z" fill="none" stroke="#2cff8a" stroke-width="1.6"/><circle cx="20" cy="19" r="7" fill="none" stroke="#2cff8a" stroke-width="1.3"/><path d="M20 12v14M13 19h14M15 14.5l10 9M25 14.5l-10 9" stroke="#2cff8a" stroke-width=".9" opacity=".8"/></svg>
-          <div style="position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:linear-gradient(180deg,#2cff8a,#3dff9a);display:grid;place-items:center;font-size:10px;font-weight:950;color:#031a0c;box-shadow:0 3px 10px rgba(44,255,138,.5)">10</div>
+          <div style="position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:linear-gradient(180deg,#2cff8a,#3dff9a);display:grid;place-items:center;font-size:10px;font-weight:950;color:#031a0c;box-shadow:0 3px 10px rgba(44,255,138,.5)">11</div>
         </div>
         <h1 style="font-size:34px;letter-spacing:.34em;text-indent:.34em;margin:0 0 6px;background:linear-gradient(180deg,#fff 10%,#8aa0c0);-webkit-background-clip:text;background-clip:text;color:transparent">TOUCHLINE</h1>
         <div style="display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;background:rgba(44,255,138,.1);border:1px solid rgba(44,255,138,.18);font-size:10px;letter-spacing:.12em;font-weight:900;color:var(--acc);margin-bottom:12px">● ULTRA GAME · OFFLINE · 402 CLUBS</div>
@@ -508,7 +508,7 @@ async function setTraining(day,session,focus){ const r=await api.post("/api/trai
 
 /* MATCH */
 let MATCH=null;
-function evIcon(t,e){ if(t==="goal") return ["ev-goal","G"]; if(t==="yellow") return ["ev-card","Y"]; if(t==="red") return ["ev-red","R"]; if(t==="var"){ if(e&&e.stage==="overturn"&&e.decision==="disallowed") return ["ev-var disallow","✕"]; if(e&&e.stage==="confirmed") return ["ev-var confirm","✓"]; return ["ev-var","VAR"]; } if(t==="var_disallowed") return ["ev-var disallow","✕"]; if(t==="sub") return ["ev-sub","S"]; if(t==="injury") return ["ev-info","+"]; if(t==="penalties") return ["ev-info","P"]; return ["ev-info","•"]; }
+function evIcon(t,e){ if(t==="touchline") return ["ev-tl","\U0001F4E3"]; if(t==="goal") return ["ev-goal","G"]; if(t==="yellow") return ["ev-card","Y"]; if(t==="red") return ["ev-red","R"]; if(t==="var"){ if(e&&e.stage==="overturn"&&e.decision==="disallowed") return ["ev-var disallow","✕"]; if(e&&e.stage==="confirmed") return ["ev-var confirm","✓"]; return ["ev-var","VAR"]; } if(t==="var_disallowed") return ["ev-var disallow","✕"]; if(t==="sub") return ["ev-sub","S"]; if(t==="injury") return ["ev-info","+"]; if(t==="penalties") return ["ev-info","P"]; return ["ev-info","•"]; }
 function scoreEvents(evs,base){ let h=base?base[0]:0,a=base?base[1]:0; return (evs||[]).map(e=>{ const o=Object.assign({},e); if(e.type==="goal"){ if(e.side==="H") h++; else if(e.side==="A") a++; o._sc=h+"–"+a; } return o; }); }
 function evRow(e){ const [cls,ic]=evIcon(e.type,e); return `<div class="ev ${cls}"><span class="min">${e.minute}'</span><span class="ei">${ic}</span><div class="et" style="font-size:12px">${esc(e.text||(e.type==="shot"?`${e.player||""} — ${e.outcome||"chance"}${e.xg!=null?" (xG "+e.xg+")":""}`:e.type))}${e._sc?` <span class="escore">${e._sc}</span>`:""}</div></div>`; }
 function hexA(c,a){ if(!c||c[0]!=="#") return "rgba(120,140,160,"+a+")"; const n=parseInt(c.slice(1),16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`; }
@@ -522,7 +522,21 @@ function statsBlock(S,meFirst){ const A=meFirst?"me":"home", B=meFirst?"opp":"aw
 async function quickSell(pid,name){ modal(`<h2>Sell ${esc(name)}</h2><p class="small muted">List for transfer. Clubs bid auto.</p><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px"><div><label style="font-size:10px;font-weight:900;color:var(--tx3)">ASK €m</label><input id="qs-price" type="number" step="0.5" value="5" style="width:100%;margin-top:4px"></div><div><label style="font-size:10px;font-weight:900;color:var(--tx3)">REASON</label><select id="qs-reason" style="width:100%;margin-top:4px"><option>Surplus</option><option>Needs football</option><option>Financial</option></select></div></div><div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end"><button class="btn sm" onclick="closeModal()">Cancel</button><button class="btn primary sm" onclick="doQuickSell(${pid})">List 💸</button></div>`); }
 async function doQuickSell(pid){ const price=+$("#qs-price").value||0; closeModal(); const r=await api.post("/api/squad/list",{pid,listed:true,asking:price}); toast(r.msg||`Listed ${money(price)}`,4000); if(G.screen==="squad") renderSquad(); else if(G.screen==="player") go("player",pid); }
 async function renderMatch(){
-  await refreshState(); if(G.pendingMatch){ showHalftime(G.halftimeState); return; }
+  await refreshState();
+  if(G.pendingMatch){
+    try{
+      const j=await api.get("/api/match/live_state");
+      if(j.ok&&j.state){
+        const f=j.state.fixture||{};
+        if(f.home_code) G.codes={home:f.home_code,away:f.away_code,comp:f.code,compName:f.comp,stage:f.stage,venue:f.venue,date:f.date};
+        G.matchMode=j.mode||G.matchMode||"full";
+        if(j.halftime){ G.halftimeState=j.state; showHalftime(j.state); }
+        else startLive(j.state);
+        return;
+      }
+    }catch(e){}
+    showHalftime(G.halftimeState); return;
+  }
   const j=await api.get("/api/match/next");
   if(!j.ok){ $("#content").innerHTML=`<div class="card" style="text-align:center;padding:24px"><div style="font-size:28px">📭</div><h3>No match</h3><p class="small muted">${esc(j.msg)}</p><button class="btn primary sm" style="margin-top:10px" onclick="doContinue()">Continue ▶</button></div>`; return; }
   MATCH=j; const p=j.preview, f=p.fixture;
@@ -539,39 +553,146 @@ async function renderMatch(){
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px"><div class="card tight"><div style="display:flex;justify-content:space-between"><h3>Your team ${esc(p.tactic.formation)}</h3><button class="btn sm" onclick="go('tactics')">Tactics ▸</button></div><div class="kv"><span>Mentality</span><b>${esc(p.tactic.mentality)}</b></div><div class="kv"><span>Strength</span><b style="font-family:var(--ff-mono)">${p.my.ca.toFixed(1)}/20</b></div><div class="kv"><span>Att / Def</span><b>${p.my.attack} / ${p.my.defence}</b></div><div class="kv"><span>Familiarity</span><b>${Math.round(p.tactic.familiarity||0)}%</b></div></div><div class="card tight"><div style="display:flex;justify-content:space-between"><h3>Opp ${esc(p.opp.name)}</h3><span class="small muted">${p.opposition_report.known}% scouted</span></div><div class="kv"><span>Strength</span><b>${p.opp.ca?p.opp.ca.toFixed(1)+"/20":"?"}</b></div><div class="kv"><span>Rep · league</span><b>${p.opp.rep} · ${esc(p.opp.league)}</b></div>${p.opposition_report.key_players.slice(0,3).map(k=>`<div class="kv"><span>⚠️ ${esc(k.name)} ${esc(k.pos)}</span><b>${k.goals}g</b></div>`).join("")||'<div class="small muted">No report</div>'}<button class="btn sm" style="margin-top:6px" onclick="go('scouting')">Scout ▸</button></div></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px"><div class="card tight"><h3>XI ${esc(p.tactic.formation)}</h3>${pitchHTML(p.xi,false)}</div><div class="card tight" style="padding:0"><div style="padding:10px 12px 4px;display:flex;justify-content:space-between"><h3>Bench ${p.bench.length}</h3></div><div style="padding:0 10px 10px;display:grid;gap:4px">${p.bench.map(b=>`<div style="display:flex;gap:8px;align-items:center;padding:6px 10px;border-radius:10px;background:var(--panel2);border:1px solid var(--line)"><span class="pos" style="min-width:28px">${esc(b.pos)}</span><span style="flex:1;font-size:11px;font-weight:800">${esc(b.name)}</span><span style="font-size:10px;color:var(--tx3)">CA ${b.ca.toFixed(1)}</span></div>`).join("")||'<div class="small muted" style="padding:10px">No bench</div>'}</div></div></div>`;
 }
-function liveScreen(cfg,onDone){
-  const C=G.codes||{}, evs=scoreEvents((cfg.events||[]).slice().sort((a,b)=>a.minute-b.minute),cfg.base), end=cfg.endMin||Math.max(45,...evs.map(e=>e.minute),1), isSecond=(cfg.startMin||0)>=45;
+/* ---------------- Match Day Live+ ---------------- */
+let LIVE=null; // {mode,ev_i,fast,stopped,clockMin,sc,state,_base}
+function stopLive(){ if(LIVE) LIVE.stopped=true; document.body.classList.remove("tension"); }
+function liveColourRow(ln){ return `<div class="ev lv-colour"><span class="min">\u2022</span><span class="ei">\u{1F399}</span><div class="et" style="font-size:11.5px;opacity:.85">${esc(ln)}</div></div>`; }
+function liveMomentum(pct){
+  const C=G.codes||{}; const h=clubCol(C.home,0)||"#2cff8a", a=clubCol(C.away,0)||"#4d9eff";
+  return `<div class="mom-wrap"><span class="mom-lb">MOMENTUM</span><div class="mom-bar"><i style="width:${pct}%;background:linear-gradient(90deg,${hexA(h,.5)},${h})"></i><i style="width:${100-pct}%;background:linear-gradient(90deg,${a},${hexA(a,.4)})"></i></div></div>`;
+}
+function liveChips(st){ const s=st.stats||{me:{},opp:{}};
+  const el=$("#lv-chips"); if(!el) return;
+  el.innerHTML=[["Poss",(s.me.poss==null?"—":s.me.poss+"%")],["Shots",(s.me.shots||0)+"\u2013"+(s.opp.shots||0)],["xG",Number(s.me.xg||0).toFixed(2)+"\u2013"+Number(s.opp.xg||0).toFixed(2)],["Corners",(s.me.corners||0)+"\u2013"+(s.opp.corners||0)]].map(([k,v])=>`<span class="tag" style="font-size:10px;background:var(--panel2)">${k} <b style="color:var(--tx)">${esc(String(v))}</b></span>`).join("");
+}
+function startLive(st){
+  stopLive();
+  LIVE={mode:G.matchMode||"full",ev_i:st.ev_i||0,fast:false,stopped:false,clockMin:st.minute||1,
+        sc:[st.score.home,st.score.away],_base:[st.score.home,st.score.away],state:st};
+  const C=G.codes||{};
   $("#content").innerHTML=`
-    <div class="mhero ${compClass(C.comp)}" style="--comp:${compColor(C.comp)}"><div class="mhero-top">${compLogo(C.comp)}<span class="comp-dot" style="animation:dot-glow 1s infinite"></span><span>${esc(C.compName||"Match")}${C.stage&&C.stage!=="league"?" · "+esc(C.stage):""}</span><span class="spacer"></span><span class="tag" style="background:var(--red);color:white;animation:dot-pulse 1s infinite">● LIVE ${cfg.startMin}'-${end}'</span></div>
-      <div class="live-bar" style="border:0;border-radius:0;background:linear-gradient(90deg, ${hexA(clubCol(G.codes.home,0),.2)}, transparent 35%, transparent 65%, ${hexA(clubCol(G.codes.away,0),.2)});padding:14px"><span class="lb-team">${crest(C.home,"lg")}<b>${esc(cfg.homeShort||"")}</b></span><span class="lb-mid"><span class="lscore" id="lv-score" style="font-size:28px">${cfg.base[0]} – ${cfg.base[1]}</span><span class="clock" id="lv-clock">${cfg.startMin}'</span><span style="font-size:9px;letter-spacing:.1em;color:var(--tx3)">${isSecond?"SECOND HALF":"FIRST HALF"}</span></span><span class="lb-team r"><b>${esc(cfg.awayShort||"")}</b>${crest(C.away,"lg")}</span></div>
-      <div id="lv-feed" style="padding:8px 12px 12px;min-height:40vh;max-height:56vh;overflow-y:auto;background:linear-gradient(180deg, transparent, rgba(0,0,0,.12))"><div class="lv-empty" style="text-align:center;padding:32px 16px"><div style="width:48px;height:48px;margin:0 auto 10px;border-radius:14px;background:var(--panel2);display:grid;place-items:center;font-size:22px">⚽</div><div style="font-weight:900;font-size:13px">Live match</div><div class="small muted" style="font-size:11px;margin-top:4px">Goals, cards, VAR — cinematic</div></div></div>
-      <div class="mhero-foot" style="background:rgba(0,0,0,.22);padding:10px 14px"><button class="btn sm" id="lv-skip">Skip to ${cfg.label} ⏩</button><span class="spacer"></span><span class="small muted" style="font-size:10px">Full = every chance</span></div>
+    <div class="mhero ${compClass(C.comp)}" style="--comp:${compColor(C.comp)}"><div class="mhero-top">${compLogo(C.comp)}<span class="comp-dot" style="animation:dot-glow 1s infinite"></span><span>${esc(C.compName||"Match")}</span><span class="spacer"></span><span class="tag" style="background:var(--red);color:#fff;animation:dot-pulse 1s infinite">\u25CF LIVE</span></div>
+      <div class="live-bar" style="border:0;border-radius:0;padding:12px 14px 6px"><span class="lb-team">${crest(C.home,"lg")}<b>${esc((st.home_name||"").split(" ").slice(-1)[0])}</b></span><span class="lb-mid"><span class="lscore" id="lv-score" style="font-size:28px">${st.score.home} \u2013 ${st.score.away}</span><span class="clock" id="lv-clock">${st.minute}'</span><span id="lv-half" style="font-size:9px;letter-spacing:.1em;color:var(--tx3)">${st.half===2?"SECOND HALF":"FIRST HALF"}</span></span><span class="lb-team r"><b>${esc((st.away_name||"").split(" ").slice(-1)[0])}</b>${crest(C.away,"lg")}</span></div>
+      <div id="lv-mom">${liveMomentum(st.momentum==null?50:st.momentum)}</div>
+      <div id="lv-chips" style="display:flex;gap:6px;padding:4px 12px 8px;flex-wrap:wrap;justify-content:center"></div>
+      <div id="lv-feed" style="padding:6px 12px 10px;min-height:32vh;max-height:42vh;overflow-y:auto"><div class="lv-empty" style="text-align:center;padding:22px 12px"><div style="font-weight:900;font-size:13px">Kick-off</div><div class="small muted" style="font-size:11px;margin-top:4px">You're on the touchline \u2014 shout anytime \u26A1</div></div></div>
+      <div class="mhero-foot" style="background:rgba(0,0,0,.22);padding:8px 10px;gap:6px"><button class="btn sm" id="lv-shout" style="background:linear-gradient(165deg,#3d2a08,#2a1c04);border-color:rgba(255,204,51,.45)">\u26A1 SHOUT</button><button class="btn sm" id="lv-sub">\U0001F501 SUB</button><span class="small muted" id="lv-ment" style="font-size:10px;padding:0 4px">${esc(st.mentality||"Balanced")}</span><span class="spacer"></span><button class="btn sm" id="lv-speed">\u23E9 FAST</button></div>
     </div>`;
-  let min=cfg.startMin||0,i=0,sc=cfg.base.slice();
-  const feed=$("#lv-feed"), clock=$("#lv-clock"), scoreEl=$("#lv-score");
-  const push=e=>{
-    const em=feed.querySelector(".lv-empty"); if(em) em.remove();
-    feed.insertAdjacentHTML("afterbegin",evRow(e));
-    if(e.type==="goal"){ goalFlash(e); Juice.haptic("goal"); Juice.play("goal"); Juice.shake(); }
-    if(e.type==="var"||e.type==="var_disallowed"){ varFlash(e); Juice.haptic("var"); Juice.play("var"); }
-    if(e.type==="yellow"||e.type==="red"){ cardFlash(e); Juice.haptic("card"); Juice.play("card"); }
-    if(e.type==="goal"){ if(e._sc) scoreEl.textContent=e._sc.replace("–"," – "); else { if(e.side==="H") sc[0]++; else if(e.side==="A") sc[1]++; scoreEl.textContent=sc[0]+" – "+sc[1]; } try{ scoreEl.animate([{transform:"scale(1.35)",color:"var(--acc)"},{transform:"scale(1)",color:"var(--tx)"}],{duration:380,easing:"cubic-bezier(.2,.8,.2,1)"}); } catch(e2){} }
-    if(e.type==="var_disallowed"){ if(e.side==="H"&&sc[0]>cfg.base[0]) sc[0]--; else if(e.side==="A"&&sc[1]>cfg.base[1]) sc[1]--; scoreEl.textContent=sc[0]+" – "+sc[1]; }
-  };
-  const finish=()=>{ clearInterval(timer); while(i<evs.length) push(evs[i++]); clock.textContent=end+"'"; setTimeout(onDone,600); };
-  $("#lv-skip").onclick=finish;
-  const timer=setInterval(()=>{ min++; clock.textContent=min+"'"; while(i<evs.length&&evs[i].minute<=min) push(evs[i++]); if(min>=end) finish(); },90);
+  liveChips(st);
+  $("#lv-shout").onclick=openOrders;
+  $("#lv-sub").onclick=openLiveSub;
+  $("#lv-speed").onclick=()=>{ LIVE.fast=!LIVE.fast; $("#lv-speed").textContent=LIVE.fast?"\u23EA NORMAL":"\u23E9 FAST"; };
+  liveLoop();
+}
+function pushLiveEvent(e,feed){
+  e=Object.assign({},e);
+  const base=LIVE._base||[0,0];
+  if(e.type==="goal"){ if(e.side==="H")LIVE.sc[0]++; else if(e.side==="A")LIVE.sc[1]++; e._sc=LIVE.sc[0]+"\u2013"+LIVE.sc[1]; }
+  if(e.type==="var_disallowed"){ if(e.side==="H"&&LIVE.sc[0]>base[0])LIVE.sc[0]--; else if(e.side==="A"&&LIVE.sc[1]>base[1])LIVE.sc[1]--; }
+  feed.insertAdjacentHTML("afterbegin",evRow(e));
+  if(e.type==="goal"){ goalFlash(e); Juice.haptic("goal"); Juice.play("goal"); Juice.shake(); }
+  else if(e.type==="var"||e.type==="var_disallowed"){ varFlash(e); Juice.haptic("var"); Juice.play("var"); }
+  else if(e.type==="yellow"||e.type==="red"){ cardFlash(e); Juice.haptic("card"); Juice.play("card"); }
+  else if(e.type==="touchline"){ Juice.haptic("medium"); }
+}
+function endChunk(st){
+  LIVE.state=st; LIVE._base=[st.score.home,st.score.away];
+  const m=$("#lv-mom"); if(m) m.innerHTML=liveMomentum(st.momentum==null?50:st.momentum);
+  liveChips(st);
+  const ment=$("#lv-ment"); if(ment) ment.textContent=st.mentality||"Balanced";
+  const half=$("#lv-half"); if(half&&st.half===2) half.textContent="SECOND HALF";
+  const se=$("#lv-score"); if(se) se.textContent=st.score.home+" \u2013 "+st.score.away;
+  if(st.minute>=85&&Math.abs(st.my_score-st.opp_score)<=1&&!document.body.classList.contains("tension")){
+    document.body.classList.add("tension"); Juice.haptic("heavy"); toast("DRAMA INCOMING \u2014 nothing between them!",3000); }
+}
+function animateChunk(st){
+  return new Promise(res=>{
+    const feed=$("#lv-feed"); if(!feed){ res(); return; }
+    const from=LIVE.clockMin, to=Math.max(from,st.minute);
+    const evs=(st.new_events||[]).slice().sort((a,b)=>a.minute-b.minute);
+    const cols=(st.colour||[]).slice();
+    const per=LIVE.fast?24:165, em=feed.querySelector(".lv-empty");
+    if(em&&(evs.length||cols.length)) em.remove();
+    const pts=cols.length?cols.map((_,k)=>from+Math.round((k+1)*((to-from)/(cols.length+1)))):[];
+    let ei=0, ci=0, m=from;
+    const iv=setInterval(()=>{
+      m++; LIVE.clockMin=m;
+      const clock=$("#lv-clock"); if(clock) clock.textContent=m+"'";
+      while(ei<evs.length&&evs[ei].minute<=m){ pushLiveEvent(evs[ei],feed); ei++; }
+      while(ci<pts.length&&m>=pts[ci]){ feed.insertAdjacentHTML("afterbegin",liveColourRow(cols[ci])); ci++; }
+      if(m>=to){ clearInterval(iv); endChunk(st); res(); }
+    },per);
+  });
+}
+async function liveLoop(){
+  while(LIVE&&!LIVE.stopped){
+    let j;
+    try{ j=await api.post("/api/match/live_step",{mode:LIVE.fast?"fast":LIVE.mode,ev_i:LIVE.ev_i}); }
+    catch(e){ stopLive(); return; }
+    if(!j||!j.ok){ toast(esc((j&&j.msg)||"Match feed lost"),5000); stopLive(); return; }
+    if(j.result){
+      stopLive(); G.pendingMatch=false; G.halftimeState=null;
+      try{ await refreshState(); }catch(e){}
+      showResult(j.result); return; }
+    const st=j.state; LIVE.ev_i=st.ev_i;
+    if(st.halftime_state){
+      stopLive(); await new Promise(r=>setTimeout(r,300));
+      G.halftimeState=st.halftime_state; showHalftime(st.halftime_state); return; }
+    await animateChunk(st);
+    if(!LIVE||LIVE.stopped) return;
+    await new Promise(r=>setTimeout(r,LIVE.fast?40:240));
+  }
+}
+function applyLiveState(st){ if(!LIVE) return; LIVE.state=st; LIVE.ev_i=st.ev_i; const ment=$("#lv-ment"); if(ment) ment.textContent=st.mentality||"Balanced"; const m=$("#lv-mom"); if(m) m.innerHTML=liveMomentum(st.momentum==null?50:st.momentum); }
+function openOrders(){
+  const st=LIVE&&LIVE.state; if(!st) return; Juice.haptic("light");
+  const left=(st.orders&&st.orders[0])?st.orders[0].left:3;
+  const rows=(st.orders||[]).map(o=>{
+    const dis=o.used||o.cd>0||left<=0;
+    return `<button class="order-row${o.used?" used":""}" ${dis?"disabled":""} onclick="sendOrder('${o.key}')"><span class="ol">${o.label}</span><span class="od">${esc(o.desc)}${o.cd>0?" \u00b7 ready in "+o.cd+"'":o.used?" \u00b7 used":""}</span></button>`;}).join("");
+  modal(`<h2>Touchline</h2><p class="small muted" style="font-size:11px">${left} instruction${left===1?"":"s"} left \u00b7 one every 10 minutes</p><div style="display:grid;gap:6px;margin-top:10px">${rows}</div>`);
+}
+async function sendOrder(k){
+  closeModal();
+  try{ const j=await api.post("/api/match/instruction",{order:k});
+    if(j.state) applyLiveState(j.state);
+    toast(esc(j.msg||(j.ok?"Instruction sent":"Ignored")),4200);
+    Juice.haptic(j.ok?"success":"error"); Juice.play(j.ok?"success":"error");
+  }catch(e){ toast("Failed: "+esc(e.message),4000); }
+}
+function openLiveSub(){
+  const st=LIVE&&LIVE.state; if(!st) return; Juice.haptic("light");
+  if(st.subs_left<=0){ toast("No substitutions left",3000); return; }
+  modal(`<h2>Substitution</h2><p class="small muted" style="font-size:11px">${st.subs_left} left \u00b7 5 total (incl. half-time)</p>
+   <div style="display:grid;gap:8px;margin-top:10px">
+    <select id="ls-off" style="min-height:38px">${st.xi.map(p=>`<option value="${p.pid}">${esc(p.name)} \u00b7 ${esc(p.pos)} \u00b7 ${p.rating.toFixed(2)}${p.fatigue>55?" \u00b7 legs "+Math.round(p.fatigue):""}</option>`).join("")}</select>
+    <select id="ls-on" style="min-height:38px">${st.bench.map(b=>`<option value="${b.pid}">${esc(b.name)} \u00b7 ${esc(b.pos)} \u00b7 CA ${b.ca.toFixed(1)}</option>`).join("")}</select>
+   </div>
+   <div style="display:flex;gap:8px;margin-top:12px"><button class="btn primary" onclick="sendLiveSub()">Make the change</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
+}
+async function sendLiveSub(){
+  const off=+$("#ls-off").value, on=+$("#ls-on").value; closeModal();
+  try{ const j=await api.post("/api/match/sub",{off,on});
+    if(j.state) applyLiveState(j.state);
+    toast(esc(j.msg||(j.ok?"Sub made":"Not possible")),3600);
+    Juice.haptic(j.ok?"success":"error"); if(j.ok) Juice.play("success");
+  }catch(e){ toast("Failed: "+esc(e.message),4000); }
 }
 async function playMatch(mode){
   G.matchMode=mode; G.busy=true; setBusy(true);
   try{
+    if(mode==="instant"){
+      const j=await api.post("/api/match/play",{mode});
+      if(!j.ok){ toast(esc(j.msg||"Could not play"),5000); G.busy=false; setBusy(false); return; }
+      if(j.result){ await refreshState(); showResult(j.result); }
+      G.busy=false; setBusy(false); return;
+    }
     const j=await api.post("/api/match/play",{mode});
     if(!j.ok){ toast(esc(j.msg||"Could not play"),5000); G.busy=false; setBusy(false); return; }
-    if(j.halftime){
-      G.pendingMatch=true; G.halftimeState=j.state; G.matchFixture=j.fixture;
-      if(mode==="full"){ const st=j.state; liveScreen({events:st.events,base:[0,0],startMin:0,endMin:45,label:"half-time",homeShort:st.home_short||st.home_name,awayShort:st.away_short||st.away_name},()=>showHalftime(st)); }
-      else showHalftime(j.state);
-    } else { await refreshState(); showResult(j.result); }
+    G.pendingMatch=true; G.halftimeState=null; G.matchFixture=j.fixture;
+    const f=j.fixture||{};
+    G.codes={home:f.home_code,away:f.away_code,comp:f.code,compName:f.comp||compLabel(f),stage:f.stage,venue:f.venue,date:f.date};
+    startLive(j.state);
   } catch(e){ toast("Match failed: "+esc(e.message),6000); }
   G.busy=false; setBusy(false);
 }
@@ -590,7 +711,14 @@ function addSubRow(){ const st=window._ht; if(!st) return; if(SUB_ROWS>=3){ toas
 async function submitHalftime(noChange){
   const talk=noChange?null:($("#ht-talk")?$("#ht-talk").value:null), subs=noChange?[]:$$(".ht-sub").map(r=>{ const off=$(".sub-off",r).value, on=$(".sub-on",r).value; return off&&on?[+off,+on]:null; }).filter(x=>x);
   G.busy=true; setBusy(true);
-  try{ const j=await api.post("/api/match/halftime",{talk,subs}); G.pendingMatch=false; G.halftimeState=null; SUB_ROWS=0; if(!j.ok){ toast(esc(j.msg||"Could not resume"),5000); G.busy=false; setBusy(false); return; } await refreshState(); if(G.matchMode==="full"){ const st=window._ht; if(st){ const second=(j.result.events||[]).filter(e=>e.minute>45); liveScreen({events:second,base:[st.score.home,st.score.away],startMin:45,endMin:90,label:"full-time",homeShort:st.home_short||st.home_name,awayShort:st.away_short||st.away_name},()=>showResult(j.result)); } else showResult(j.result); } else showResult(j.result); } catch(e){ toast("Match failed: "+esc(e.message),6000); } G.busy=false; setBusy(false);
+  try{
+    const j=await api.post("/api/match/halftime",{talk,subs});
+    SUB_ROWS=0;
+    if(!j.ok){ toast(esc(j.msg||"Could not resume"),5000); G.busy=false; setBusy(false); return; }
+    if(j.live&&j.state){ G.pendingMatch=true; G.halftimeState=null; startLive(j.state); }
+    else if(j.result){ G.pendingMatch=false; G.halftimeState=null; await refreshState(); showResult(j.result); }
+  } catch(e){ toast("Match failed: "+esc(e.message),6000); }
+  G.busy=false; setBusy(false);
 }
 function showResult(r){
   const isH=r.is_home, my=isH?r.hg:r.ag, opp=isH?r.ag:r.hg, res=r.result||(my>opp?"W":my===opp?"D":"L"), mySide=isH?"H":"A", all=(r.events||[]).slice().sort((a,b)=>a.minute-b.minute), relevant=all.filter(e=>e.type==="goal"||e.type==="red"||e.type==="injury"||e.type==="sub"||e.type==="halftime"||e.type==="kickoff"||e.type==="team_talk"||e.type==="penalties"||e.side===mySide), shown=r.mode==="instant"?all.filter(e=>["goal","red","penalties","halftime","kickoff"].includes(e.type)):r.mode==="key"?relevant.filter(e=>["goal","red","injury","sub","halftime","kickoff","team_talk","penalties"].includes(e.type)):relevant;

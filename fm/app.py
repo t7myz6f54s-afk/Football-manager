@@ -244,7 +244,8 @@ def api_state():
     s = need_save()
     return {"home": V.home(con(), s), "inbox_preview": V.inbox(con(), s, limit=6)["items"],
             "pending_match": bool(S["pending_match"]),
-            "pending_mode": (S["pending_match"] or {}).get("mode")}
+            "pending_mode": (S["pending_match"] or {}).get("mode"),
+            "pending_phase": (S["pending_match"] or {}).get("phase")}
 
 
 @app.get("/api/screen/{name}")
@@ -435,23 +436,185 @@ def api_match_play(payload: dict = Body(default={})):
             FROM fixtures f LEFT JOIN competitions k ON k.id=f.comp_id WHERE f.id=?""",
                             (nf["id"],)).fetchone()
         fx = dict(row)
-        runner, ctx, ht = E.begin_human_match(con(), s, fx, rng=S["rng"], custom_lineup=lineup)
-        if runner is None:
-            return {"ok": False, "msg": "That fixture cannot be played (already played, "
-                                       "or not enough fit players)."}
         if mode == "instant":
+            runner, ctx, ht = E.begin_human_match(con(), s, fx, rng=S["rng"], custom_lineup=lineup)
+            if runner is None:
+                return {"ok": False, "msg": "That fixture cannot be played (already played, "
+                                           "or not enough fit players)."}
             data = E.finish_human_match(con(), s, fx, runner, ctx,
                                         halftime={"talk": payload.get("talk")})
             return _match_response(s, fx, data, mode)
-        S["pending_match"] = {"runner": runner, "ctx": ctx, "fx": fx, "mode": mode}
-        preview = V.match_preview(con(), s, fx)
-        return {"ok": True, "halftime": True, "mode": mode,
+        # Match Day Live+: the match is stepped minute-chunks server-side, so
+        # touchline instructions genuinely change what happens next.
+        runner, ctx = E._setup_human_match(con(), s, fx, rng=S["rng"], custom_lineup=lineup, live=True)
+        if runner is None:
+            return {"ok": False, "msg": "That fixture cannot be played (already played, "
+                                       "or not enough fit players)."}
+        S["pending_match"] = {"runner": runner, "ctx": ctx, "fx": fx, "mode": mode,
+                              "phase": "live1", "ev_i": 0}
+        return {"ok": True, "live": True, "mode": mode,
                 "fixture": V._fixture_brief(con(), s, fx),
-                "state": _halftime_view(s, ht, preview)}
+                "state": _live_view(s, runner, 0)}
     except HTTPException:
         raise
     except Exception as e:
         S["pending_match"] = None
+        return err(e)
+
+
+MENTALITY_LABELS = ((1.5, "Very Attacking"), (0.75, "Attacking"), (0.25, "Positive"),
+                    (-0.25, "Balanced"), (-0.75, "Cautious"), (-1.5, "Defensive"), (-99, "Very Defensive"))
+
+
+def _mentality_label(mshift):
+    for cut, label in MENTALITY_LABELS:
+        if mshift >= cut:
+            return label
+    return "Very Defensive"
+
+
+def _live_stats(side_stats, all_stats):
+    """Live stat lines for one side (possession as % of minutes played)."""
+    total = all_stats["home"].get("poss", 0) + all_stats["away"].get("poss", 0)
+    out = {k: side_stats.get(k, 0) for k in ("shots", "sot", "corners", "fouls", "yellow", "red", "big")}
+    out["xg"] = round(side_stats.get("xg", 0.0), 2)
+    out["poss"] = round(100 * side_stats.get("poss", 0) / total) if total else 50
+    return out
+
+
+def _live_view(s, runner, ev_i, new_events=None, colour=None, extra=None):
+    """Snapshot of a live match, shaped for the UI."""
+    fx = V._fixture_brief(con(), s, S["pending_match"]["fx"]) if S.get("pending_match") else {}
+    my_tr, opp_tr, side = runner.live_sides()
+    is_home = side == "H"
+    allst = runner._stats_snapshot()
+    me = allst["home" if is_home else "away"]
+    opp = allst["away" if is_home else "home"]
+    view = {
+        "phase": (S["pending_match"] or {}).get("phase", "live1"),
+        "minute": runner.minute, "half": runner.half,
+        "score": {"home": runner.goals["H"], "away": runner.goals["A"]},
+        "my_score": runner.goals[side], "opp_score": runner.goals["A" if side == "H" else "H"],
+        "is_home": is_home,
+        "home_name": fx.get("home", runner.home["name"]), "away_name": fx.get("away", runner.away["name"]),
+        "home_code": fx.get("home_code", ""), "away_code": fx.get("away_code", ""),
+        "momentum": runner.momentum_pct(),            # share for the HOME side
+        "stats": {"me": _live_stats(me, allst), "opp": _live_stats(opp, allst)},
+        "xi": runner.live_my_xi(), "bench": runner.live_bench(),
+        "orders": runner.live_orders(),
+        "subs_left": max(0, 5 - len(runner.subs[side])),
+        "mentality": _mentality_label(my_tr.get("mshift", 0)),
+        "tempo": round(my_tr.get("tempo", 0.5), 2), "press": round(my_tr.get("press", 0.6), 2),
+        "new_events": new_events or [], "colour": colour or [],
+        "ev_i": ev_i, "talks": ["praise", "encourage", "neutral", "firm", "aggressive", "defensive", "attacking"],
+        "fixture": fx,
+    }
+    if extra:
+        view.update(extra)
+    return view
+
+
+@app.post("/api/match/live_step")
+def api_match_live_step(payload: dict = Body(default={})):
+    """Advance the live match by a chunk (full=~2min, key=to next event, fast=bulk)."""
+    try:
+        s = need_club()
+        pm = S["pending_match"]
+        if not pm:
+            return {"ok": False, "msg": "No match is in progress."}
+        if pm.get("phase") not in ("live1", "live2"):
+            # at half-time: hand back the HT state (idempotent)
+            preview = V.match_preview(con(), s, pm["fx"])
+            return {"ok": True, "live": True, "halftime": True,
+                    "state": _halftime_view(s, pm["runner"].halftime_state(), preview)}
+        mode = payload.get("mode", "full")
+        ev_i = int(payload.get("ev_i", pm.get("ev_i", 0)))
+        step = pm["runner"].live_step(ev_i=ev_i, mode=mode)
+        pm["ev_i"] = step["ev_i"]
+        extra = {}
+        if step["boundary"] and step["half"] == 1:
+            pm["phase"] = "halftime"
+            preview = V.match_preview(con(), s, pm["fx"])
+            extra["halftime_state"] = _halftime_view(s, pm["runner"].halftime_state(), preview)
+        if step["boundary"] and step["half"] == 2:
+            data = E._finish_human_match(con(), s, pm["fx"], pm["ctx"], pm["runner"].finalize())
+            resp = _match_response(s, pm["fx"], data, pm["mode"])
+            resp["live_done"] = True
+            return resp
+        return {"ok": True, "live": True,
+                "state": _live_view(s, pm["runner"], step["ev_i"],
+                                    new_events=step["new_events"], colour=step.get("colour"),
+                                    extra=extra)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return err(e)
+
+
+@app.post("/api/match/instruction")
+def api_match_instruction(payload: dict = Body(default={})):
+    """Bark a touchline instruction at the live match."""
+    try:
+        s = need_club()
+        pm = S["pending_match"]
+        if not pm or pm.get("phase") not in ("live1", "live2"):
+            return {"ok": False, "msg": "No live match to instruct."}
+        order = payload.get("order", "")
+        ok, msg = pm["runner"].apply_order(pm["runner"].my_side, order)
+        pm["ev_i"] = len(pm["runner"].events)
+        return {"ok": ok, "msg": msg,
+                "state": _live_view(s, pm["runner"], pm["ev_i"])}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return err(e)
+
+
+@app.post("/api/match/sub")
+def api_match_sub(payload: dict = Body(default={})):
+    """Make a substitution during a live match (max 5 total incl. half-time)."""
+    try:
+        s = need_club()
+        pm = S["pending_match"]
+        if not pm or pm.get("phase") not in ("live1", "live2"):
+            return {"ok": False, "msg": "No live match for a substitution."}
+        try:
+            off_id, on_id = int(payload["off"]), int(payload["on"])
+        except Exception:
+            return {"ok": False, "msg": "Pick a player off and a player on."}
+        runner = pm["runner"]
+        if len(runner.subs[runner.my_side]) >= 5:
+            return {"ok": False, "msg": "All five substitutions used."}
+        made = runner.manual_sub(runner.my_side, runner.minute, off_id, on_id)
+        if not made:
+            return {"ok": False, "msg": "That substitution is not possible (player off/on not available)."}
+        pm["ev_i"] = len(runner.events)
+        return {"ok": True, "msg": "Substitution made.",
+                "state": _live_view(s, runner, pm["ev_i"])}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return err(e)
+
+
+@app.get("/api/match/live_state")
+def api_match_live_state():
+    """Current live/HT state without advancing (used after app restart)."""
+    try:
+        s = need_club()
+        pm = S["pending_match"]
+        if not pm:
+            return {"ok": False, "msg": "No match is in progress."}
+        if pm.get("phase") in ("live1", "live2"):
+            return {"ok": True, "live": True,
+                    "mode": pm["mode"],
+                    "state": _live_view(s, pm["runner"], pm.get("ev_i", 0))}
+        preview = V.match_preview(con(), s, pm["fx"])
+        return {"ok": True, "live": True, "halftime": True, "mode": pm["mode"],
+                "state": _halftime_view(s, pm["runner"].halftime_state(), preview)}
+    except HTTPException:
+        raise
+    except Exception as e:
         return err(e)
 
 
@@ -508,6 +671,13 @@ def api_match_halftime(payload: dict = Body(default={})):
             return {"ok": False, "msg": "No match is paused at half-time."}
         talk = payload.get("talk") or None
         subs = [tuple(x) for x in (payload.get("subs") or [])][:3]
+        if pm.get("phase") in ("live1", "halftime"):
+            # Match Day Live+: apply decisions, kick off the second half live
+            pm["runner"].begin_second_half({"talk": talk, "subs": subs})
+            pm["phase"] = "live2"
+            pm["ev_i"] = len(pm["runner"].events)
+            return {"ok": True, "live": True,
+                    "state": _live_view(s, pm["runner"], pm["ev_i"])}
         data = E.finish_human_match(con(), s, pm["fx"], pm["runner"], pm["ctx"],
                                     halftime={"talk": talk, "subs": subs})
         return _match_response(s, pm["fx"], data, pm["mode"])
@@ -526,7 +696,11 @@ def api_match_abandon():
         pm = S["pending_match"]
         if not pm:
             return {"ok": False, "msg": "No match is paused at half-time."}
-        data = E.finish_human_match(con(), s, pm["fx"], pm["runner"], pm["ctx"], halftime={})
+        if pm.get("phase") in ("live1", "live2", "halftime"):
+            pm["runner"].run_rest()
+            data = E._finish_human_match(con(), s, pm["fx"], pm["ctx"], pm["runner"].finalize())
+        else:
+            data = E.finish_human_match(con(), s, pm["fx"], pm["runner"], pm["ctx"], halftime={})
         return _match_response(s, pm["fx"], data, pm["mode"])
     except HTTPException:
         raise
