@@ -99,3 +99,18 @@ Design tokens in style.css; nav restructure (bottom bar: Home/Squad/Tactics/Matc
 All P0/P1 closed; 16/16 screens clean at 393px; tablet + desktop passes clean; new-career,
 matchday (full/key/instant), HT resume, transfers, season progression and world simulation
 verified in-browser; repo pushed; release shipped.
+
+## Post-sprint update (user feedback round) — v1.6.1
+- REAL BADGES: 94/96 big-five clubs mapped to actual crests (Wikimedia thumbs, verified 200+image,
+  filename-curated to reject stadium photos / maps / constituency arms); fm/static/crests.json;
+  crest() wraps crestSVG() with <img onerror=fallback>; unified light badge plate for dark crests.
+  LEC + VER keep procedural shields (non-free, no commons asset).
+- GODFATHER: engine.godfather_plan() — best XI by slot fit/CA/availability, per-opponent mentality
+  + instruction plan with reasoning (strength diff of best-XI CA), 3 affordable sign targets w/ need
+  reasoning; /api/advice returns plan; dashboard card gains Select-XI / Apply-plan / Bid buttons.
+- NO SWIPE: phone league tables form→dots + tighter cells (table 363px = container); stat strips
+  3-col grid; inbox tabs wrap. audit2: 16/16 screens, zero overflow, zero page errors.
+- MATCHDAY: goal flash overlay (crest/scorer/minute/score), club-colour live bar tint, FT diagonal
+  club-colour split; app-feel CSS (overscroll, tap-highlight, select-none, transitions, safe areas).
+- APK 1.6.1 (code 9) rebuilt after /usr/local wipe (JDK17+gradle8.9+SDK34 reinstalled); signed,
+  crests.json(94)+godPlan verified inside assets; release v1.6.1 published w/ APK.
