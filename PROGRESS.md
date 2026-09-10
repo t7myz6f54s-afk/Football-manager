@@ -52,3 +52,11 @@ Design tokens in style.css; nav restructure (bottom bar: Home/Squad/Tactics/Matc
 - Goal event graphics now carry running score chips; shot commentary humanised.
 - APK v1.6.0 versionCode 8 dry-run BUILT+SIGNED+VERIFIED (assets include new app.js).
 - Next: final regression sweep, hold, final-hour rebuild+release+report.
+
+## Update ~00:30 UTC
+- Calendar rebuilt as fixture rows (crests/score/result tags/next highlight).
+- Table zone cues (blue promo / red relegation inset) on league + hub tables.
+- Status chips tappable (budget→finances, board→board, next→match, club→club hub).
+- Squad live name filter.
+- tests/multiseason.py: TWO-SEASON proof passed (trophies 26 La Liga; 27 Copa+La Liga; ageing/rep/finances carry).
+- Remaining hold cycles: godfather-on visual, key-mode HT, desktop inbox; final hour 05:27 freeze→APK→release→report.
