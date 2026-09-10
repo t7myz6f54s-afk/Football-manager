@@ -667,11 +667,23 @@ async function openMail(id) {
 }
 
 /* -------------------------------------------------------------------- SQUAD */
-let SQUAD_FILTER = "First Team", SQUAD_SORT = "ca";
+let SQUAD_FILTER = "First Team", SQUAD_SORT = "ca", SQUAD_Q = "";
+function filterSquadList() {
+  const q = (SQUAD_Q || "").toLowerCase();
+  $$(".sq-list .sqr").forEach(r => {
+    const nm = (r.querySelector(".sqr-n b") || {}).textContent || "";
+    r.style.display = !q || nm.toLowerCase().includes(q) ? "" : "none";
+  });
+  $$(".sq-table tbody tr").forEach(r => {
+    const nm = r.children[1] ? r.children[1].textContent : "";
+    r.style.display = !q || nm.toLowerCase().includes(q) ? "" : "none";
+  });
+}
 async function renderSquad() {
   await refreshState();
   const j = await api.get("/api/screen/squad");
-  const players = j.players.filter(p => SQUAD_FILTER === "All" || p.squad === SQUAD_FILTER);
+  const players = j.players.filter(p => SQUAD_FILTER === "All" || p.squad === SQUAD_FILTER)
+    .filter(p => !SQUAD_Q || p.name.toLowerCase().includes(SQUAD_Q.toLowerCase()));
   const groups = ["All", "First Team", "Reserve", "U21", "Youth"];
   const sortFn = {
     ca: (a, b) => b.ca - a.ca, pos: (a, b) => a.pos.localeCompare(b.pos) || b.ca - a.ca,
@@ -715,7 +727,7 @@ async function renderSquad() {
     </div>
     <div class="tabs">
       ${groups.map(g => `<button class="${SQUAD_FILTER === g ? "active" : ""}" onclick="SQUAD_FILTER='${g}';renderSquad()">${g}</button>`).join("")}
-      <span class="spacer"></span>
+      <input id="sq-q" placeholder="Filter by name…" value="${esc(SQUAD_Q || "")}" oninput="SQUAD_Q=this.value;filterSquadList()" style="min-height:32px;margin-left:auto;width:130px">
       <select onchange="SQUAD_SORT=this.value;renderSquad()">
         ${[["ca", "Ability"], ["pos", "Position"], ["age", "Age"], ["value", "Value"], ["wage", "Wage"],
            ["goals", "Goals"], ["condition", "Condition"], ["name", "Name"]]
