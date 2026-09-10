@@ -560,3 +560,5 @@ tbody tr.zr td:first-child { box-shadow: inset 2px 0 0 var(--red); }
 .sqr-r .tx { color: var(--tx); }
 .stf-k { flex-basis: 100%; font-size: 11px; color: var(--tx2); margin-left: 42px; }
 .stf-k b { color: var(--tx); }
+.zdot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
+.zdot.zp { background: var(--blue); } .zdot.zr { background: var(--red); }
