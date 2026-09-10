@@ -15,7 +15,7 @@ const api = {
     return j;
   }
 };
-const VERSION = "1.9.0-ULTRA";
+const VERSION = "1.10.0";
 let DEAD = false;
 function deadScreen() { if (DEAD) return; DEAD = true; const d = $("#dead"); if (d) d.classList.remove("hidden"); }
 const G = { boot: null, home: null, screen: "home", sub: null, static: null, busy: false, prevScreen: null };
@@ -86,7 +86,7 @@ function showStartScreen(){
       <div style="width:100%;max-width:480px;text-align:center">
         <div style="position:relative;width:88px;height:88px;margin:0 auto 16px;border-radius:22px;background:linear-gradient(135deg,#0d2818,#123a22);border:1.5px solid rgba(44,255,138,.35);box-shadow:0 16px 40px rgba(44,255,138,.25),inset 0 1px 0 rgba(255,255,255,.08);display:grid;place-items:center;animation:logo-float 3s ease-in-out infinite">
           <svg viewBox="0 0 40 40" style="width:50px;height:50px;filter:drop-shadow(0 0 10px rgba(44,255,138,.6))"><path d="M20 2 L36 8 V20 C36 30 29 36 20 38 C11 36 4 30 4 20 V8 Z" fill="#0d3b26"/><path d="M20 2 L36 8 V20 C36 30 29 36 20 38 C11 36 4 30 4 20 V8 Z" fill="none" stroke="#2cff8a" stroke-width="1.6"/><circle cx="20" cy="19" r="7" fill="none" stroke="#2cff8a" stroke-width="1.3"/><path d="M20 12v14M13 19h14M15 14.5l10 9M25 14.5l-10 9" stroke="#2cff8a" stroke-width=".9" opacity=".8"/></svg>
-          <div style="position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:linear-gradient(180deg,#2cff8a,#3dff9a);display:grid;place-items:center;font-size:10px;font-weight:950;color:#031a0c;box-shadow:0 3px 10px rgba(44,255,138,.5)">9</div>
+          <div style="position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:linear-gradient(180deg,#2cff8a,#3dff9a);display:grid;place-items:center;font-size:10px;font-weight:950;color:#031a0c;box-shadow:0 3px 10px rgba(44,255,138,.5)">10</div>
         </div>
         <h1 style="font-size:34px;letter-spacing:.34em;text-indent:.34em;margin:0 0 6px;background:linear-gradient(180deg,#fff 10%,#8aa0c0);-webkit-background-clip:text;background-clip:text;color:transparent">TOUCHLINE</h1>
         <div style="display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;background:rgba(44,255,138,.1);border:1px solid rgba(44,255,138,.18);font-size:10px;letter-spacing:.12em;font-weight:900;color:var(--acc);margin-bottom:12px">● ULTRA GAME · OFFLINE · 402 CLUBS</div>
@@ -759,7 +759,7 @@ const TAB_LABEL={home:"Home",inbox:"News",squad:"Squad",match:"Match",comps:"Com
 const TAB_EMOJI={home:"🏠",inbox:"📰",squad:"👕",match:"⚽",comps:"🏆"};
 function renderTabbar(items){
   const el=$("#tabbar"); if(!el) return; const tabs=TAB_IDS.map(id=>items.find(i=>i[0]===id)).filter(Boolean);
-  el.innerHTML=`<div class="dock">${tabs.map(n=>`<button data-s="${n[0]}" onclick="Juice.haptic('tap');go('${n[0]}')"><span style="font-size:16px">${TAB_EMOJI[n[0]]||"📦"}</span><span>${TAB_LABEL[n[0]]||n[2].split(" ")[0]}</span><span class="tbadge hidden" data-badge="${n[0]}"></span></button>`).join("")+`<button data-s="__more" onclick="Juice.haptic('tap');openSheet()"><span style="font-size:16px">⋯</span><span>More</span></button></div>`;
+  el.innerHTML=`<div class="dock">${tabs.map(n=>`<button data-s="${n[0]}" onclick="Juice.haptic('tap');go('${n[0]}')"><span style="font-size:16px">${TAB_EMOJI[n[0]]||"📦"}</span><span>${TAB_LABEL[n[0]]||n[2].split(" ")[0]}</span><span class="tbadge hidden" data-badge="${n[0]}"></span></button>`).join("")+`<button data-s="__more" onclick="Juice.haptic('tap');openSheet()"><span style="font-size:16px">⋯</span><span>More</span></button>`}</div>`;
 }
 function renderSheet(items){
   const el=$("#sheet-grid"); if(!el) return; const inBar=new Set(TAB_IDS), moreItems=items.filter(i=>!inBar.has(i[0]));

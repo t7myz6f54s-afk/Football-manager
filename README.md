@@ -179,10 +179,10 @@ Massive overhaul addressing **"It still feels like a browser trying to act like 
 
 A standalone build of the same game is published as a release asset:
 
-**[Touchline-1.8.0-GAME-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.8.0-GAME/Touchline-1.8.0-GAME-arm64.apk)** — ~14 MB, Android 7.0+, 64-bit ARM, versionCode 11.
-GAME: feels like native mobile game — HUD, floating dock, dressing room, manager office gauges, haptics, sounds, confetti, slide transitions. Not a browser.
+**[Touchline-1.10.0-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.10.0/Touchline-1.10.0-arm64.apk)** — ~14 MB, Android 7.0+, 64-bit ARM, versionCode 13.
+v1.10.0 is the fix release for v1.9.0: the ULTRA GAME UI shipped with a JavaScript syntax error that left the app stuck on the loading screen; this one boots (verified in a headless browser: splash → launcher → career → all screens), and fixes two engine crashes in transfer negotiations (`would_sell`, `player_willing`).
 
-Previous: [v1.7.0-PREMIUM](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.7.0-PREMIUM/Touchline-1.7.0-PREMIUM-arm64.apk) · [v1.6.2](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.6.2/Touchline-1.6.2-FIXED-arm64.apk)
+Previous: [v1.9.0-ULTRA](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.9.0-ULTRA/Touchline-1.9.0-ULTRA-arm64.apk) (broken — do not use) · [v1.8.0-GAME](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.8.0-GAME/Touchline-1.8.0-GAME-arm64.apk)
 
 It embeds CPython (Chaquopy) and runs `fm/` unmodified on `127.0.0.1` inside a WebView, so the
 whole simulation works with no internet connection. Career saves live in app-private storage.

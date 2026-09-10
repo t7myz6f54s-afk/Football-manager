@@ -2377,7 +2377,7 @@ def would_sell(con, save, seller_id, pid, fee, rng):
     # 4. Specific unrealistic block: Haaland to United, etc.
     # Players with loyalty >15 at elite clubs refuse moves to lesser rep clubs unless wanted_out
     vec = unpack_attrs(p["attrs"]) if isinstance(p["attrs"], str) else {}
-    loyalty = p.get("loyalty", 10) or vec.get("loyalty", 10) if isinstance(vec, dict) else 10
+    loyalty = (p["loyalty"] or vec.get("loyalty", 10)) if isinstance(vec, dict) else 10
     if p["ca"] >= 18.0 and loyalty >= 14 and not p["wanted_out"]:
         if buyer_club and buyer_club["rep"] < sc["rep"] - 5:
             return ("reject", 0, f"{p['name']} is committed to {sc['name']}'s project and turned down {buyer_club['name']}'s approach. He feels valued here.")
@@ -2448,7 +2448,7 @@ def player_willing(con, save, pid, wage, promise, rng):
     # === REALISM FACTORS ===
     
     # Loyalty - high loyalty players refuse to leave unless pushed
-    loyalty = p.get("loyalty", 10)
+    loyalty = p["loyalty"] if p["loyalty"] is not None else 10
     if loyalty >= 16 and not p["wanted_out"] and rep_diff < 5:
         score -= 1.1
         if p["ca"] >= 17:
@@ -2457,7 +2457,7 @@ def player_willing(con, save, pid, wage, promise, rng):
                 return False, f"{p['name']} is fiercely loyal to {old['name']} and has no interest in leaving. He considers himself part of the furniture here."
     
     # Ambition - ambitious players at small clubs want big moves, but not sideways
-    ambition = p.get("ambition", 10)
+    ambition = p["ambition"] if p["ambition"] is not None else 10
     if ambition >= 15 and old["rep"] < 75 and new["rep"] >= 85:
         score += 0.8  # Ambitious player at small club wants big club
     if ambition >= 16 and rep_diff < -10:

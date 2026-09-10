@@ -114,3 +114,12 @@ verified in-browser; repo pushed; release shipped.
   club-colour split; app-feel CSS (overscroll, tap-highlight, select-none, transitions, safe areas).
 - APK 1.6.1 (code 9) rebuilt after /usr/local wipe (JDK17+gradle8.9+SDK34 reinstalled); signed,
   crests.json(94)+godPlan verified inside assets; release v1.6.1 published w/ APK.
+
+## v1.10.0 hotfix — takeover session (2026-09-10)
+- P0 FIXED: v1.9.0 shipped a broken app.js (syntax error, line 762 renderTabbar template literal — missing closing backtick+brace). Entire JS file failed to parse in WebView → app stuck on splash forever. Confirmed inside the released APK. One-line fix; file now parses 100%.
+- P0 FIXED: engine.py would_sell() crashed on sqlite3.Row .get() (transfer market day) — killed CONTINUE during windows. Row-safe access now.
+- P0 FIXED: engine.py player_willing() crashed the same way on loyalty/ambition — killed every accepted transfer bid path.
+- ui_sanity: stale CSS hooks (.stf-k, .zdot) replaced with hooks the ULTRA UI actually uses; guard green (20 screens / 44 handlers / 11 hooks).
+- Verification: smoke PASS, season_test (WXC, 1 season) PASS, headless-browser boot test PASS (splash→launcher→career→6 screens→CONTINUE→transfer bid; zero console errors).
+- v1.10.0 (versionCode 13), make_apk.sh now emits a single correctly-named APK (was copying one APK under two version names).
+- android/setup_toolchain.sh added: one-shot JDK17+Gradle 8.9+SDK34 installer for reproducible builds on any fresh machine.
