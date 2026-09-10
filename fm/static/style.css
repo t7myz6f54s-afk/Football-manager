@@ -563,11 +563,14 @@ tbody tr.zr td:first-child { box-shadow: inset 2px 0 0 var(--red); }
 .zdot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
 .zdot.zp { background: var(--blue); } .zdot.zr { background: var(--red); }
 @media (max-width: 620px) {
-  table.mc th:nth-child(4), table.mc td:nth-child(4),
-  table.mc th:nth-child(5), table.mc td:nth-child(5),
-  table.mc th:nth-child(6), table.mc td:nth-child(6),
-  table.mc th:nth-child(7), table.mc td:nth-child(7),
-  table.mc th:nth-child(8), table.mc td:nth-child(8) { display: none; }
+  table.mh th:nth-child(4), table.mh td:nth-child(4),
+  table.mh th:nth-child(5), table.mh td:nth-child(5),
+  table.mh th:nth-child(6), table.mh td:nth-child(6) { display: none; }
+  table.mc:not(.mh) th:nth-child(4), table.mc:not(.mh) td:nth-child(4),
+  table.mc:not(.mh) th:nth-child(5), table.mc:not(.mh) td:nth-child(5),
+  table.mc:not(.mh) th:nth-child(6), table.mc:not(.mh) td:nth-child(6),
+  table.mc:not(.mh) th:nth-child(7), table.mc:not(.mh) td:nth-child(7),
+  table.mc:not(.mh) th:nth-child(8), table.mc:not(.mh) td:nth-child(8) { display: none; }
   table.mc tbody td, table.mc thead th { padding: 7px 6px; font-size: 12.5px; }
 }
 @media (max-width: 620px) {

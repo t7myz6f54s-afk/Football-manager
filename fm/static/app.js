@@ -1851,7 +1851,7 @@ async function renderCompHub(id) {
     ${tbl.length ? `<div class="card tight" style="padding:0;margin-top:10px">
       <div class="sec-h" style="padding:10px 12px 4px"><h3>${k.ctype === "continental" ? "League phase" : "Standings"}</h3>
         <span class="spacer"></span>${k.code === (G.home.club && G.home.club.league_code) ? '<button class="btn sm" onclick="go(\'table\')">Full</button>' : ""}</div>
-      <div class="tw"><table class="mc"><thead><tr><th class="num">#</th><th>Club</th><th class="num">P</th><th class="num">W</th>
+      <div class="tw"><table class="mc mh"><thead><tr><th class="num">#</th><th>Club</th><th class="num">P</th><th class="num">W</th>
         <th class="num">D</th><th class="num">L</th><th class="num">GD</th><th class="num">Pts</th></tr></thead>
         <tbody>${tbl.map(rowHtml).join("")}</tbody></table></div>
     </div>` : ""}
