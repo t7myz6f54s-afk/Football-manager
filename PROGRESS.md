@@ -70,3 +70,10 @@ Design tokens in style.css; nav restructure (bottom bar: Home/Squad/Tactics/Matc
 - README gained "What changed in 1.6" section + APK link bump (v1.6.0 tag).
 - Harness lesson: pass screen names verbatim to go(); 'name'.split('-')[1] yielded undefined → "Loading..." false alarm.
 - Pushed: README + mh commits.
+
+## Update ~03:40 UTC (hold cycles 4-6)
+- REGRESSION FIXED: audit2 16/16 screens clean @393 (was tactics/training/transfers overflow). Causes: select intrinsic min-width in fr tracks (global `select{min-width:0}` + `.grid>*{min-width:0}`), `.kv span{flex:none}` blocking shrink (phone override), negotiation action row now own line.
+- INCIDENT (00:18) fully closed: restored renderCalendar/Table/Comps/CompHub/Club from 292ccce; ui_sanity guard prevents recurrence; league/hub tables now stay tables on phones (.mc/.mh/.mp column sets).
+- NEW-CAREER FLOW tested end-to-end in UI: splash -> search/pick club (rich club card) -> manager name -> onboarding checklist (step-list CSS was missing, fixed) -> dashboard w/ explainer card. Arsenal career now live in dev server.
+- Tablet 768 pass: pitch/bench stack below 980px (label collisions fixed).
+- Pushed: overflow fixes + step-list.
