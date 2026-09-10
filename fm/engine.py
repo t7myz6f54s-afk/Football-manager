@@ -2926,6 +2926,9 @@ def renew_contract(con, save, pid, wage, years, promise, rng=None):
 
 
 def list_player(con, save, pid, listed=True):
+    p = con.execute("SELECT id, club_id FROM players WHERE id=?", (pid,)).fetchone()
+    if not p or p["club_id"] != save["club_id"]:
+        return {"ok": False, "msg": "Not your player."}
     con.execute("UPDATE players SET listed=? WHERE id=?", (1 if listed else 0, pid))
     return True
 
@@ -3087,6 +3090,56 @@ def renew_staff(con, save, staff_id, years=2):
     return {"ok": True, "name": s["name"], "contract_end": cend, "wage": new_wage}
 
 
+def _approach_human_players(con, save, rng):
+    """AI clubs actively target the human club's listed (or wanted-out) players.
+
+    The random AI-to-AI pool almost never lands on your squad by chance —
+    listing a player should make real clubs come calling. Uses its own
+    date-seeded RNG so the world's main stream is untouched when nobody is
+    listed (zero drift), and outcomes stay reproducible per date.
+    """
+    cid = save["club_id"]
+    win = window_state(d(save["date"]), save["season"])
+    win_open = win in ("summer", "winter")
+    diff = DIFFICULTY.get(save["career"]["difficulty"], DIFFICULTY["realistic"])
+    cands = con.execute("""SELECT * FROM players WHERE club_id=? AND squad IN ('First Team','Reserve')
+        AND (listed=1 OR wanted_out=1) ORDER BY id""", (cid,)).fetchall()
+    if not cands:
+        return
+    rr = random.Random(_seed("approach" + save["date"] + str(cid)))
+    for p in cands:
+        # one pending approach per player at a time
+        if con.execute("""SELECT COUNT(*) n FROM offers WHERE player_id=? AND from_id=?
+            AND status='incoming'""", (p["id"], cid)).fetchone()["n"]:
+            continue
+        prob = (0.055 if win_open else 0.012) if p["listed"] else (0.02 if win_open else 0.005)
+        if rr.random() >= prob:
+            continue
+        asking = asking_price(con, save, p["id"], rr)
+        fee = round(asking * rr.uniform(0.85, 1.3) * diff["neg"], 2)
+        if fee < p["value"] * 0.4:
+            continue
+        me = club(con, cid)
+        buyers = con.execute("""SELECT * FROM clubs WHERE id!=? AND code!='FREE' AND rep>=?
+            ORDER BY (id*104729 + CAST(rep AS INTEGER)*7919) % 1000003, id LIMIT 25""",
+            (cid, max(20, me["rep"] - 25))).fetchall()
+        if not buyers:
+            continue
+        able = [b for b in buyers if b["transfer_budget"] > fee * 0.6] or [buyers[0]]
+        buyer = able[0] if len(able) == 1 else rr.choice(able)
+        oid = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM offers").fetchone()[0]
+        con.execute("""INSERT INTO offers (id,player_id,from_id,to_id,fee,addons,wage,status,date,round,
+            clause,is_loan,loan_end,split,human,note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?)""",
+            (oid, p["id"], cid, buyer["id"], fee, "{}", round(p["wage"] * 1.1, 2),
+             "incoming", save["date"], 1, 0, 0, None, 0, "pending"))
+        add_inbox(con, save, "BID", "URGENT", f"Transfer bid: {p['name']}",
+                  f"{buyer['name']} bid {money(fee)} for {p['name']} ({p['age']}, {p['pos']}).\n"
+                  f"Your valuation: {money(p['value'])}. Asking price: {money(asking)}.\n"
+                  f"Contract until {p['contract_end']} · Wage €{p['wage']:.1f}k/week.",
+                  payload={"screen": "transfers", "action": "incoming_bid", "offer_id": oid,
+                           "pid": p["id"], "fee": fee, "asking": asking, "value": p["value"]})
+
+
 def _world_transfer_activity(con, save, rng, events, volume=3):
     """AI clubs buy, sell and loan players from each other (and poach yours)."""
     win = window_state(d(save["date"]), save["season"])
@@ -3181,6 +3234,7 @@ def _market_day(con, save, rng, events):
     elif dt.day >= 25 and win:
         vol += 2
     _world_transfer_activity(con, save, rng, events, volume=vol)
+    _approach_human_players(con, save, rng)
     if dt == W["close"]:
         add_inbox(con, save, "TRANSFER", "URGENT", "Summer transfer window closed",
                   "The summer window has shut. Unregistered players cannot play until January.",
@@ -3243,6 +3297,8 @@ def handle_incoming_bid(con, save, offer_id, decision, counter_fee=None, rng=Non
     o = con.execute("SELECT * FROM offers WHERE id=?", (offer_id,)).fetchone()
     if not o:
         return {"ok": False, "msg": "No such offer."}
+    if o["from_id"] != save["club_id"] or o["to_id"] == save["club_id"] or o["status"] != "incoming":
+        return {"ok": False, "msg": "This bid is no longer open for negotiation."}
     p = con.execute("SELECT * FROM players WHERE id=?", (o["player_id"],)).fetchone()
     buyer = club(con, o["to_id"])
     if decision == "accept":

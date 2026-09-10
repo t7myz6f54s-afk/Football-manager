@@ -179,7 +179,32 @@ Massive overhaul addressing **"It still feels like a browser trying to act like 
 
 A standalone build of the same game is published as a release asset:
 
-**[Touchline-1.15.0-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.15.0/Touchline-1.15.0-arm64.apk)** — ~14 MB, Android 7.0+, 64-bit ARM, versionCode 20.
+**[Touchline-1.16.0-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.16.0/Touchline-1.16.0-arm64.apk)** — ~14 MB, Android 7.0+, 64-bit ARM, versionCode 21.
+
+### What changed in 1.16 — THE MARKET COMES TO YOU
+
+Listed players now attract real bids. The AI transfer pool used to roll 14,000 names and
+almost never land on your squad — now, if a player of yours is **listed** (or marked
+*wants out*), clubs start calling during the window:
+
+- **Bids arrive in the News feed** — an URGENT "Transfer bid" item shows the fee, your
+  valuation, and your asking price, with **Accept / Counter / Reject** right in the mail
+- **FIFA-style negotiation** — countering opens a proper modal (bid, your valuation,
+  asking price, +10/+25/+50%/Ask shortcuts). The buyer can accept your number, meet you
+  part-way, or walk away; reject and they may come back with an improved bid
+- **Transfers screen** — a "Bids on your players" panel (fee, asking, contract, actions),
+  a "N" listed indicator while clubs are watching, and the Negotiations list now
+  highlights everything awaiting your move
+- **Poaching** — market cards show contract length and a LISTED tag; unlisted players get
+  a **Poach** button instead of Bid (their club will demand a lot more)
+- Values stay on the game's own scale — the fix is the mechanics plus the price context,
+  so every bid is legible against what the player is worth
+
+Verified: 10-check seeded suite (approaches, one-bid-per-player, determinism, negotiation
+outcomes), zero-drift proof, and a 3-season A/B run bit-identical to the previous code
+whenever nothing is listed.
+
+Previous: [1.15.0](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.15.0/Touchline-1.15.0-arm64.apk) (staff management), [1.14.1](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.14.1/Touchline-1.14.1-arm64.apk) (nav patch).
 
 ### What changed in 1.15 — STAFF MANAGEMENT
 Your backroom is now yours to manage. The **Staff screen** (Club section) has two halves:

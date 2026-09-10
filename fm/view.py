@@ -667,7 +667,7 @@ def scouting(con, save):
 
 def transfers(con, save, pos="", q="", max_fee=None, age_max=None, limit=80):
     sql = """SELECT p.id, p.name, p.age, p.pos, p.pos2, p.nat, p.ca, p.pa, p.value, p.wage,
-        p.contract_end, p.club_id, c.name club, c.rep club_rep, c.league FROM players p
+        p.contract_end, p.listed, p.wanted_out, p.club_id, c.name club, c.rep club_rep, c.league FROM players p
         LEFT JOIN clubs c ON c.id=p.club_id
         WHERE p.club_id IS NOT NULL AND p.club_id!=? AND p.squad IN ('First Team','Reserve')
           AND p.age BETWEEN 16 AND 38 AND COALESCE(c.code,'')!='FREE'"""
@@ -735,17 +735,23 @@ def my_offers(con, save, limit=30):
         d = dict(r)
         d["direction"] = "in" if d["to_id"] == save["club_id"] else "out"
         d["awaiting_you"] = (d["direction"] == "in" and d["status"] == "pending") or \
-                            (d["direction"] == "out" and d["status"] == "counter")
+                            (d["direction"] == "out" and d["status"] in ("counter", "incoming"))
         out.append(d)
     return out
 
 
 def incoming_offers(con, save):
+    """Bids from AI clubs on our players — we are the seller and must respond."""
     rows = con.execute("""SELECT o.*, p.name player, p.age, p.pos, p.ca, p.value, p.wage,
-        c.name from_club FROM offers o JOIN players p ON p.id=o.player_id
-        LEFT JOIN clubs c ON c.id=o.from_id WHERE o.to_id=? AND o.status='pending'
+        cb.name from_club FROM offers o JOIN players p ON p.id=o.player_id
+        LEFT JOIN clubs cb ON cb.id=o.to_id WHERE o.from_id=? AND o.status='incoming'
         ORDER BY o.id DESC""", (save["club_id"],)).fetchall()
-    return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["asking"] = round(E.asking_price(con, save, r["player_id"]), 2)
+        out.append(d)
+    return out
 
 
 def youth(con, save):
