@@ -632,44 +632,87 @@ KO_NAMES = {"R16": "Round of 16", "R32": "Round of 32", "R64": "First Round", "Q
 
 # ------------------------------------------------------------------ AI matches
 def ai_sim(con, save, fx, rng, difficulty="realistic"):
+    """PREMIUM REALISM: Stronger teams win consistently, prevents Fulham topping PL."""
     hs = club_strength(con, fx["home_id"], save)
     aws = club_strength(con, fx["away_id"], save)
     ctype = fx.get("ctype") or "league"
     comp_row = comp(con, fx["comp_id"]) if fx["comp_id"] else None
     pres = (comp_row["prestige"] / 100.0) if comp_row else 0.6
-    k = 1.18
+    
+    home_club = club(con, fx["home_id"])
+    away_club = club(con, fx["away_id"])
+    home_rep = home_club["rep"] if home_club else 70
+    away_rep = away_club["rep"] if away_club else 70
+    
+    is_friendly = ctype == "friendly"
+    friendly_mod = 1.0
+    if is_friendly:
+        friendly_mod = 0.72
+        if home_rep >= 85:
+            friendly_mod *= 0.85
+        if away_rep >= 85:
+            friendly_mod *= 0.85
+    
+    k = 1.25
     ratio = (hs["attack"] / max(aws["defence"], 1.0))
     xratio = (aws["attack"] / max(hs["defence"], 1.0))
-    eh = k * (ratio ** 0.80) * 1.06 * (0.90 + 0.18 * hs["condition"])
-    ea = k * (xratio ** 0.80) * 0.92 * (0.90 + 0.18 * aws["condition"])
-    if ctype == "friendly":
-        eh *= 0.8; ea *= 0.8
-    eh = max(0.18, min(4.4, eh)); ea = max(0.12, min(4.2, ea))
+    
+    rep_bonus_h = 1.0 + (home_rep - 70) * 0.008
+    rep_bonus_a = 1.0 + (away_rep - 70) * 0.008
+    
+    eh = k * (ratio ** 1.35) * 1.08 * (0.88 + 0.20 * hs["condition"]) * rep_bonus_h
+    ea = k * (xratio ** 1.35) * 0.94 * (0.88 + 0.20 * aws["condition"]) * rep_bonus_a
+    
+    if not is_friendly:
+        home_adv = 1.12 + (home_rep - 70) * 0.003
+        eh *= home_adv
+    
+    if is_friendly:
+        eh *= friendly_mod
+        ea *= friendly_mod
+        eh *= rng.uniform(0.85, 1.15)
+        ea *= rng.uniform(0.85, 1.15)
+    
+    eh = max(0.15, min(5.2, eh))
+    ea = max(0.10, min(4.8, ea))
+    
     diffmul = DIFFICULTY.get(difficulty, DIFFICULTY["realistic"])
-    if save and fx["home_id"] != save["club_id"] and fx["away_id"] != save["club_id"]:
-        pass
-    hg = _poisson(rng, eh); ag = _poisson(rng, ea)
-    xgh = round(hg * rng.uniform(0.7, 1.35) + rng.uniform(0.1, 0.6), 2)
-    xga = round(ag * rng.uniform(0.7, 1.35) + rng.uniform(0.05, 0.5), 2)
+    if save and fx["home_id"] == save["club_id"]:
+        ea *= diffmul["ai_strength"]
+    if save and fx["away_id"] == save["club_id"]:
+        eh *= diffmul["ai_strength"]
+    
+    hg = _poisson(rng, eh)
+    ag = _poisson(rng, ea)
+    
+    xgh = round(hg * rng.uniform(0.75, 1.25) + rng.uniform(0.15, 0.65) * (1 + (hs["attack"]-12)/10), 2)
+    xga = round(ag * rng.uniform(0.75, 1.25) + rng.uniform(0.10, 0.55) * (1 + (aws["attack"]-12)/10), 2)
+    
     winner = None
     pens = None
     if ctype in ("cup", "continental") and fx.get("stage") not in ("league",) and hg == ag:
-        # knockout: extra time then pens
-        if rng.random() < 0.35:
+        if rng.random() < 0.38:
             if rng.random() < 0.5:
                 hg += 1
             else:
                 ag += 1
     if ctype in ("cup", "continental") and fx.get("stage") != "league" and hg == ag and fx.get("stage") in ("SF", "F", "R16", "QF", "R32", "R64", "R1", "R2", "R3", "R4", "R5", "R6", "R7"):
-        pens = "H" if rng.random() < (0.53 if True else 0.5) else "A"
+        pens = "H" if rng.random() < 0.53 else "A"
         winner = pens
-    data = dict(xg_home=xgh, xg_away=xga,
-                shots_home=max(hg * 3, int(rng.gauss(9 + (hs["attack"] - aws["defence"]) * 1.4, 3))),
-                shots_away=max(ag * 3, int(rng.gauss(8 + (aws["attack"] - hs["defence"]) * 1.4, 3))),
-                possession_home=int(max(28, min(72, 50 + (hs["overall"] - aws["overall"]) * 3.2 + rng.gauss(0, 5)))),
-                penalties=pens, ai=True)
-    data["shots_on_target_home"] = min(data["shots_home"], int(hg + rng.randint(1, 4)))
-    data["shots_on_target_away"] = min(data["shots_away"], int(ag + rng.randint(0, 3)))
+    
+    shot_diff_h = (hs["attack"] - aws["defence"]) * 1.8
+    shot_diff_a = (aws["attack"] - hs["defence"]) * 1.8
+    
+    data = dict(
+        xg_home=xgh, xg_away=xga,
+        shots_home=max(hg * 2 + 2, int(rng.gauss(11 + shot_diff_h, 2.8))),
+        shots_away=max(ag * 2 + 2, int(rng.gauss(9 + shot_diff_a, 2.8))),
+        possession_home=int(max(28, min(72, 50 + (hs["overall"] - aws["overall"]) * 4.2 + (home_rep - away_rep)*0.12 + rng.gauss(0, 4)))),
+        penalties=pens, ai=True,
+        friendly_rotation=is_friendly
+    )
+    data["shots_on_target_home"] = min(data["shots_home"], max(hg, int(hg * 1.8 + rng.randint(1, 3))))
+    data["shots_on_target_away"] = min(data["shots_away"], max(ag, int(ag * 1.8 + rng.randint(0, 2))))
     return hg, ag, data
 
 
@@ -940,17 +983,19 @@ def _setup_human_match(con, save, fx, rng=None, custom_lineup=None):
     players = load_players(con, cid)
     tac = get_tactics(con, save)
     selected = custom_lineup or json.loads(save["flags"].get("selected_xi") or "[]")
+    ctype = fx.get("ctype") or "league"
+    comp_for_lineup = "friendly" if ctype == "friendly" else "league"
     if selected and len(selected) == 11:
         xi, bench = _lineup_from_selection(players, selected, tac)
     else:
-        xi, bench = M.build_lineup(players, tac)
+        xi, bench = M.build_lineup(players, tac, competition=comp_for_lineup)
     if len(xi) < 11:
         return None, None
     hrating = M.team_rating(xi, tac)
     # opposition
     opp_tac = ai_tactics(con, opp_id)
     opp_players = load_players(con, opp_id)
-    oxi, obench = M.build_lineup(opp_players, opp_tac)
+    oxi, obench = M.build_lineup(opp_players, opp_tac, competition=comp_for_lineup)
     if len(oxi) < 11:
         opp_rating = club_strength(con, opp_id, save)
         oxi = []
@@ -969,9 +1014,9 @@ def _setup_human_match(con, save, fx, rng=None, custom_lineup=None):
                 rating=opp_rating, human=not is_home)
     if not is_home:
         home, away = away, home
+    comp_type = "friendly" if ctype == "friendly" else ("cup" if ctype in ("cup", "continental") and (fx.get("stage") not in ("league",)) else "league")
     runner = M.MatchRunner(home, away, rng=rng, home_adv=True, weather=weather, referee=ref,
-                           competition=("cup" if ctype in ("cup", "continental") and
-                                        (fx.get("stage") not in ("league",)) else "league"),
+                           competition=comp_type,
                            extra_time_allowed=ctype in ("cup", "continental") and fx.get("stage") != "league")
     runner.run_first_half()
     ctx = dict(cid=cid, is_home=is_home, opp_id=opp_id, players=players, tac=tac, xi=xi, bench=bench,
@@ -1413,6 +1458,71 @@ def tick_day(con, save, rng, auto_human=False):
                          (ds(dt),)).fetchall():
         pass
     _check_competitions(con, save, rng)
+    # ---- international break notifications — meaningful breaks
+    prev_day = dt - timedelta(days=1)
+    was_break = in_int_break(prev_day, save["season"])
+    is_break = in_int_break(dt, save["season"])
+    if is_break and not was_break:
+        # Entering international break — pick callups without needing extra column, store in save flags
+        callup_ids = save["flags"].get("int_callups", [])
+        if cid and not callup_ids:
+            candidates = con.execute("SELECT id, name, ca FROM players WHERE club_id=? AND ca>=13.5 AND condition='fit' ORDER BY ca DESC LIMIT 12", (cid,)).fetchall()
+            if candidates:
+                k = min(len(candidates), rng.randint(3, 7))
+                callup_ids = rng.sample([r[0] for r in candidates], k=k)
+                save["flags"]["int_callups"] = callup_ids
+                # Increase fatigue for callup simulation
+                for pid in callup_ids:
+                    con.execute("UPDATE players SET fatigue=MIN(100,fatigue+8) WHERE id=?", (pid,))
+        away_count = len(callup_ids)
+        # Get names
+        names = []
+        if callup_ids:
+            for pid in callup_ids[:5]:
+                r = con.execute("SELECT name FROM players WHERE id=?", (pid,)).fetchone()
+                if r:
+                    names.append(r[0].split()[-1])
+        name_str = ", ".join(names) + (f" +{away_count-len(names)} more" if away_count>5 else "") if names else "several"
+        add_inbox(con, save, "INTERNATIONAL", "IMPORTANT", f"🌍 International break — {away_count} players away ({name_str})",
+                  f"The international break has begun ({dt.strftime('%d %b %Y')} — {dt.strftime('%A')}). Squads depleted worldwide.\n\n"
+                  f"YOUR CALL-UPS ({away_count}): {name_str}\n"
+                  f"They will miss club training and return with extra fatigue. Some may pick up knocks on international duty.\n\n"
+                  f"WHAT TO DO IN THE BREAK:\n"
+                  f"• Scout foreign leagues — they continue playing, great time to find hidden gems\n"
+                  f"• Arrange friendlies — test youth/reserves with real friendly rotation (70% intensity, rotated squads)\n"
+                  f"• Rest tired starters — use Recovery sessions\n"
+                  f"• Negotiate contracts — no match pressure\n"
+                  f"• Check youth intake progress\n\n"
+                  f"League football resumes after the break. Use this time wisely — top managers do.",
+                  payload={"screen": "squad"})
+        events.append(dict(kind="international", text=f"International break begins — {away_count} players ({name_str}) away on duty.", priority="IMPORTANT"))
+    elif not is_break and was_break:
+        # Exiting break
+        callup_ids = save["flags"].pop("int_callups", [])
+        returned = len(callup_ids)
+        injured_on_duty = 0
+        if cid and callup_ids:
+            for pid in callup_ids:
+                if rng.random() < 0.14:  # 14% return with fatigue/injury
+                    if rng.random() < 0.35:
+                        # Injury on duty
+                        nm, days = _roll_injury(rng, {"age": 26}, save)
+                        con.execute("UPDATE players SET condition='injured', injury_name=?, return_date=?, fatigue=MIN(100,fatigue+20) WHERE id=?",
+                                    (nm, ds(dt + timedelta(days=days)), pid))
+                        injured_on_duty += 1
+                    else:
+                        con.execute("UPDATE players SET fatigue=MIN(100,fatigue+22), fitness=MAX(65,fitness-6) WHERE id=?", (pid,))
+                else:
+                    con.execute("UPDATE players SET fatigue=MIN(100,fatigue+10) WHERE id=?", (pid,))
+        add_inbox(con, save, "INTERNATIONAL", "ROUTINE" if injured_on_duty==0 else "IMPORTANT",
+                  f"International break ends — {returned} return" + (f", {injured_on_duty} injured" if injured_on_duty else ""),
+                  f"The international break is over ({dt.strftime('%d %b')}).\n\n"
+                  f"{returned} players return to your squad.\n"
+                  + (f"⚠️ {injured_on_duty} picked up injuries on international duty — check medical centre.\n" if injured_on_duty else "All returned fit, though some are fatigued from travel.\n")
+                  + f"\nLeague football resumes now. The run-in begins — board and fans will be watching.",
+                  payload={"screen": "squad"})
+        events.append(dict(kind="international", text=f"International break ends — {returned} players return" + (f", {injured_on_duty} injured on duty" if injured_on_duty else "") + ".", priority="IMPORTANT" if injured_on_duty else "ROUTINE"))
+
     # ---- weekly events
     if dt.weekday() == 0:
         _weekly(con, save, rng, events)
@@ -2184,21 +2294,46 @@ def asking_price(con, save, pid, rng=None):
         mult = 0.35
     elif years_left == 1:
         mult = 0.72
+    elif years_left >= 4:
+        mult *= 1.35
     if c["profile"] in ("sell", "dev"):
         mult *= 1.22
     if c["profile"] in ("elite", "trad") and p["ca"] > 14:
-        mult *= 1.18
+        mult *= 1.45
+    # Superstar protection - elite players cost extreme premium
+    if p["ca"] >= 18.0:
+        mult *= 2.2
+    elif p["ca"] >= 17.0:
+        mult *= 1.7
     if p["listed"]:
         mult *= 0.85
     if p["wanted_out"]:
         mult *= 0.92
+    # Young elite premium
+    if p["age"] <= 23 and p["ca"] >= 15:
+        mult *= 1.35
     return round(base * mult, 2)
 
 
 def would_sell(con, save, seller_id, pid, fee, rng):
-    """AI club decision on an incoming bid. Returns (decision, counter_fee, note)."""
+    """AI club decision on an incoming bid. Returns (decision, counter_fee, note).
+    
+    PREMIUM REALISM: Prevents unrealistic transfers like United buying Haaland,
+    adds rivalry blocks, superstar protection, loyalty factors.
+    """
     p = con.execute("SELECT * FROM players WHERE id=?", (pid,)).fetchone()
+    if not p:
+        return ("reject", 0, "Player not found.")
     sc = club(con, seller_id)
+    if not sc:
+        return ("reject", 0, "Seller club not found.")
+    
+    # Get buyer info for rivalry checks
+    buyer_id = save.get("club_id") if save else None
+    buyer_club = club(con, buyer_id) if buyer_id else None
+    buyer_code = buyer_club["code"] if buyer_club else ""
+    seller_code = sc["code"]
+    
     ask = asking_price(con, save, pid)
     squad_n = con.execute("SELECT COUNT(*) n FROM players WHERE club_id=? AND squad IN ('First Team','Reserve')",
                           (seller_id,)).fetchone()["n"]
@@ -2208,47 +2343,176 @@ def would_sell(con, save, seller_id, pid, fee, rng):
     ratio = fee / max(ask, 0.05)
     window = window_state(d(save["date"]), save["season"])
     thresh = 0.92
+    
+    # === REALISM BLOCKS ===
+    
+    # 1. Superstar protection - CA 19+ players at elite clubs almost never sold
+    if p["ca"] >= 18.5 and sc["rep"] >= 85:
+        if not p["listed"] and not p["wanted_out"]:
+            # Need astronomical fee
+            if ratio < 2.5:
+                return ("reject", 0, f"{sc['name']} consider {p['name']} untouchable. It would take an astronomical offer (€{ask*2.5:.1f}m+) to even consider.")
+            thresh += 0.8
+    
+    # 2. Rivalry block - direct rivals won't sell to each other easily
+    rivals = C.RIVALRIES.get(seller_code, [])
+    if buyer_code in rivals:
+        # Huge premium for rivals, or outright refusal for elite players
+        if p["ca"] >= 17.0:
+            return ("reject", 0, f"{sc['name']} would never sell {p['name']} to rivals {buyer_club['name'] if buyer_club else 'a rival'}. The board blocked the move.")
+        thresh += 0.65
+        if ratio < 1.8:
+            counter = round(ask * 2.2, 2)
+            return ("counter", counter, f"Rivalry premium: {sc['name']} want {money(counter)} to sell to {buyer_club['name'] if buyer_club else 'a rival'}.")
+    
+    # 3. Elite club stacking prevention - top clubs can't easily buy from other top clubs
+    if buyer_club and sc["rep"] >= 88 and buyer_club["rep"] >= 88 and p["ca"] >= 17.0:
+        # Elite to elite transfers need huge fees
+        if seller_code in C.ELITE_CLUBS and buyer_code in C.ELITE_CLUBS:
+            if not p["wanted_out"] and p["loyalty"] > 13:
+                thresh += 0.45
+                if ratio < 1.5:
+                    return ("reject", 0, f"{p['name']} is settled at {sc['name']} and has no desire to join another elite club. He rejected the approach.")
+    
+    # 4. Specific unrealistic block: Haaland to United, etc.
+    # Players with loyalty >15 at elite clubs refuse moves to lesser rep clubs unless wanted_out
+    vec = unpack_attrs(p["attrs"]) if isinstance(p["attrs"], str) else {}
+    loyalty = p.get("loyalty", 10) or vec.get("loyalty", 10) if isinstance(vec, dict) else 10
+    if p["ca"] >= 18.0 and loyalty >= 14 and not p["wanted_out"]:
+        if buyer_club and buyer_club["rep"] < sc["rep"] - 5:
+            return ("reject", 0, f"{p['name']} is committed to {sc['name']}'s project and turned down {buyer_club['name']}'s approach. He feels valued here.")
+    
+    # 5. Contract length protection
+    years_left = max(0, int(p["contract_end"][:4]) - 2026) if p["contract_end"] else 0
+    if years_left >= 3 and p["ca"] >= 16.0:
+        thresh += 0.15 * (years_left - 2)
+    
+    # === STANDARD LOGIC ===
     if p["listed"] or p["wanted_out"]:
-        thresh -= 0.14
+        thresh -= 0.22
     if need_cover and squad_n < 22:
-        thresh += 0.14
+        thresh += 0.22
     if not window:
-        thresh += 0.35
+        thresh += 0.45
     if sc["profile"] in ("elite",) and p["ca"] > 15:
-        thresh += 0.20
-    if fee > sc["cash"] * 0 and ratio > 1.6:
-        return ("accept", fee, "The offer is far above their valuation.")
+        thresh += 0.30
+    # Mid-table clubs won't sell star players mid-season cheaply
+    if sc["rep"] >= 70 and sc["rep"] <= 82 and p["ca"] >= 14.5 and not window:
+        thresh += 0.25
+    
+    if ratio >= 2.0:
+        return ("accept", fee, "The offer is far above their valuation — they reluctantly accept.")
     if ratio >= thresh:
         return ("accept", fee, "The offer meets their valuation.")
-    if ratio >= thresh - 0.30:
-        counter = round(max(fee * 1.12, ask * thresh * 1.02), 2)
+    if ratio >= thresh - 0.35:
+        counter = round(max(fee * 1.18, ask * thresh * 1.05), 2)
         return ("counter", counter, f"They want closer to {money(counter)}.")
     return ("reject", 0, f"They are not interested at {money(fee)} — they value him around {money(ask)}.")
 
 
 def player_willing(con, save, pid, wage, promise, rng):
-    """Would the player accept personal terms?"""
+    """Would the player accept personal terms? PREMIUM REALISM - loyalty, ambition, rivalries matter."""
     p = con.execute("SELECT * FROM players WHERE id=?", (pid,)).fetchone()
-    old = club(con, p["club_id"])
-    new = club(con, save["club_id"])
+    if not p:
+        return False, "Player not found."
+    old = club(con, p["club_id"]) if p["club_id"] else None
+    new = club(con, save["club_id"]) if save.get("club_id") else None
+    if not old or not new:
+        return True, "Free agent — no club loyalty."
+    
+    old_code = old["code"] if old else ""
+    new_code = new["code"] if new else ""
+    
     score = 0.0
-    score += (new["rep"] - old["rep"]) / 22.0
-    score += (wage - p["wage"]) / max(p["wage"], 0.5) * 0.9
+    
+    # Rep difference - players want to move up, not down (unless huge wages)
+    rep_diff = new["rep"] - old["rep"]
+    score += rep_diff / 18.0
+    
+    # Wage improvement - more important for lower CA players
+    wage_ratio = wage / max(p["wage"], 0.5)
+    if p["ca"] < 14:
+        score += (wage_ratio - 1.0) * 1.2  # Lower players more wage-motivated
+    else:
+        score += (wage_ratio - 1.0) * 0.7  # Stars care less about wages
+    
+    # Playing time promise
     lvl = C.PROMISE_LEVEL.get(promise, 3)
     want = C.PROMISE_LEVEL.get(p["promise"], 3)
-    score += (lvl - want) * 0.28
+    score += (lvl - want) * 0.32
+    
+    # Wanted out - big boost
     if p["wanted_out"]:
-        score += 0.8
-    if p["loyalty"] > 14 and new["rep"] < old["rep"]:
-        score -= 0.5
-    if p["ambition"] > 15 and new["rep"] < old["rep"] - 8:
-        score -= 0.7
-    score += rng.gauss(0, 0.45)
-    if score > 0.35:
-        return True, "He is keen on the move."
-    if score > -0.1:
-        return None, "He wants to think about it — better terms might convince him."
-    return False, "He has turned down the approach."
+        score += 1.2
+    
+    # === REALISM FACTORS ===
+    
+    # Loyalty - high loyalty players refuse to leave unless pushed
+    loyalty = p.get("loyalty", 10)
+    if loyalty >= 16 and not p["wanted_out"] and rep_diff < 5:
+        score -= 1.1
+        if p["ca"] >= 17:
+            # Super loyal star - almost never leaves
+            if rng.random() < 0.75:
+                return False, f"{p['name']} is fiercely loyal to {old['name']} and has no interest in leaving. He considers himself part of the furniture here."
+    
+    # Ambition - ambitious players at small clubs want big moves, but not sideways
+    ambition = p.get("ambition", 10)
+    if ambition >= 15 and old["rep"] < 75 and new["rep"] >= 85:
+        score += 0.8  # Ambitious player at small club wants big club
+    if ambition >= 16 and rep_diff < -10:
+        score -= 1.0  # Ambitious player won't go to much smaller club
+    
+    # Rivalry block - players rarely move directly between rivals
+    rivals = C.RIVALRIES.get(old_code, [])
+    if new_code in rivals:
+        if p["ca"] >= 16 or loyalty >= 13:
+            # Fan backlash fear
+            if rng.random() < 0.65:
+                return False, f"{p['name']} refused to even consider {new['name']} out of respect for {old['name']} fans. The rivalry is too intense."
+        score -= 0.9
+    
+    # Elite club loyalty - Haaland won't join United from City
+    if old["rep"] >= 90 and p["ca"] >= 17.5 and loyalty >= 12:
+        if new["rep"] < old["rep"] - 3 and not p["wanted_out"]:
+            return False, f"{p['name']} is committed to {old['name']}'s project. He laughed off {new['name']}'s interest — 'I'm winning things here.'"
+    
+    # Age factor - older players less likely to move for non-wage reasons
+    if p["age"] >= 30 and rep_diff < 0:
+        score -= 0.4
+    
+    # Contract situation - if contract expiring, more willing
+    try:
+        years_left = max(0, int(p["contract_end"][:4]) - 2026) if p["contract_end"] else 1
+        if years_left <= 1:
+            score += 0.5
+    except:
+        pass
+    
+    score += rng.gauss(0, 0.38)
+    
+    if score > 0.45:
+        # Generate enthusiastic response
+        reasons = []
+        if rep_diff > 8:
+            reasons.append(f"the chance to join {new['name']}")
+        if wage_ratio > 1.4:
+            reasons.append("the improved wages")
+        if lvl > want + 1:
+            reasons.append(f"the promise of being a {promise}")
+        reason_str = " and ".join(reasons) if reasons else "the move"
+        return True, f"He is excited by {reason_str} and keen on the move."
+    if score > -0.15:
+        return None, f"He is considering {new['name']}'s offer but wants to think. Better terms or assurances might convince him."
+    
+    # Rejection with reason
+    if loyalty >= 15:
+        return False, f"He feels loyal to {old['name']} and turned down the approach. 'This club believed in me.'"
+    if rep_diff < -12:
+        return False, f"He has no interest in stepping down from {old['name']} to {new['name']}. His agent said it's not a sporting progression."
+    if new_code in rivals:
+        return False, f"He doesn't want to be branded a traitor by {old['name']} fans. Moving to {new['name']} would be career suicide here."
+    return False, "He has turned down the approach — the project doesn't excite him."
 
 
 def make_offer(con, save, pid, fee, wage, years, promise, is_loan=False, loan_end=None,

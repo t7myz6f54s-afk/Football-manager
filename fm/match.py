@@ -148,6 +148,7 @@ def team_rating(xi, tactics, opposition=None):
 
     xi: list of dicts {player, slot, role, duty}
     tactics: dict(formation, mentality, instr, familiarity)
+    PREMIUM REALISM: Stronger teams have more pronounced advantage.
     """
     fam = tactics.get("familiarity", 60.0)
     instr = tactics.get("instr", dict(C.INSTR_DEFAULT))
@@ -166,6 +167,8 @@ def team_rating(xi, tactics, opposition=None):
     setpiece_best = 0.0
     gk_q = 8.0
     conds = []
+    ca_sum = 0.0
+    consistency_sum = 0.0
     for it in xi:
         p = it["player"]
         slot = it["slot"]
@@ -186,10 +189,32 @@ def team_rating(xi, tactics, opposition=None):
         if slot == "GK":
             gk_q = q
         wk += q
+        ca_sum += p.get("ca", 10)
+        # Consistency matters - top teams have more consistent performers
+        consistency_sum += v.get("consistency", 10) if "consistency" in v else p.get("consistency", 10)
     n = max(1, len(xi))
     attack = att / max(atk_w, 0.001)
     defence = dfn / max(dfn_w, 0.001)
     overall = wk / n
+    
+    # PREMIUM REALISM: Elite team bonus - higher CA squads get multiplicative advantage
+    avg_ca = ca_sum / n
+    avg_cons = consistency_sum / n
+    # Teams averaging 16+ CA get boost, teams averaging <12 get penalty
+    if avg_ca >= 16.0:
+        elite_bonus = 1.0 + (avg_ca - 16.0) * 0.12  # up to ~1.36x for 19 avg
+        attack *= elite_bonus
+        defence *= elite_bonus
+    elif avg_ca <= 12.0:
+        # Weaker teams penalized slightly - prevents Fulham topping PL
+        weak_penalty = 1.0 - (12.0 - avg_ca) * 0.06
+        attack *= max(0.82, weak_penalty)
+        defence *= max(0.82, weak_penalty)
+    
+    # Consistency bonus - consistent teams perform more reliably
+    if avg_cons >= 14:
+        attack *= 1.0 + (avg_cons - 14) * 0.02
+        defence *= 1.0 + (avg_cons - 14) * 0.02
 
     # instruction / mentality effects
     loe = LEVEL5.get(instr.get("line_of_engagement", "Standard"), 0)
@@ -228,16 +253,50 @@ def team_rating(xi, tactics, opposition=None):
     )
 
 
-def build_lineup(club_players, tactics, n=11, prefer=None, exclude=None):
-    """Pick a best XI for formation slots, respecting fitness/availability."""
+def build_lineup(club_players, tactics, n=11, prefer=None, exclude=None, competition="league"):
+    """Pick a best XI for formation slots, respecting fitness/availability.
+    PREMIUM REALISM: Friendlies rotate heavily — youth, reserves, low intensity.
+    """
     formation = C.FORMATIONS.get(tactics.get("formation", "4-3-3 DM Wide"))
     if formation is None:
         formation = C.FORMATIONS["4-3-3 DM Wide"]
     roles = tactics.get("roles", {})
     exclude = exclude or set()
-    avail = [p for p in club_players
-             if p["id"] not in exclude and p["condition"] == "fit" and p["suspended"] <= 0
-             and p["squad"] in ("First Team", "Reserve")]
+    
+    is_friendly = competition == "friendly"
+    
+    if is_friendly:
+        # FRIENDLY REALISM: Rotate heavily, use youth/reserves
+        # Top teams rest stars, give youth chance
+        first_team = [p for p in club_players if p["id"] not in exclude and p["condition"] == "fit" and p["suspended"] <= 0 and p["squad"] == "First Team"]
+        reserves = [p for p in club_players if p["id"] not in exclude and p["condition"] == "fit" and p["suspended"] <= 0 and p["squad"] == "Reserve"]
+        youth = [p for p in club_players if p["id"] not in exclude and p["condition"] == "fit" and p["squad"] in ("U21", "Youth")]
+        
+        # Mix: 3-4 first team, 4-5 reserves, 2-3 youth for realism
+        import random as _rnd
+        _rng = _rnd.Random()
+        _rng.shuffle(first_team)
+        _rng.shuffle(reserves)
+        _rng.shuffle(youth)
+        
+        # For elite clubs (rep >= 85), even more rotation
+        avg_ca = sum(p.get("ca", 10) for p in club_players) / max(len(club_players), 1)
+        if avg_ca >= 15.5:  # Elite squad
+            avail = youth[:4] + reserves[:5] + first_team[:3]
+        else:
+            avail = first_team[:5] + reserves[:4] + youth[:3]
+        
+        if len(avail) < 11:
+            # Fill up with whatever available
+            all_avail = [p for p in club_players if p["id"] not in exclude and p["condition"] == "fit" and p["suspended"] <= 0]
+            for p in all_avail:
+                if p["id"] not in [x["id"] for x in avail] and len(avail) < 14:
+                    avail.append(p)
+    else:
+        avail = [p for p in club_players
+                 if p["id"] not in exclude and p["condition"] == "fit" and p["suspended"] <= 0
+                 and p["squad"] in ("First Team", "Reserve")]
+    
     used = set()
     xi = []
     for i, slot in enumerate(formation):
@@ -253,14 +312,17 @@ def build_lineup(club_players, tactics, n=11, prefer=None, exclude=None):
             duty = duty if duty in C.DUTIES.get(slot, ["Support"]) else "Support"
             cond = player_condition(p)
             q = player_match_quality(p, slot, role, duty, tactics.get("familiarity", 60), cond)
-            # small bonus for declared preference
             if prefer and p["id"] in prefer:
                 q *= 1.02
+            # Friendly: give youth a boost to get selected
+            if is_friendly and p["squad"] in ("U21", "Youth"):
+                q *= 1.35
+            if is_friendly and p["squad"] == "Reserve":
+                q *= 1.15
             if q > best_q:
                 best_q = q
                 best = (p, slot, role, duty)
         if best is None:
-            # nobody left: pull from youth
             rest = [p for p in club_players if p["id"] not in used and p["condition"] == "fit"]
             if not rest:
                 break
@@ -270,7 +332,15 @@ def build_lineup(club_players, tactics, n=11, prefer=None, exclude=None):
             best = (p, slot, role, duty)
         used.add(best[0]["id"])
         xi.append(dict(player=best[0], slot=best[1], role=best[2], duty=best[3]))
-    bench = [p for p in sorted(avail, key=lambda x: -x["ca"]) if p["id"] not in used][:9]
+    
+    # Bench also rotated for friendlies
+    if is_friendly:
+        remaining = [p for p in club_players if p["id"] not in used and p["condition"] == "fit" and p["suspended"] <= 0]
+        # Sort by youth first for friendlies
+        remaining.sort(key=lambda x: (0 if x["squad"] in ("Youth","U21") else 1 if x["squad"] == "Reserve" else 2, -x["ca"]))
+        bench = remaining[:9]
+    else:
+        bench = [p for p in sorted(avail, key=lambda x: -x["ca"]) if p["id"] not in used][:9]
     return xi, bench
 
 
@@ -390,12 +460,22 @@ class MatchRunner:
     def chance_rate(self, side):
             tr = self.rating_of(side)
             op = self.opp_of(side)
-            r = (tr["attack"] / max(op["defence"], 1)) ** 0.85
+            # PREMIUM REALISM: More pronounced advantage for stronger teams
+            # Exponent 1.15 instead of 0.85 increases elite dominance
+            r = (tr["attack"] / max(op["defence"], 1)) ** 1.15
             r *= 0.285 + 0.050 * tr["tempo"] + 0.032 * tr["mshift"]
             r *= 1.0 + 0.12 * (tr["condition"] - 1.0)
             r *= self.weather["tempo"]
+            
+            # Friendly realism - lower intensity
+            if self.competition == "friendly":
+                r *= 0.72
+                # Top teams rotate in friendlies - reduce chance rate
+                if tr["overall"] >= 16:
+                    r *= 0.82
+            
             if side == "H":
-                r *= self.adv * 1.04
+                r *= self.adv * 1.06
             return max(0.03, r)
 
     def state_adjust(self, minute):

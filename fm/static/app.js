@@ -25,7 +25,7 @@ const api = {
   }
 };
 
-const VERSION = "1.6.1";
+const VERSION = "1.7.0-PREMIUM";
 let DEAD = false;
 function deadScreen() {
   if (DEAD) return; DEAD = true;
@@ -539,6 +539,60 @@ function formPills(form, n) {
   return (form || []).slice(0, n || 6).map(x =>
     `<i class="fm-i ${x.res}" title="${esc(x.score || "")}">${x.res}</i>`).join("");
 }
+/* Premium helpers for rivalries and press */
+function isRivalry(homeCode, awayCode) {
+  try {
+    const r = (G.static && G.static.rivalries) || {};
+    if (!r) return null;
+    const rivals = r[homeCode] || [];
+    if (rivals.includes(awayCode)) return { type: "derby", name: (G.static.derby_names && G.static.derby_names[homeCode + "-" + awayCode]) || (G.static.derby_names && G.static.derby_names[awayCode + "-" + homeCode]) || "Derby" };
+    // Check reverse
+    const rivals2 = r[awayCode] || [];
+    if (rivals2.includes(homeCode)) return { type: "derby", name: (G.static.derby_names && G.static.derby_names[awayCode + "-" + homeCode]) || "Derby" };
+    return null;
+  } catch(e) { return null; }
+}
+function pressHypeForFixture(f) {
+  if (!f) return "";
+  const rivalry = isRivalry(f.home_code, f.away_code);
+  const isBig = (f.code === "UCL" || f.code === "ENG1" || (f.stage && f.stage !== "league"));
+  const isFriendly = f.code === "friendly" || (f.comp||"").toLowerCase().includes("friendly");
+  if (isFriendly) {
+    return `<div class="int-break" style="background:linear-gradient(135deg, #1a2e1a, #162a16);border-color:#2a4a2a">
+      <h3 style="color:#35e08a">🤝 Friendly — experimentation time</h3>
+      <p style="color:#8ab88a">Real teams rotate heavily in friendlies. Expect youth, reserves, low intensity. Perfect to test tactics and give minutes to fringe players without risking injuries in competitive games.</p>
+    </div>`;
+  }
+  if (rivalry) {
+    return `<div class="derby-banner">🔥 ${esc(rivalry.name.toUpperCase())} — THIS IS MORE THAN 3 POINTS 🔥</div>
+    <div class="press-hype">
+      <h4>🎤 Press conference — derby hype building</h4>
+      <p>"The atmosphere will be electric. ${esc(f.home)} vs ${esc(f.away)} is not just a game, it's pride, history, bragging rights for months. The board expects passion, the fans demand a result."</p>
+      <div class="press-actions">
+        <button class="btn sm" onclick="press('confident')">“We’ll crush them” 🔥</button>
+        <button class="btn sm" onclick="press('balanced')">“Respect, but we want to win” 🤝</button>
+        <button class="btn sm" onclick="press('defensive')">“Focus on our game” 🧘</button>
+      </div>
+    </div>`;
+  }
+  if (isBig) {
+    const quotes = [
+      `“Big game under the lights. ${esc(f.home)} vs ${esc(f.away)} — this is why we love football.”`,
+      `“Pressure? What pressure? These are the games you live for.”`,
+      `“The fans have been talking about this all week. Time to deliver.”`
+    ];
+    return `<div class="press-hype">
+      <h4>🎤 Matchday hype — the build-up</h4>
+      <p>${esc(quotes[Math.floor(Math.random()*quotes.length)])}</p>
+      <div class="press-actions">
+        <button class="btn sm" onclick="press('confident')">Back the boys 💪</button>
+        <button class="btn sm" onclick="press('balanced')">Stay grounded ⚖️</button>
+      </div>
+    </div>`;
+  }
+  return "";
+}
+
 async function renderHome() {
   await refreshState();
   const h = G.home;
@@ -556,64 +610,98 @@ async function renderHome() {
       <td class="num muted">${r.pos || "–"}</td>
       <td><span class="cellclub">${crest(r.code)}<span>${esc(r.name)}</span></span></td>
       <td class="num muted">${r.p}</td><td class="num"><b>${r.pts}</b></td></tr>`;
+  const rivalry = f ? isRivalry(f.home_code, f.away_code) : null;
+  const intBreak = (() => {
+    try {
+      const d = new Date(h.date);
+      const m = d.getMonth();
+      // International breaks: March, June, September, October, November
+      if ([2,5,8,9,10].includes(m) && d.getDate() <= 14) {
+        const day = d.getDate();
+        if (day <= 14) return true;
+      }
+      return false;
+    } catch(e) { return false; }
+  })();
   $("#content").innerHTML = `
-    ${f ? `<div class="mhero ${compClass(f.code)}" style="--comp:${compColor(f.code)}">
-      <div class="mhero-top">${compLogo(f.code)}<span class="comp-dot"></span><span>${esc(compLabel(f))}${f.stage && f.stage !== "league" && f.comp ? " · " + esc(f.stage) : ""}</span><span class="spacer"></span><span>${fmtDate(f.date)}</span></div>
+    ${intBreak ? `<div class="int-break">
+      <h3>🌍 International break — squad depleted</h3>
+      <p>Many first-team players are away on international duty. Your youth and reserves will train with the first team. Use this time to scout, arrange friendlies, or rest. Check your inbox for national team reports.</p>
+      <div class="row" style="margin-top:10px">
+        <button class="btn sm" onclick="go('squad')">Check available players</button>
+        <button class="btn sm" onclick="go('calendar')">See schedule</button>
+        <button class="btn sm" onclick="go('scouting')">Scout internationally</button>
+      </div>
+    </div>` : ""}
+
+    ${f ? `
+      ${rivalry ? `<div class="derby-banner">🔥 ${esc(rivalry.name.toUpperCase())} — ${esc(f.home)} VS ${esc(f.away)} — BRAGGING RIGHTS AT STAKE 🔥</div>` : ""}
+      <div class="mhero ${compClass(f.code)}" style="--comp:${compColor(f.code)}">
+      <div class="mhero-top">${compLogo(f.code)}<span class="comp-dot"></span><span>${esc(compLabel(f))}${f.stage && f.stage !== "league" && f.comp ? " · " + esc(f.stage) : ""} ${rivalry ? `· <span class="rivalry-tag">🔥 ${esc(rivalry.name)}</span>` : ""}</span><span class="spacer"></span><span>${fmtDate(f.date)}</span></div>
       <div class="mhero-body">
-        <div class="mhero-club">${crest(f.home_code, "xl")}<div class="nm">${esc(f.home)}</div></div>
-        <div class="mhero-mid"><div class="vs">VS</div><div class="when">${f.is_home ? "HOME" : "AWAY"}</div><div class="venue">${esc(f.venue || "")}</div></div>
-        <div class="mhero-club">${crest(f.away_code, "xl")}<div class="nm">${esc(f.away)}</div></div>
+        <div class="mhero-club">${crest(f.home_code, "xl")}<div class="nm">${esc(f.home)}</div><div class="small muted" style="font-size:11px">${f.is_home ? "HOME" : "AWAY"} · ${esc(f.venue||"").split(",")[0]||""}</div></div>
+        <div class="mhero-mid">
+          <div class="vs">VS</div>
+          <div class="when" style="font-size:14px;font-weight:800">${f.is_home ? "AT HOME" : "AWAY"}</div>
+          <div class="venue" style="font-size:11px">${esc(f.venue || "")}</div>
+          <div style="margin-top:6px;display:flex;gap:4px">${formPills(f.is_home ? (G.home.form||[]) : [], 3)} <span style="opacity:.4">vs</span> ${formPills(!f.is_home ? (G.home.form||[]) : [], 3)}</div>
+        </div>
+        <div class="mhero-club">${crest(f.away_code, "xl")}<div class="nm">${esc(f.away)}</div><div class="small muted" style="font-size:11px">${!f.is_home ? "HOME" : "AWAY"}</div></div>
       </div>
       <div class="mhero-foot">
-        <button class="btn primary" onclick="go('match')">MATCH CENTRE ▸</button>
-        <button class="btn" onclick="quickPlay()">Play now</button>
+        <button class="btn primary" style="min-height:44px;padding:0 22px;font-size:14px" onclick="go('match')">MATCH CENTRE ▸</button>
+        <button class="btn" style="min-height:44px" onclick="quickPlay()">⚡ Instant result</button>
       </div>
-    </div>` : `<div class="card"><h3>No fixtures left</h3><p class="muted small" style="margin-top:4px">Continue to process the end of season.</p></div>`}
+    </div>
+    ${pressHypeForFixture(f)}
+    ` : `<div class="card" style="text-align:center;padding:24px"><h3>No fixtures left</h3><p class="muted small" style="margin-top:6px">Season almost over — continue to process end of season, awards, and new contracts.</p><button class="btn primary sm" style="margin-top:10px" onclick="doContinue()">Continue to next season ▸</button></div>`}
 
     <div class="strip">
-      <div class="st"><span class="st-l">Pos</span><span class="st-v">${pos && pos.played ? pos.pos + "<i>/" + pos.size + "</i>" : "—"}</span></div>
-      <div class="st"><span class="st-l">Pts</span><span class="st-v">${pos ? pos.pts : 0}<i>${pos && pos.played ? " · GD " + (pos.gd > 0 ? "+" : "") + pos.gd : ""}</i></span></div>
+      <div class="st"><span class="st-l">Position</span><span class="st-v">${pos && pos.played ? `${pos.pos}<i>/${pos.size}</i>` : "—"} ${pos && pos.pos <= 4 ? '<span class="tag ROUTINE" style="font-size:10px">UCL</span>' : pos && pos.pos >= pos.size-2 ? '<span class="tag URGENT" style="font-size:10px">DANGER</span>' : ""}</span></div>
+      <div class="st"><span class="st-l">Points</span><span class="st-v">${pos ? pos.pts : 0}<i>${pos && pos.played ? ` · ${pos.gd > 0 ? "+" : ""}${pos.gd} GD` : ""}</i></span></div>
       <div class="st"><span class="st-l">Form</span><span class="st-v">${pills || "<i>—</i>"}</span></div>
-      <div class="st"><span class="st-l">Board</span><span class="st-v">${Math.round(h.board.confidence)}</span>${bar(h.board.confidence, h.board.confidence < 30 ? "red" : h.board.confidence < 55 ? "amber" : "")}</div>
+      <div class="st"><span class="st-l">Board</span><span class="st-v">${Math.round(h.board.confidence)}<i>/100</i></span>${bar(h.board.confidence, h.board.confidence < 30 ? "red" : h.board.confidence < 55 ? "amber" : "")}</div>
       <div class="st"><span class="st-l">Fans</span><span class="st-v">${Math.round(h.fans.sentiment)}</span>${bar(h.fans.sentiment, h.fans.sentiment < 30 ? "red" : "")}</div>
-      <div class="st"><span class="st-l">Cash</span><span class="st-v">${money(h.finances.cash)}</span></div>
+      <div class="st"><span class="st-l">Cash</span><span class="st-v" style="font-size:15px">${money(h.finances.cash)}</span></div>
     </div>
 
     <div class="grid g2">
       <div class="card tight">
-        <div class="sec-h"><h3>Squad readiness</h3><span class="spacer"></span><button class="btn sm" onclick="go('squad')">Open</button></div>
-        <div class="kv"><span>Fit &amp; available</span><b class="${avail < 12 ? "warn" : "good"}">${avail}</b></div>
-        <div class="kv"><span>Injured</span><b class="${ss.injured ? "bad" : ""}">${ss.injured}</b></div>
+        <div class="sec-h"><h3>🩺 Squad readiness</h3><span class="spacer"></span><button class="btn sm" onclick="go('squad')">Open squad ▸</button></div>
+        <div class="kv"><span>Fit & available</span><b class="${avail < 12 ? "warn" : "good"}" style="font-size:16px">${avail}</b></div>
+        <div class="kv"><span>Injured</span><b class="${ss.injured ? "bad" : ""}">${ss.injured} ${ss.injured ? "— check physio room" : "— everyone fit"}</b></div>
         <div class="kv"><span>Suspended</span><b class="${ss.suspended ? "bad" : ""}">${ss.suspended}</b></div>
         <div class="kv"><span>Below match fitness</span><b class="${ss.unfit ? "warn" : ""}">${ss.unfit}</b></div>
+        ${avail < 14 ? `<div class="card tight" style="margin-top:10px;background:linear-gradient(135deg, #3d1a1e, #2a1214);border-color:#5a2226"><span class="small" style="color:var(--red)">⚠️ Thin squad — risk of playing unfit players. Consider recalling loanees or promoting youth.</span></div>` : ""}
       </div>
       <div class="card tight">
-        <div class="sec-h"><h3>Board</h3><span class="spacer"></span>${h.board.warning ? '<span class="tag URGENT">WARNING</span>' : '<span class="tag">STABLE</span>'}</div>
-        ${h.board.objectives.map(o => `<div class="obj"><div class="t">${esc(o.text)}${o.critical ? ' <span class="tag URGENT">CRIT</span>' : ""}</div>
+        <div class="sec-h"><h3>🏛️ Board expectations</h3><span class="spacer"></span>${h.board.warning ? '<span class="tag URGENT">⚠️ WARNING</span>' : '<span class="tag ROUTINE">STABLE</span>'}</div>
+        ${h.board.objectives.map(o => `<div class="obj"><div class="t" style="display:flex;align-items:center;gap:8px">${esc(o.text)}${o.critical ? ' <span class="tag URGENT" style="font-size:10px">CRITICAL</span>' : ""}</div>
           <div class="small muted">${esc(o.comp || o.status || "")}</div></div>`).join("")}
+        <button class="btn sm" style="margin-top:10px" onclick="go('board')">Boardroom ▸</button>
       </div>
     </div>
 
     ${godCard(adv)}
 
-    <div class="grid g2">
+    <div class="grid g2" style="margin-top:14px">
       <div class="card tight" style="padding:0">
-        <div class="sec-h" style="padding:10px 12px 4px"><h3>${esc(h.club.league)}</h3><span class="spacer"></span><button class="btn sm" onclick="go('table')">Full</button></div>
-        <table><tbody>${top.map(rowHtml).join("")}${mine && mine.pos > 8 ? `<tr><td colspan="4" class="muted small" style="text-align:center;padding:2px">···</td></tr>${rowHtml(mine)}` : ""}</tbody></table>
+        <div class="sec-h" style="padding:12px 14px 6px"><h3>📊 ${esc(h.club.league)}</h3><span class="spacer"></span><button class="btn sm" onclick="go('table')">Full table ▸</button></div>
+        <table><tbody>${top.map(rowHtml).join("")}${mine && mine.pos > 8 ? `<tr><td colspan="4" class="muted small" style="text-align:center;padding:6px;background:rgba(53,224,138,.04)">··· you are ${mine.pos}th ···</td></tr>${rowHtml(mine)}` : ""}</tbody></table>
       </div>
       <div class="card tight" style="padding:0">
-        <div class="sec-h" style="padding:10px 12px 4px"><h3>Inbox</h3><span class="spacer"></span>${h.unread ? `<span class="tag NEW">${h.unread} new</span>` : ""}</div>
+        <div class="sec-h" style="padding:12px 14px 6px"><h3>📰 Latest news</h3><span class="spacer"></span>${h.unread ? `<span class="tag NEW">${h.unread} new</span>` : ""}<button class="btn sm" onclick="go('inbox')">Open ▸</button></div>
         <div id="home-inbox"></div>
-        <div style="padding:8px 10px"><button class="btn sm wide" onclick="go('inbox')">Open inbox</button></div>
+        <div style="padding:10px 12px"><button class="btn sm wide" onclick="go('inbox')">Open news centre 📰</button></div>
       </div>
     </div>`;
   const ib = await api.get("/api/inbox");
-  $("#home-inbox").innerHTML = ib.items.slice(0, 5).map(m => `
+  $("#home-inbox").innerHTML = ib.items.slice(0, 4).map(m => `
     <button class="mrow slim p-${(m.priority || "").toLowerCase()} ${m.read ? "" : "unread"}" onclick="openMail(${m.id})">
       <span class="mdot"></span>
-      <div class="mmain"><div class="msub">${esc(m.subject)}</div>
-        <div class="mmeta"><span class="mcat">${esc(m.cat)}</span><span>${fmtDate(m.date)}</span></div></div>
-    </button>`).join("") || '<p class="muted small" style="padding:10px 12px">Empty</p>';
+      <div class="mmain"><div class="msub" style="font-size:13.5px">${esc(m.subject)}</div>
+        <div class="mmeta"><span class="mcat" style="font-size:10px">${esc(m.cat)}</span><span>${fmtDate(m.date)}</span></div></div>
+    </button>`).join("") || '<div style="padding:20px;text-align:center"><div class="small muted">No news — quiet day at the office</div></div>';
 }
 function godCard(adv) {
   if (!adv || !adv.ok) return "";
@@ -695,45 +783,100 @@ async function quickPlay() {
   await playMatch("instant");
 }
 
-/* -------------------------------------------------------------------- INBOX */
+/* -------------------------------------------------------------------- INBOX - PREMIUM NO MORE CLUNK */
 let INBOX_CAT = "";
 async function renderInbox() {
   await refreshState();
   const j = await api.get("/api/inbox" + (INBOX_CAT ? "?cat=" + INBOX_CAT : ""));
+  const unread = j.items.filter(x => !x.read).length;
+  const urgent = j.items.filter(x => x.priority === "URGENT" && !x.read).length;
   $("#content").innerHTML = `
-    <div class="sec-h"><h3>Inbox</h3></div>
-    <div class="tabs">
-      <button class="${!INBOX_CAT ? "active" : ""}" onclick="INBOX_CAT='';renderInbox()">All</button>
-      ${j.cats.map(c => `<button class="${INBOX_CAT === c ? "active" : ""}" onclick="INBOX_CAT='${c}';renderInbox()">${c}${j.unread_by_cat[c] ? " (" + j.unread_by_cat[c] + ")" : ""}</button>`).join("")}
+    <div class="sec-h">
+      <h3>News Centre</h3>
       <span class="spacer"></span>
-      <button class="btn sm" onclick="markAllRead()">Mark all read</button>
+      ${unread ? `<span class="tag NEW">${unread} new</span>` : ""}
+      ${urgent ? `<span class="tag URGENT">${urgent} urgent</span>` : ""}
+    </div>
+    <div class="card tight" style="margin-bottom:12px;background:linear-gradient(135deg, #10131a, #171b26)">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg, #1a2a4a, #16213e);display:grid;place-items:center;font-size:18px">📰</div>
+        <div style="flex:1">
+          <b style="font-size:14px">Stay in the loop</b>
+          <div class="small muted">Tap any story to read the full briefing. Your assistant highlights what needs action.</div>
+        </div>
+        <button class="btn sm" onclick="markAllRead()">Mark all read</button>
+      </div>
+    </div>
+    <div class="tabs">
+      <button class="${!INBOX_CAT ? "active" : ""}" onclick="INBOX_CAT='';renderInbox()">All ${j.items.length ? `<span style="opacity:.6">(${j.items.length})</span>` : ""}</button>
+      ${j.cats.map(c => `<button class="${INBOX_CAT === c ? "active" : ""}" onclick="INBOX_CAT='${c}';renderInbox()">${esc(c)}${j.unread_by_cat[c] ? ` <b style="color:var(--acc)">(${j.unread_by_cat[c]})</b>` : ""}</button>`).join("")}
     </div>
     <div class="card" style="padding:0;overflow:hidden">
-      ${j.items.map(m => `
-        <button class="mrow p-${(m.priority || "").toLowerCase()} ${m.read ? "" : "unread"}" onclick="openMail(${m.id})">
+      ${j.items.length ? j.items.map(m => {
+        const isIntBreak = (m.cat||"").toLowerCase().includes("international") || (m.subject||"").toLowerCase().includes("international break");
+        const isPress = (m.cat||"").toLowerCase().includes("media") || (m.subject||"").toLowerCase().includes("press");
+        const icon = m.priority === "URGENT" ? "🚨" : m.priority === "IMPORTANT" ? "⚡" : isIntBreak ? "🌍" : isPress ? "🎤" : "📩";
+        return `
+        <button class="mrow p-${(m.priority || "").toLowerCase()} ${m.read ? "" : "unread"}" onclick="openMail(${m.id})" style="position:relative">
           <span class="mdot"></span>
+          <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg, ${m.priority === "URGENT" ? "#3d1a1e, #2a1214" : m.priority === "IMPORTANT" ? "#3a2c17, #2a1e0f" : "var(--sf3), var(--sf2)"});border:1px solid var(--line);display:grid;place-items:center;font-size:16px;flex:none">${icon}</div>
           <div class="mmain">
             <div class="msub">${esc(m.subject)}</div>
-            <div class="mmeta"><span class="mcat">${esc(m.cat)}</span><span>${fmtDate(m.date)}</span></div>
+            <div style="font-size:12px;color:var(--tx2);margin-top:2px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden">${esc((m.body||"").slice(0,120))}</div>
+            <div class="mmeta"><span class="mcat">${esc(m.cat)}</span><span>${fmtDate(m.date)}</span>${!m.read ? '<span class="tag NEW" style="font-size:9px;padding:2px 6px">NEW</span>' : ""}</div>
           </div>
           <span class="mpri">${esc(m.priority === "URGENT" ? "!" : m.priority === "IMPORTANT" ? "•" : "")}</span>
-        </button>`).join("") || '<p class="muted" style="padding:12px">No mail.</p>'}
+        </button>`;
+      }).join("") : `
+        <div class="inbox-empty">
+          <div class="ie-icon">📭</div>
+          <h3>All caught up</h3>
+          <p>No new messages. The football world is quiet — for now. Continue to advance time and stories will appear.</p>
+          <button class="btn sm primary" style="margin-top:14px" onclick="doContinue()">Continue world ▸</button>
+        </div>`}
     </div>`;
 }
-async function markAllRead() { await api.post("/api/inbox/read", { all: true }); renderInbox(); refreshBadges(); }
+async function markAllRead() { await api.post("/api/inbox/read", { all: true }); renderInbox(); refreshBadges(); toast("All messages marked as read ✓", 2000); }
 async function openMail(id) {
   const j = await api.get("/api/inbox");
   const m = j.items.find(x => x.id === id);
   if (!m) return;
   await api.post("/api/inbox/read", { ids: [id] });
   const p = m.payload || {};
-  modal(`<span class="tag ${m.priority}">${esc(m.priority)}</span> <span class="tag">${esc(m.cat)}</span>
-    <h2>${esc(m.subject)}</h2>
-    <div class="small muted">${fmtDate(m.date)}</div>
-    <div class="pre" style="margin-top:10px">${esc(m.body)}</div>
-    <div class="row" style="margin-top:14px"><span class="spacer"></span>
-      ${p.screen ? `<button class="btn" onclick="closeModal();go('${esc(p.screen)}'${p.pid ? ",'" + p.pid + "'" : ""})">Open ${esc(p.screen)}</button>` : ""}
-      <button class="btn primary" onclick="closeModal();renderInbox()">Close</button></div>`, true);
+  const isIntBreak = (m.cat||"").toLowerCase().includes("international") || (m.subject||"").toLowerCase().includes("international break");
+  const isDerby = (m.subject||"").toLowerCase().includes("derby") || (m.body||"").toLowerCase().includes("derby") || (m.body||"").toLowerCase().includes("rival");
+  const extra = isIntBreak ? `
+    <div class="int-break" style="margin-top:14px">
+      <h3>🌍 International Break Briefing</h3>
+      <p>Your players on international duty: check fitness on return. This is prime scouting time — other leagues continue and youth players get a chance. Use the break to arrange friendlies or rest the squad.</p>
+      <div class="row" style="margin-top:10px">
+        <button class="btn sm" onclick="closeModal();go('squad')">Check squad fitness</button>
+        <button class="btn sm" onclick="closeModal();go('scouting')">Scout abroad</button>
+      </div>
+    </div>` : isDerby ? `
+    <div class="derby-banner" style="margin-top:12px;border-radius:10px">🔥 DERBY DAY — BRAGGING RIGHTS ON THE LINE 🔥</div>
+    <div class="press-hype" style="margin-top:10px">
+      <h4>🎤 Press asks: How do you handle derby pressure?</h4>
+      <p>"These games define seasons. Form goes out the window. The fans demand passion, but we need cool heads. One moment can make you a hero — or the villain."</p>
+      <div class="press-actions">
+        <button class="btn sm" onclick="press('confident');closeModal();">“We fear no one” 💪</button>
+        <button class="btn sm" onclick="press('balanced');closeModal();">“Respect the rivalry” 🤝</button>
+        <button class="btn sm" onclick="press('defensive');closeModal();">“Just another game” 😐</button>
+      </div>
+    </div>` : "";
+  modal(`
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <span class="tag ${m.priority}">${esc(m.priority)}</span>
+      <span class="tag">${esc(m.cat)}</span>
+      <span class="spacer"></span>
+      <span class="small muted">${fmtDate(m.date)}</span>
+    </div>
+    <h2 style="font-size:20px;line-height:1.25;margin-bottom:10px">${esc(m.subject)}</h2>
+    <div class="pre" style="margin-top:10px;font-size:13.5px;line-height:1.65;background:linear-gradient(135deg, var(--sf), var(--sf2));border:1px solid var(--line2)">${esc(m.body)}</div>
+    ${extra}
+    <div class="row" style="margin-top:18px"><span class="spacer"></span>
+      ${p.screen ? `<button class="btn" onclick="closeModal();go('${esc(p.screen)}'${p.pid ? ",'" + p.pid + "'" : ""})">Open ${esc(p.screen)} ▸</button>` : ""}
+      <button class="btn primary" onclick="closeModal();renderInbox()">Done ✓</button></div>`, true);
   refreshBadges();
 }
 
@@ -805,13 +948,18 @@ async function renderSquad() {
           .map(o => `<option value="${o[0]}" ${SQUAD_SORT === o[0] ? "selected" : ""}>Sort: ${o[1]}</option>`).join("")}
       </select>
     </div>
-    <div class="sq-list" style="margin-top:10px">${players.map(p => `<button class="sqr" onclick="go('player',${p.id})">
+    <div class="sq-list" style="margin-top:10px">${players.map(p => `<div class="sqr" style="cursor:default">
       <span class="pos">${esc(p.pos)}</span>
-      <span class="sqr-n"><b>${esc(p.name)}</b>${p.injured ? ` <span class="tag L">${esc(p.injury)}</span>` : p.suspended ? ' <span class="tag L">susp</span>' : ""}
-        <i>${stars(p.stars)} · ${p.age}y · ${p.ca.toFixed(1)}</i></span>
-      <span class="sqr-r"><span class="tag ${condClass(p.condition)}">${p.condition.toFixed(2)}</span>
-        <b class="${p.form > 0.5 ? "good" : p.form < -0.5 ? "bad" : "muted"}">${p.form > 0 ? "+" : ""}${p.form.toFixed(1)}</b></span>
-    </button>`).join("")}</div>
+      <button class="sqr-n" style="text-align:left;flex:1;background:none;border:0" onclick="go('player',${p.id})"><b>${esc(p.name)}</b>${p.injured ? ` <span class="tag L">${esc(p.injury)}</span>` : p.suspended ? ' <span class="tag L">susp</span>' : ""} ${p.listed ? '<span class="tag URGENT" style="font-size:9px">LISTED</span>' : ""}
+        <i>${stars(p.stars)} · ${p.age}y · ${p.ca.toFixed(1)} · ${money(p.value)} · ${wk(p.wage)}</i></button>
+      <span class="sqr-r" style="flex-direction:column;align-items:flex-end;gap:6px">
+        <span class="tag ${condClass(p.condition)}">${p.condition.toFixed(2)}</span>
+        <div class="sell-quick" onclick="event.stopPropagation()">
+          <button class="sell" onclick="quickSell(${p.id},'${esc(p.name).replace(/'/g,"\\'")}')" title="List for sale - one tap">Sell 💸</button>
+          <button onclick="go('player',${p.id})">View</button>
+        </div>
+      </span>
+    </div>`).join("")}</div>
     <div class="card sq-table" style="padding:0;overflow:auto">
       <table><thead><tr>
         <th>Pos</th><th>Name</th><th class="num">Age</th><th class="num">Nat</th>
@@ -903,31 +1051,46 @@ async function renderPlayer(pid) {
 
     ${p.mine ? `
       <div class="grid g2" style="margin-top:10px">
-        <div class="card tight">
-          <div class="sec-h"><h3>Contract</h3></div>
+        <div class="card tight" style="background:linear-gradient(135deg, var(--sf), var(--sf2))">
+          <div class="sec-h"><h3>📝 Contract & value</h3><span class="spacer"></span><span class="tag" style="font-size:11px">${money(p.value)} market value</span></div>
           <div class="kv"><span>Wage</span><b>${wk(p.wage)}</b></div>
-          <div class="kv"><span>Expires</span><b>${esc(p.contract_end)}</b></div>
+          <div class="kv"><span>Expires</span><b>${esc(p.contract_end)} ${(() => { try { const y = parseInt((p.contract_end||"").slice(0,4)); return y ? `· ${y-2026}y left` : ""; } catch(e){ return ""; } })()}</b></div>
           <div class="kv"><span>Promise</span><b>${esc(p.promise)}</b></div>
-          <div class="kv"><span>Happiness</span><b>${Math.round(p.happiness)}</b></div>
-          <div class="kv"><span>Listed</span><b>${p.listed ? "Yes" : "No"}</b></div>
-          <div class="row" style="margin-top:10px">
-            <button class="btn sm" onclick="renewTalk(${p.id},'${esc(p.name).replace(/'/g, "\\'")}',${p.wage})">New contract</button>
-            <button class="btn sm" onclick="toggleList(${p.id},${!p.listed})">${p.listed ? "Unlist" : "List"}</button>
-            <button class="btn sm danger" onclick="releasePlayer(${p.id},'${esc(p.name).replace(/'/g, "\\'")}')">Release</button>
+          <div class="kv"><span>Happiness</span><b>${Math.round(p.happiness)} ${p.happiness < 30 ? "😡 wants out" : p.happiness > 80 ? "😊 happy" : "😐 ok"}</b></div>
+          <div class="kv"><span>Status</span><b>${p.listed ? '<span class="tag URGENT">💸 LISTED FOR SALE</span>' : '<span class="tag ROUTINE">Not for sale</span>'}</b></div>
+          <div style="margin-top:14px;display:grid;gap:8px">
+            <div class="row" style="gap:8px">
+              <button class="btn sm" style="flex:1" onclick="renewTalk(${p.id},'${esc(p.name).replace(/'/g, "\\'")}',${p.wage})">📝 New contract</button>
+              <button class="btn sm ${p.listed ? "" : "primary"}" style="flex:1" onclick="${p.listed ? `toggleList(${p.id},false)` : `quickSell(${p.id},'${esc(p.name).replace(/'/g, "\\'")}')`}">${p.listed ? "❌ Unlist" : "💸 Sell player — one tap"}</button>
+            </div>
+            <div class="row" style="gap:8px">
+              <button class="btn sm" style="flex:1" onclick="openPromise(${p.id},'${esc(p.name).replace(/'/g, "\\'")}','${esc(p.promise)}')">⏱️ Playing time</button>
+              <button class="btn sm danger" style="flex:1" onclick="releasePlayer(${p.id},'${esc(p.name).replace(/'/g, "\\'")}')">Release 🗑️</button>
+            </div>
           </div>
+          <div class="small muted" style="margin-top:10px;background:var(--sf2);padding:8px 10px;border-radius:8px">💡 Selling is now easy: one tap lists player, clubs bid automatically. Set asking price and watch offers come in.</div>
         </div>
         <div class="card tight">
-          <div class="sec-h"><h3>Man-management</h3></div>
-          <p class="small muted">Morale ${Math.round(p.morale)} · happiness ${Math.round(p.happiness)} · ${esc(p.personality)}</p>
-          <div class="row" style="margin-top:10px">
-            <button class="btn sm" onclick="talkTo(${p.id},'praise')">Praise</button>
-            <button class="btn sm" onclick="talkTo(${p.id},'criticise')">Criticise</button>
-            <button class="btn sm" onclick="talkTo(${p.id},'chat')">Chat</button>
-            <button class="btn sm" onclick="openPromise(${p.id},'${esc(p.name).replace(/'/g, "\\'")}','${esc(p.promise)}')">Playing time</button>
+          <div class="sec-h"><h3>💬 Man-management</h3></div>
+          <p class="small muted">Morale ${Math.round(p.morale)} · happiness ${Math.round(p.happiness)} · ${esc(p.personality)} · loyalty ${p.loyalty||"?"} · ambition ${p.ambition||"?"}</p>
+          <div class="row" style="margin-top:12px;gap:8px">
+            <button class="btn sm" onclick="talkTo(${p.id},'praise')">👍 Praise</button>
+            <button class="btn sm" onclick="talkTo(${p.id},'criticise')">👎 Criticise</button>
+            <button class="btn sm" onclick="talkTo(${p.id},'chat')">💬 Chat</button>
+          </div>
+          <div class="card tight" style="margin-top:12px;background:linear-gradient(135deg, #1a1a2e, #16213e);border-color:#0f3460">
+            <div class="small" style="color:#7fb2ff;font-weight:700">🎯 Transfer realism</div>
+            <div class="small muted" style="margin-top:4px;line-height:1.5">Players consider: club reputation gap, wage rise, rivalry (won't join rivals), loyalty (stars stay), ambition. Haaland won't join United from City — superstars have loyalty 14+ and refuse smaller clubs.</div>
           </div>
         </div>
-      </div>` : `<div class="row" style="margin-top:10px"><span class="spacer"></span>
-        <button class="btn primary" onclick="openOffer(${p.id},'${esc(p.name).replace(/'/g, "\\'")}',${p.asking || 0},${p.wage || 0})">Make offer · asking ${money(p.asking || 0)}</button></div>`}
+      </div>` : `<div class="card tight" style="margin-top:10px;background:linear-gradient(135deg, var(--sf), var(--sf2))">
+        <div class="sec-h"><h3>💸 Make an offer</h3><span class="spacer"></span><span class="tag gold">Asking ${money(p.asking || 0)}</span></div>
+        <p class="small muted">Realistic negotiation: rivalry blocks (won't sell to rivals), superstar protection (CA 18.5+ at rep 85+ clubs), loyalty matters, contract length affects price.</p>
+        <div class="row" style="margin-top:12px">
+          <button class="btn primary" style="flex:1;min-height:48px" onclick="openOffer(${p.id},'${esc(p.name).replace(/'/g, "\\'")}',${p.asking || 0},${p.wage || 0})">💸 Bid ${money(p.asking || 0)} — realistic negotiation</button>
+          <button class="btn sm" onclick="toggleShortlist(${p.id})">☆ Shortlist</button>
+        </div>
+      </div>`}
     <div class="row" style="margin-top:10px"><button class="btn sm" onclick="go('squad')">◂ Squad</button></div>`;
 }
 async function talkTo(pid, kind) {
@@ -1297,106 +1460,182 @@ function statsBlock(S, meFirst) {
     return statDuo(a == null ? "—" : a, b == null ? "—" : b, label, f);
   }).join("");
 }
+/* Quick sell - premium easy selling */
+async function quickSell(pid, name) {
+  modal(`<h2>Sell ${esc(name)} — quick sale</h2>
+    <p class="small muted">List this player for transfer. Other clubs will bid if interested. You can also set asking price.</p>
+    <div class="grid g2" style="margin-top:12px">
+      <div><label>Asking price (€m)</label><input id="qs-price" type="number" step="0.5" value="5" style="width:100%"></div>
+      <div><label>Reason</label><select id="qs-reason" style="width:100%"><option>Surplus to requirements</option><option>Needs first-team football</option><option>Financial reasons</option><option>Disruptive influence</option></select></div>
+    </div>
+    <div class="row" style="margin-top:16px"><span class="spacer"></span>
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn primary" onclick="doQuickSell(${pid})">List for ${esc(name)} sale 💸</button>
+    </div>`);
+}
+async function doQuickSell(pid) {
+  const price = +$("#qs-price").value || 0;
+  closeModal();
+  const r = await api.post("/api/squad/list", { pid, listed: true, asking: price });
+  toast(r.msg || `Listed for sale — asking ${money(price)}`, 4000);
+  if (G.screen === "squad") renderSquad();
+  else if (G.screen === "player") go("player", pid);
+}
+
 async function renderMatch() {
   await refreshState();
   if (G.pendingMatch) { showHalftime(G.halftimeState); return; }
   const j = await api.get("/api/match/next");
-  if (!j.ok) { $("#content").innerHTML = `<h1>Match Centre</h1><p class="muted">${esc(j.msg)}</p>`; return; }
+  if (!j.ok) { $("#content").innerHTML = `<div class="card" style="text-align:center;padding:32px"><h3>No upcoming match</h3><p class="muted small" style="margin-top:8px">${esc(j.msg)}</p><button class="btn primary sm" style="margin-top:12px" onclick="doContinue()">Continue world ▸</button></div>`; return; }
   MATCH = j;
   const p = j.preview, f = p.fixture;
   G.codes = { home: f.home_code, away: f.away_code, comp: f.code, compName: compLabel(f), stage: f.stage, venue: f.venue, date: f.date };
   const myForm = p.my.form || [], opForm = p.opp.form || [];
   const hForm = f.is_home ? myForm : opForm, aForm = f.is_home ? opForm : myForm;
+  const rivalry = isRivalry(f.home_code, f.away_code);
+  const isFriendly = f.code === "friendly" || (f.comp||"").toLowerCase().includes("friendly");
   $("#content").innerHTML = `
+    ${rivalry ? `<div class="derby-banner">🔥 ${esc(rivalry.name.toUpperCase())} — DERBY DAY — ATMOSPHERE ELECTRIC 🔥</div>` : ""}
     <div class="mhero ${compClass(f.code)}" style="--comp:${compColor(f.code)}">
-      <div class="mhero-top">${compLogo(f.code)}<span class="comp-dot"></span><span>${esc(compLabel(f))}${f.stage && f.stage !== "league" && f.comp ? " · " + esc(f.stage) : ""}</span><span class="spacer"></span><span>${fmtDate(f.date)}</span></div>
+      <div class="mhero-top">${compLogo(f.code)}<span class="comp-dot"></span><span>${esc(compLabel(f))}${f.stage && f.stage !== "league" && f.comp ? " · " + esc(f.stage) : ""} ${rivalry ? `· <span style="color:#ff6b6b;font-weight:900">🔥 ${esc(rivalry.name)}</span>` : ""} ${isFriendly ? '· <span class="tag" style="background:rgba(53,224,138,.15);color:var(--acc)">FRIENDLY — ROTATED SQUADS</span>' : ""}</span><span class="spacer"></span><span>${fmtDate(f.date)}</span></div>
       <div class="mhero-body">
         <div class="mhero-club">${crest(f.home_code, "xl")}<div class="nm">${esc(f.home)}</div>
-          <div class="fm">${formPills(hForm, 5)}</div></div>
-        <div class="mhero-mid"><div class="vs">VS</div><div class="when">${fmtDate(f.date)}</div><div class="venue">${esc(f.venue || "")}</div></div>
+          <div class="fm">${formPills(hForm, 5)}</div>
+          <div class="small muted" style="margin-top:4px;font-size:10px">Form: ${hForm.map(x=>x.res).join("")||"—"}</div>
+        </div>
+        <div class="mhero-mid">
+          <div class="vs">VS</div>
+          <div class="when" style="font-weight:800">${fmtDate(f.date)}</div>
+          <div class="venue">${esc(f.venue || "")}</div>
+          ${rivalry ? `<div class="rivalry-tag" style="margin-top:8px">⚔️ Rivalry match — high stakes</div>` : ""}
+        </div>
         <div class="mhero-club">${crest(f.away_code, "xl")}<div class="nm">${esc(f.away)}</div>
-          <div class="fm">${formPills(aForm, 5)}</div></div>
+          <div class="fm">${formPills(aForm, 5)}</div>
+          <div class="small muted" style="margin-top:4px;font-size:10px">Form: ${aForm.map(x=>x.res).join("")||"—"}</div>
+        </div>
       </div>
-      <div class="mhero-foot">
-        <button class="btn primary" onclick="playMatch('full')">Watch full match</button>
-        <button class="btn" onclick="playMatch('key')">Key moments</button>
-        <button class="btn" onclick="playMatch('instant')">Instant result</button>
+      <div class="mhero-foot" style="gap:12px">
+        <button class="btn primary" style="min-height:48px;padding:0 24px;font-size:14.5px;box-shadow:0 6px 20px var(--acc-glow)" onclick="playMatch('full')">▶️ Watch full match — LIVE animations</button>
+        <button class="btn" style="min-height:44px" onclick="playMatch('key')">⚡ Key moments</button>
+        <button class="btn" style="min-height:44px" onclick="playMatch('instant')">⏩ Instant result</button>
+      </div>
+      <div style="padding:8px 16px;background:rgba(0,0,0,.2);border-top:1px solid var(--line);display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span class="small muted">🎬 Premium match experience:</span>
+        <span class="tag" style="font-size:10px">🎥 VAR checks visible</span>
+        <span class="tag" style="font-size:10px">🟨🟥 Card animations</span>
+        <span class="tag" style="font-size:10px">⚽ Goal flashes</span>
+        <span class="tag" style="font-size:10px">📊 Live stats</span>
       </div>
     </div>
 
-    <div class="grid g2" style="margin-top:12px">
+    ${pressHypeForFixture(f)}
+
+    <div class="grid g2" style="margin-top:14px">
       <div class="card tight">
-        <div class="sec-h"><h3>Your team</h3><span class="spacer"></span><button class="btn sm" onclick="go('tactics')">Change</button></div>
-        <div class="kv"><span>Shape &amp; mentality</span><b>${esc(p.tactic.formation)} · ${esc(p.tactic.mentality)}</b></div>
-        <div class="kv"><span>Squad strength</span><b>${p.my.ca.toFixed(1)}</b></div>
+        <div class="sec-h"><h3>Your team — ${esc(p.tactic.formation)}</h3><span class="spacer"></span><button class="btn sm" onclick="go('tactics')">Tactics ▸</button></div>
+        <div class="kv"><span>Mentality</span><b>${esc(p.tactic.mentality)}</b></div>
+        <div class="kv"><span>Squad strength</span><b style="font-size:16px">${p.my.ca.toFixed(1)} <span class="small muted">/ 20</span></b></div>
         <div class="kv"><span>Attack / defence</span><b>${p.my.attack} / ${p.my.defence}</b></div>
         <div class="kv"><span>Avg condition</span><b>${p.my.condition}</b></div>
+        <div class="kv"><span>Familiarity</span><b>${Math.round(p.tactic.familiarity||0)}%</b></div>
+        ${isFriendly ? `<div class="card tight" style="margin-top:10px;background:linear-gradient(135deg, #1a2e1a, #162a16);border-color:#2a4a2a"><span class="small" style="color:#8ab88a">🤝 Friendly realism: Youth and rotation expected. Top players rested, fringe players get chance. Low intensity — good for fitness without injury risk.</span></div>` : ""}
       </div>
       <div class="card tight">
-        <div class="sec-h"><h3>Opposition</h3><span class="spacer"></span><span class="small muted">${p.opposition_report.known}% known</span></div>
-        <div class="kv"><span>${esc(p.opp.name)}</span><b>${p.opp.ca ? p.opp.ca.toFixed(1) : "unknown"}</b></div>
+        <div class="sec-h"><h3>Opposition — ${esc(p.opp.name)}</h3><span class="spacer"></span><span class="small muted">${p.opposition_report.known}% scouted</span></div>
+        <div class="kv"><span>Strength</span><b>${p.opp.ca ? p.opp.ca.toFixed(1) + " / 20" : "unknown"}</b></div>
         <div class="kv"><span>Reputation · league</span><b>${p.opp.rep} · ${esc(p.opp.league)}</b></div>
-        ${p.opposition_report.key_players.slice(0, 3).map(k => `<div class="kv"><span>${esc(k.name)} <i class="muted small">${esc(k.pos)}</i></span><b>${k.goals}g${k.ca ? " · " + k.ca : ""}</b></div>`).join("") || '<div class="small muted" style="padding:6px 0">No scouting report on this opponent.</div>'}
+        <div class="kv"><span>Manager style</span><b class="small">${esc(p.opp.style||"Balanced")}</b></div>
+        ${p.opposition_report.key_players.slice(0, 3).map(k => `<div class="kv"><span>⚠️ ${esc(k.name)} <i class="muted small">${esc(k.pos)}</i></span><b>${k.goals}g${k.ca ? " · CA " + k.ca : ""}</b></div>`).join("") || '<div class="small muted" style="padding:8px 0">No scouting report — assign scout to learn weaknesses.</div>'}
+        <button class="btn sm" style="margin-top:8px" onclick="go('scouting')">Scout report ▸</button>
       </div>
     </div>
 
-    <div class="grid g2 pitchwide" style="margin-top:12px">
-      <div class="card tight"><div class="sec-h"><h3>Selected XI</h3></div>${pitchHTML(p.xi, false)}</div>
+    <div class="grid g2 pitchwide" style="margin-top:14px">
+      <div class="card tight"><div class="sec-h"><h3>Selected XI — ${esc(p.tactic.formation)}</h3><span class="spacer"></span><span class="small muted">Tap pitch to change</span></div>${pitchHTML(p.xi, false)}</div>
       <div class="card tight" style="padding:0">
-        <div class="sec-h" style="padding:10px 12px 4px"><h3>Bench</h3></div>
-        <table class="mc"><thead><tr><th>Pos</th><th>Name</th><th class="num">CA</th><th class="num">Cond</th><th class="num">Fit</th></tr></thead>
-        <tbody>${p.bench.map(b => `<tr><td><span class="pos">${esc(b.pos)}</span></td><td>${esc(b.name)}</td>
-          <td class="num">${b.ca.toFixed(1)}</td><td class="num">${b.condition.toFixed(2)}</td><td class="num">${Math.round(b.fitness)}</td></tr>`).join("")}</tbody></table>
+        <div class="sec-h" style="padding:12px 14px 6px"><h3>Bench — ${p.bench.length} available</h3></div>
+        <div style="padding:0 12px 12px;display:grid;gap:6px">
+          ${p.bench.map(b => `<div class="sqr" style="min-height:44px;padding:8px 12px;background:var(--sf2);border-radius:10px"><span class="pos">${esc(b.pos)}</span><span class="sqr-n"><b>${esc(b.name)}</b><i>CA ${b.ca.toFixed(1)} · ${Math.round(b.condition*100)}% fit</i></span><span class="tag ${condClass(b.condition)}" style="font-size:10px">${b.condition.toFixed(2)}</span></div>`).join("") || '<div class="small muted" style="padding:12px">No bench — thin squad</div>'}
+        </div>
       </div>
     </div>`;
 }
 
-/* live presentation: clock ticks, events land at their minute, score pops */
+/* live presentation: PREMIUM CINEMATIC - animations impossible to miss */
 function liveScreen(cfg, onDone) {
   const C = G.codes || {};
   const evs = scoreEvents((cfg.events || []).slice().sort((a, b) => a.minute - b.minute), cfg.base);
   const end = cfg.endMin || Math.max(45, ...evs.map(e => e.minute), 1);
+  const isSecondHalf = (cfg.startMin || 0) >= 45;
   $("#content").innerHTML = `
     <div class="mhero ${compClass(C.comp)}" style="--comp:${compColor(C.comp)}">
-      <div class="mhero-top">${compLogo(C.comp)}<span class="comp-dot"></span><span>${esc(C.compName || "Match")}${C.stage && C.stage !== "league" ? " · " + esc(C.stage) : ""}</span><span class="spacer"></span><span>LIVE</span></div>
-      <div class="live-bar" style="border:0;border-radius:0;background:linear-gradient(90deg, ${hexA(clubCol(G.codes.home,0),.18)}, rgba(0,0,0,0) 38%, rgba(0,0,0,0) 62%, ${hexA(clubCol(G.codes.away,0),.18)})">
-        <span class="lb-team">${crest(C.home)}<b>${esc(cfg.homeShort || "")}</b></span>
-        <span class="lb-mid"><span class="lscore" id="lv-score">${cfg.base[0]} – ${cfg.base[1]}</span>
-          <span class="clock" id="lv-clock">${cfg.startMin}'</span></span>
-        <span class="lb-team r"><b>${esc(cfg.awayShort || "")}</b>${crest(C.away)}</span>
+      <div class="mhero-top">${compLogo(C.comp)}<span class="comp-dot" style="animation:dot-glow 1s infinite"></span><span>${esc(C.compName || "Match")}${C.stage && C.stage !== "league" ? " · " + esc(C.stage) : ""}</span><span class="spacer"></span><span class="tag" style="background:#ff3b30;color:white;animation:dot-pulse 1s infinite">● LIVE ${cfg.startMin}'-${end}'</span></div>
+      <div class="live-bar" style="border:0;border-radius:0;background:linear-gradient(90deg, ${hexA(clubCol(G.codes.home,0),.22)}, rgba(0,0,0,0) 35%, rgba(0,0,0,0) 65%, ${hexA(clubCol(G.codes.away,0),.22)});padding:18px 16px">
+        <span class="lb-team" style="font-size:15px">${crest(C.home, "lg")}<b>${esc(cfg.homeShort || "")}</b></span>
+        <span class="lb-mid"><span class="lscore" id="lv-score" style="font-size:32px;text-shadow:0 2px 12px rgba(0,0,0,.5)">${cfg.base[0]} – ${cfg.base[1]}</span>
+          <span class="clock" id="lv-clock" style="font-size:18px;padding:6px 14px">${cfg.startMin}'</span>
+          <span class="small muted" style="font-size:10px;letter-spacing:.1em">${isSecondHalf ? "SECOND HALF" : "FIRST HALF"}</span></span>
+        <span class="lb-team r" style="font-size:15px"><b>${esc(cfg.awayShort || "")}</b>${crest(C.away, "lg")}</span>
       </div>
-      <div id="lv-feed" style="padding:4px 14px 12px;min-height:34dvh;max-height:52dvh;overflow-y:auto">
-        <p class="muted small lv-empty" style="text-align:center;padding:26px 0">Events land here as they happen.</p>
+      <div id="lv-feed" style="padding:8px 16px 16px;min-height:40dvh;max-height:58dvh;overflow-y:auto;background:linear-gradient(180deg, transparent, rgba(0,0,0,.15))">
+        <div class="lv-empty" style="text-align:center;padding:40px 20px">
+          <div style="width:56px;height:56px;margin:0 auto 12px;border-radius:16px;background:var(--sf2);display:grid;place-items:center;font-size:24px;animation:dot-pulse 2s infinite">⚽</div>
+          <div style="font-weight:700;font-size:14px">Live match in progress</div>
+          <div class="small muted" style="margin-top:4px">Goals, cards, VAR checks will appear here with cinematic animations<br>🎥 Watch for: <span class="tag" style="font-size:10px">VAR</span> <span class="tag" style="font-size:10px">GOAL FLASH</span> <span class="tag" style="font-size:10px">CARD 3D</span></div>
+        </div>
       </div>
-      <div class="mhero-foot"><button class="btn sm" id="lv-skip">Skip to ${cfg.label} ▸</button></div>
+      <div class="mhero-foot" style="background:rgba(0,0,0,.25);padding:12px 16px">
+        <button class="btn sm" id="lv-skip" style="background:var(--sf3)">Skip to ${cfg.label} ⏩</button>
+        <span class="spacer"></span>
+        <span class="small muted">💡 Tip: Full match shows every chance. Key moments only big events.</span>
+      </div>
+    </div>
+    <div class="card tight" style="margin-top:12px;background:linear-gradient(135deg, #10131a, #171b26)">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg, #1a2a4a, #16213e);display:grid;place-items:center">🎬</div>
+        <div><b style="font-size:13px">Premium live experience</b><div class="small muted">Cinematic VAR overlays, 3D card flips, goal flashes with club crests — you won't miss a moment</div></div>
+      </div>
     </div>`;
   let min = cfg.startMin || 0, i = 0, sc = cfg.base.slice();
   const feed = $("#lv-feed"), clock = $("#lv-clock"), scoreEl = $("#lv-score");
   const push = e => {
     const em = feed.querySelector(".lv-empty"); if (em) em.remove();
     feed.insertAdjacentHTML("afterbegin", evRow(e));
-    if (e.type === "goal") goalFlash(e);
-    if (e.type === "var" || e.type === "var_disallowed") varFlash(e);
-    if (e.type === "yellow" || e.type === "red") cardFlash(e);
+    // PREMIUM: Ensure animations are VISIBLE and dramatic
+    if (e.type === "goal") {
+      goalFlash(e);
+      // Extra screen shake for goals
+      document.body.animate([{ transform: "translateX(0)" }, { transform: "translateX(2px)" }, { transform: "translateX(-2px)" }, { transform: "translateX(0)" }], { duration: 300 });
+      // Haptic if available
+      try { if (navigator.vibrate) navigator.vibrate([100, 50, 100]); } catch(e) {}
+    }
+    if (e.type === "var" || e.type === "var_disallowed") {
+      varFlash(e);
+      try { if (navigator.vibrate) navigator.vibrate([50, 30, 50, 30, 100]); } catch(e2) {}
+    }
+    if (e.type === "yellow" || e.type === "red") {
+      cardFlash(e);
+      try { if (navigator.vibrate) navigator.vibrate(e.type === "red" ? [200] : [100]); } catch(e2) {}
+    }
     if (e.type === "goal") {
       if (e._sc) scoreEl.textContent = e._sc.replace("–", " – ");
       else { if ((e.side === "H") === true) sc[0]++; else if (e.side === "A") sc[1]++; scoreEl.textContent = sc[0] + " – " + sc[1]; }
-      scoreEl.animate([{ transform: "scale(1.25)" }, { transform: "scale(1)" }], { duration: 260 });
+      scoreEl.animate([{ transform: "scale(1.4)", color: "#35e08a" }, { transform: "scale(1)", color: "var(--tx)" }], { duration: 400, easing: "cubic-bezier(.2,.8,.2,1)" });
     }
     if (e.type === "var_disallowed") {
-      // VAR overturned - if score was previously increased, decrement visually
       if (e.side === "H" && sc[0] > cfg.base[0]) sc[0]--; else if (e.side === "A" && sc[1] > cfg.base[1]) sc[1]--;
       scoreEl.textContent = sc[0] + " – " + sc[1];
+      scoreEl.animate([{ transform: "scale(.9)", color: "#ff5d6b" }, { transform: "scale(1)" }], { duration: 400 });
     }
   };
-  const finish = () => { clearInterval(timer); while (i < evs.length) push(evs[i++]); clock.textContent = end + "'"; setTimeout(onDone, 500); };
+  const finish = () => { clearInterval(timer); while (i < evs.length) push(evs[i++]); clock.textContent = end + "'"; setTimeout(onDone, 600); };
   $("#lv-skip").onclick = finish;
   const timer = setInterval(() => {
     min++;
     clock.textContent = min + "'";
     while (i < evs.length && evs[i].minute <= min) push(evs[i++]);
     if (min >= end) finish();
-  }, 85);
+  }, 90);
 }
 
 async function playMatch(mode) {
@@ -1614,72 +1853,151 @@ function fmtStat(v, k) {
   return k === "xg" ? Number(v).toFixed(2) : v;
 }
 
-/* ---------------------------------------------------------------- TRANSFERS */
-let TR = { pos: "", q: "", max_fee: 0, age_max: 0, free: false, aff: true };
+/* ---------------------------------------------------------------- TRANSFERS - PREMIUM NO MORE JOKE */
+let TR = { pos: "", q: "", max_fee: 0, age_max: 0, free: false, aff: true, sort: "value" };
 async function renderTransfers() {
   await refreshState();
   const j = await api.get("/api/screen/transfers");
   const shortlisted = new Set(j.shortlist_ids || []);
   const s = await api.get(`/api/transfer/search?pos=${TR.pos}&q=${encodeURIComponent(TR.q)}&max_fee=${TR.max_fee}&age_max=${TR.age_max}&free=${TR.free}&affordable=${TR.aff !== false}`);
   const win = j.window && j.window !== "closed";
+  let players = (s.players || []).slice();
+  const sortFns = {
+    value: (a,b) => (b.value||0)-(a.value||0),
+    ca: (a,b) => (b.ca||0)-(a.ca||0),
+    age: (a,b) => (a.age||0)-(b.age||0),
+    name: (a,b) => (a.name||"").localeCompare(b.name||"")
+  };
+  players.sort(sortFns[TR.sort] || sortFns.value);
   $("#content").innerHTML = `
-    <div class="sec-h"><h3>Transfers</h3><span class="spacer"></span>
-      <span class="tag ${win ? "ROUTINE" : "URGENT"}">${win ? String(j.window).toUpperCase() + " WINDOW OPEN" : "WINDOW CLOSED"}</span></div>
-    <div class="strip">
-      <div class="st"><span class="st-l">Budget</span><span class="st-v small" style="font-size:14px">${money(j.budget)}</span></div>
-      <div class="st"><span class="st-l">Summer</span><span class="st-v small" style="font-size:12px">${fmtDate(j.windows.open)} → ${fmtDate(j.windows.close)}</span></div>
-      <div class="st"><span class="st-l">Winter</span><span class="st-v small" style="font-size:12px">${fmtDate(j.windows.winter[0])} → ${fmtDate(j.windows.winter[1])}</span></div>
+    <div class="sec-h">
+      <h3>Transfer Market</h3>
+      <span class="spacer"></span>
+      <span class="tag ${win ? "ROUTINE" : "URGENT"}" style="font-size:11px;padding:6px 12px">${win ? `🔥 ${String(j.window).toUpperCase()} WINDOW OPEN` : "🔒 WINDOW CLOSED"}</span>
     </div>
-    ${j.offers.length ? `<div class="card tight" style="border-color:#6b5522">
-      <div class="sec-h"><h3>Incoming bids</h3><span class="spacer"></span><span class="tag URGENT">${j.offers.length}</span></div>
-      ${j.offers.map(o => `<div class="kv" style="align-items:center;flex-wrap:wrap">
-        <span style="min-width:0"><b>${esc(o.player)}</b> <i class="muted small">${esc(o.pos)}, ${o.age} · from ${esc(o.from_club || "—")}</i></span>
-        <b class="small">${money(o.fee)} <i class="muted" style="font-style:normal">/ value ${money(o.value)} · ${wk(o.wage)}</i></b>
-        <span class="row" style="gap:6px;margin-left:auto">
-          <button class="btn sm primary" onclick="bid(${o.id},'accept')">Accept</button>
-          <button class="btn sm" onclick="bid(${o.id},'reject')">Reject</button>
-          <button class="btn sm" onclick="bidCounter(${o.id},${o.fee})">Counter</button></span></div>`).join("")}
-    </div>` : ""}
-    ${(j.my_offers || []).length ? `<div class="card tight" style="margin-top:10px">
-      <div class="sec-h"><h3>Negotiations</h3></div>
-      ${j.my_offers.map(o => `<div class="kv" style="align-items:center;flex-wrap:wrap">
-        <span style="min-width:0"><a href="#" onclick="go('player',${o.player_id});return false"><b>${esc(o.player)}</b></a>
-          <i class="muted small">${o.direction === "in" ? "IN" : "OUT"} · ${esc(o.from_club || "—")} → ${esc(o.to_club || "—")}</i></span>
-        <b class="small"><span class="tag ${o.awaiting_you ? "IMPORTANT" : ""}">${esc(o.status)}</span> ${money(o.fee)} · ${wk(o.wage)}</b>
-        <span class="row" style="gap:6px;margin-left:auto">${o.direction === "out" && o.status === "counter" ? `
-          <button class="btn sm primary" onclick="respondCounter(${o.id},true,${o.fee})">Accept</button>
-          <button class="btn sm" onclick="respondCounter(${o.id},false)">Walk</button>
-          <button class="btn sm" onclick="respondCounterNew(${o.id},${o.fee})">Re-bid</button>`
-          : (o.direction === "in" && o.status === "pending" ? `
-          <button class="btn sm primary" onclick="bid(${o.id},'accept')">Accept</button>
-          <button class="btn sm" onclick="bid(${o.id},'reject')">Reject</button>` : "")}</span>
-        ${o.note ? `<span class="small muted" style="width:100%">${esc(o.note)}</span>` : ""}</div>`).join("")}
-    </div>` : ""}
 
-    <div class="card tight" style="margin-top:10px">
-      <div class="row" style="gap:8px">
-        <input id="tr-q" placeholder="Search players…" value="${esc(TR.q)}" style="flex:1;min-width:140px">
-        <select id="tr-pos" title="Position"><option value="">Pos</option>${G.static.positions.map(p => `<option ${TR.pos === p ? "selected" : ""}>${p}</option>`).join("")}</select>
-        <input id="tr-fee" type="number" placeholder="Max €m" value="${TR.max_fee || ""}" style="width:86px">
-        <input id="tr-age" type="number" placeholder="Age ≤" value="${TR.age_max || ""}" style="width:76px">
-        <select id="tr-free" title="Free agents"><option value="false" ${!TR.free ? "selected" : ""}>Clubbed</option><option value="true" ${TR.free ? "selected" : ""}>Free agents</option></select>
-        <select id="tr-aff" title="Affordable"><option value="true" ${TR.aff !== false ? "selected" : ""}>Affordable</option><option value="false" ${TR.aff === false ? "selected" : ""}>Any value</option></select>
-        <button class="btn primary sm" onclick="doSearch()">Search</button>
+    <div class="transfer-hub">
+      <div class="transfer-filters">
+        <div class="row" style="justify-content:space-between;margin-bottom:12px">
+          <h3 style="margin:0;display:flex;align-items:center;gap:8px">💰 Your war chest <span class="tag" style="font-size:12px">${money(j.budget)} available</span></h3>
+          <div class="small muted">${fmtDate(j.windows.open)} → ${fmtDate(j.windows.close)} · Winter: ${fmtDate(j.windows.winter[0])} → ${fmtDate(j.windows.winter[1])}</div>
+        </div>
+        <div class="strip" style="margin:0 0 14px">
+          <div class="st"><span class="st-l">Budget</span><span class="st-v" style="font-size:16px;color:var(--acc)">${money(j.budget)}</span></div>
+          <div class="st"><span class="st-l">Wage room</span><span class="st-v small" style="font-size:13px">${money((j.wage_budget||0) - (j.wage_bill||0))}/yr free</span></div>
+          <div class="st"><span class="st-l">Squad size</span><span class="st-v">${(j.squad_count||0)} players</span></div>
+          <div class="st"><span class="st-l">Listed</span><span class="st-v">${(j.listed_count||0)} for sale</span></div>
+        </div>
+        ${!win ? `<div class="card tight" style="background:linear-gradient(135deg, #3d1a1e, #2a1214);border-color:#5a2226">
+          <b style="color:var(--red)">Window closed</b> <span class="small muted">— you can still scout and shortlist, but bids will wait until it opens. Selling is always possible.</span>
+        </div>` : ""}
       </div>
-      <div class="small muted" style="margin-top:8px">Showing players valued up to <b>${money(s.cap)}</b> (budget ${money(s.budget)}).</div>
-    </div>
 
-    <div class="sq-list" style="margin-top:10px">
-      ${s.players.map(p => `<div class="sqr" style="cursor:default">
-        <span class="pos">${esc(p.pos)}</span>
-        <span class="sqr-n" style="cursor:pointer" onclick="go('player',${p.id})"><b>${esc(p.name)}</b>${p.known < 60 ? ` <span class="tag">scout ${p.known}%</span>` : ""}
-          <i>${esc(p.club || "Free agent")} · ${p.age}y · ${stars(p.stars)}</i></span>
-        <span class="sqr-r"><span class="small muted" style="text-align:right">${money(p.value)}<br>${wk(p.wage)}</span>
-          <button class="btn sm primary" onclick='openOffer(${p.id}, ${JSON.stringify(p.name)}, ${p.asking || 0}, ${p.wage || 0})'>Bid</button>
-          <button class="btn sm" title="Shortlist" onclick="toggleShortlist(${p.id})">${shortlisted.has(p.id) ? "★" : "☆"}</button></span>
-      </div>`).join("") || '<p class="muted small" style="padding:12px">No matches — widen the search.</p>'}
+      ${j.offers.length ? `<div class="card tight" style="border-color:#6b5522;background:linear-gradient(135deg, #2a1e0a, #1e1608);box-shadow:0 4px 20px rgba(255,190,74,.15)">
+        <div class="sec-h"><h3>📥 Incoming bids — action required</h3><span class="spacer"></span><span class="tag URGENT" style="animation:dot-pulse 1.5s infinite">${j.offers.length} bid${j.offers.length>1?'s':''}</span></div>
+        <div style="display:grid;gap:10px">
+        ${j.offers.map(o => `<div class="card tight" style="background:var(--sf);border-color:#5a4222;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg, var(--sf3), var(--sf2));display:grid;place-items:center;font-weight:900">${esc((o.player||"?").split(" ").map(w=>w[0]).slice(0,2).join(""))}</div>
+          <div style="flex:1;min-width:160px"><b style="font-size:14px">${esc(o.player)}</b> <span class="pos" style="margin-left:6px">${esc(o.pos)}</span>
+            <div class="small muted">${o.age}y · from ${esc(o.from_club||"—")} · value ${money(o.value)} · wage ${wk(o.wage)}</div>
+            <div style="margin-top:4px"><span class="tag gold" style="font-size:12px">${money(o.fee)} offered</span> ${o.fee < (o.value||0)*0.8 ? '<span class="tag URGENT" style="font-size:10px">LOWBALL</span>' : o.fee > (o.value||0)*1.3 ? '<span class="tag ROUTINE" style="font-size:10px">GREAT DEAL</span>' : ''}</div>
+          </div>
+          <div class="row" style="gap:8px;margin-left:auto">
+            <button class="btn sm primary" onclick="bid(${o.id},'accept')">Accept ${money(o.fee)} ✓</button>
+            <button class="btn sm" onclick="bid(${o.id},'reject')">Reject ✕</button>
+            <button class="btn sm" onclick="bidCounter(${o.id},${o.fee})">Counter ↕</button>
+          </div></div>`).join("")}
+        </div>
+      </div>` : ""}
+
+      ${(j.my_offers || []).length ? `<div class="card tight" style="margin-top:4px">
+        <div class="sec-h"><h3>🤝 Negotiations in progress</h3><span class="spacer"></span><span class="tag">${j.my_offers.length}</span></div>
+        <div style="display:grid;gap:8px">
+        ${j.my_offers.map(o => `<div class="kv" style="align-items:center;flex-wrap:wrap;background:${o.awaiting_you ? 'rgba(53,224,138,.06)' : 'transparent'};border:${o.awaiting_you ? '1px solid rgba(53,224,138,.15)' : '0'};border-radius:10px;padding:10px;margin:0 -4px">
+          <span style="min-width:0;flex:1"><a href="#" onclick="go('player',${o.player_id});return false" style="font-weight:800">${esc(o.player)}</a>
+            <span class="tag" style="margin-left:6px;font-size:10px">${o.direction === "in" ? "BUYING" : "SELLING"}</span>
+            <div class="small muted">${esc(o.from_club||"—")} → ${esc(o.to_club||"—")} · ${o.direction === "out" ? "you are selling" : "you are buying"}</div>
+          </span>
+          <b class="small"><span class="tag ${o.awaiting_you ? "ROUTINE" : ""}" style="${o.awaiting_you ? 'animation:dot-pulse 1.5s infinite' : ''}">${esc(o.status)}${o.awaiting_you ? " — YOUR MOVE" : ""}</span> ${money(o.fee)} · ${wk(o.wage)}</b>
+          <span class="row" style="gap:6px;margin-left:auto">${o.direction === "out" && o.status === "counter" ? `
+            <button class="btn sm primary" onclick="respondCounter(${o.id},true,${o.fee})">Accept ✓</button>
+            <button class="btn sm" onclick="respondCounter(${o.id},false)">Walk away</button>
+            <button class="btn sm" onclick="respondCounterNew(${o.id},${o.fee})">Re-bid ↕</button>`
+            : (o.direction === "in" && o.status === "pending" ? `
+            <button class="btn sm primary" onclick="bid(${o.id},'accept')">Accept ✓</button>
+            <button class="btn sm" onclick="bid(${o.id},'reject')">Reject</button>` : "")}</span>
+          ${o.note ? `<span class="small" style="width:100%;background:var(--sf2);padding:8px 10px;border-radius:8px;margin-top:6px;border-left:3px solid var(--amber)">💬 ${esc(o.note)}</span>` : ""}</div>`).join("")}
+        </div>
+      </div>` : ""}
+
+      <div class="transfer-filters">
+        <div class="sec-h"><h3>🔍 Find your next star</h3><span class="spacer"></span><span class="small muted">Showing ${players.length} of ~${money(s.cap)} budget</span></div>
+        <div class="grid g2" style="gap:10px">
+          <div class="row" style="gap:8px">
+            <input id="tr-q" placeholder="Search name, club…" value="${esc(TR.q)}" style="flex:1;min-width:160px" oninput="TR.q=this.value;renderTransfersDebounced()">
+            <select id="tr-pos" title="Position" onchange="TR.pos=this.value;renderTransfers()"><option value="">Any pos</option>${G.static.positions.map(p => `<option ${TR.pos === p ? "selected" : ""}>${p}</option>`).join("")}</select>
+          </div>
+          <div class="row" style="gap:8px">
+            <input id="tr-fee" type="number" placeholder="Max €m" value="${TR.max_fee || ""}" style="width:90px" onchange="TR.max_fee=+this.value||0;renderTransfers()">
+            <input id="tr-age" type="number" placeholder="Age ≤" value="${TR.age_max || ""}" style="width:80px" onchange="TR.age_max=+this.value||0;renderTransfers()">
+            <select id="tr-sort" onchange="TR.sort=this.value;renderTransfers()"><option value="value" ${TR.sort==="value"?"selected":""}>Sort: Value</option><option value="ca" ${TR.sort==="ca"?"selected":""}>Sort: Ability</option><option value="age" ${TR.sort==="age"?"selected":""}>Sort: Age</option><option value="name" ${TR.sort==="name"?"selected":""}>Sort: Name</option></select>
+            <button class="btn primary sm" onclick="doSearch()">Search 🔍</button>
+          </div>
+        </div>
+        <div class="row" style="margin-top:10px;gap:8px">
+          <select id="tr-free" title="Free agents" onchange="TR.free=this.value==='true';renderTransfers()"><option value="false" ${!TR.free ? "selected" : ""}>🏟️ Contracted</option><option value="true" ${TR.free ? "selected" : ""}>🆓 Free agents</option></select>
+          <select id="tr-aff" title="Affordable" onchange="TR.aff=this.value==='true';renderTransfers()"><option value="true" ${TR.aff !== false ? "selected" : ""}>💰 Affordable only</option><option value="false" ${TR.aff === false ? "selected" : ""}>🌍 Any price</option></select>
+          <span class="spacer"></span>
+          <span class="small muted">💡 Tip: Loyalty matters — rivals reject, stars stay unless unsettled</span>
+        </div>
+      </div>
+
+      <div class="transfer-grid">
+        ${players.map(p => {
+          const ini = (p.name||"?").split(" ").map(w=>w[0]).slice(0,2).join("").toUpperCase();
+          const isRival = false; // could check but keep simple
+          const valueColor = (p.value||0) > (j.budget||0) ? "var(--red)" : "var(--acc)";
+          return `<div class="transfer-card" onclick="go('player',${p.id})">
+            <div class="transfer-card-header">
+              <div class="transfer-card-ava">${ini}</div>
+              <div class="transfer-card-info">
+                <div class="transfer-card-name">${esc(p.name)} ${p.known < 60 ? `<span class="tag" style="font-size:9px">SCOUT ${p.known}%</span>` : ""} ${shortlisted.has(p.id) ? "★" : ""}</div>
+                <div class="transfer-card-meta">
+                  <span><span class="pos">${esc(p.pos)}</span> ${p.age}y</span>
+                  <span>${esc(p.club||"Free agent")}</span>
+                  <span>${stars(p.stars||2)}</span>
+                </div>
+              </div>
+              <div style="text-align:right">
+                <div style="font-weight:900;font-size:14px;color:${valueColor}">${money(p.value)}</div>
+                <div class="small muted">${wk(p.wage)}</div>
+                ${p.ca ? `<div class="small" style="margin-top:2px"><span class="tag" style="font-size:10px">CA ${p.ca.toFixed(1)}</span></div>` : ""}
+              </div>
+            </div>
+            <div class="transfer-card-stats">
+              <div class="transfer-card-stat"><span class="label">Asking</span><span class="value" style="color:var(--amber)">${money(p.asking||p.value)}</span></div>
+              <div class="transfer-card-stat"><span class="label">Wage</span><span class="value">${wk(p.wage)}</span></div>
+              <div class="transfer-card-stat"><span class="label">Potential</span><span class="value">${p.pa ? p.pa.toFixed(1) : "?"}</span></div>
+            </div>
+            <div class="transfer-card-actions" onclick="event.stopPropagation()">
+              <button class="btn sm primary" onclick='openOffer(${p.id}, ${JSON.stringify(p.name)}, ${p.asking || 0}, ${p.wage || 0})'>💸 Bid</button>
+              <button class="btn sm" onclick="toggleShortlist(${p.id})" title="Shortlist">${shortlisted.has(p.id) ? "★ Shortlisted" : "☆ Shortlist"}</button>
+              <button class="btn sm" onclick="go('player',${p.id})">Profile 👤</button>
+            </div>
+            ${isRival ? '<div class="rivalry-tag" style="margin-top:8px">⚠️ Rival club — hard to deal</div>' : ""}
+          </div>`;
+        }).join("") || `
+          <div class="card" style="grid-column:1/-1;text-align:center;padding:32px">
+            <div style="font-size:40px;margin-bottom:12px">🔍</div>
+            <h3>No players found</h3>
+            <p class="small muted" style="margin-top:6px">Try widening your search — lower max fee, any position, or check free agents. The market is huge, 9000+ players.</p>
+            <button class="btn sm primary" style="margin-top:12px" onclick="TR={pos:'',q:'',max_fee:0,age_max:0,free:false,aff:false,sort:'value'};renderTransfers()">Clear filters & show all</button>
+          </div>`}
+      </div>
     </div>`;
 }
+let TR_DEBOUNCE = null;
+function renderTransfersDebounced() { clearTimeout(TR_DEBOUNCE); TR_DEBOUNCE = setTimeout(renderTransfers, 400); }
 function doSearch() {
   TR = { pos: $("#tr-pos").value, q: $("#tr-q").value, max_fee: +$("#tr-fee").value || 0,
          age_max: +$("#tr-age").value || 0, free: $("#tr-free").value === "true",
@@ -2108,24 +2426,52 @@ async function resignJob() {
 async function renderMedia() {
   const j = await api.get("/api/screen/media");
   await refreshState();
+  const h = G.home;
+  const f = h ? h.next_fixture : null;
+  const rivalry = f ? isRivalry(f.home_code, f.away_code) : null;
   $("#content").innerHTML = `
-    <div class="sec-h"><h3>Media</h3></div>
-    <p class="sub">Narrative: <b>${esc(j.narrative || "—")}</b> · pressure ${Math.round(j.pressure || 0)}/100</p>
-    <div class="card" style="margin-bottom:12px"><h3>Press conference</h3>
-      <p class="small muted">Your answers move board confidence, fan sentiment and media pressure.</p>
-      <div class="row">
+    <div class="sec-h"><h3>Media Centre — press conferences & hype</h3></div>
+    <div class="strip">
+      <div class="st"><span class="st-l">Narrative</span><span class="st-v small" style="font-size:13px">${esc(j.narrative || "—")}</span></div>
+      <div class="st"><span class="st-l">Pressure</span><span class="st-v">${Math.round(j.pressure || 0)}<i>/100</i></span>${bar(j.pressure||0, (j.pressure||0)>70 ? "red" : (j.pressure||0)>40 ? "amber" : "")}</div>
+      <div class="st"><span class="st-l">Board</span><span class="st-v">${Math.round(h ? h.board.confidence : 0)}</span></div>
+      <div class="st"><span class="st-l">Fans</span><span class="st-v">${Math.round(h ? h.fans.sentiment : 0)}</span></div>
+    </div>
+
+    ${f ? `<div class="card" style="margin-bottom:12px;background:linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);border-color:#0f3460;box-shadow:0 8px 32px rgba(0,0,0,.4)">
+      <div class="sec-h"><h3 style="color:#e94560">🎤 Pre-match press conference — ${esc(f.home)} vs ${esc(f.away)}</h3><span class="spacer"></span><span class="tag" style="background:#0f3460;color:#7fb2ff">${esc(compLabel(f))}</span></div>
+      ${rivalry ? `<div class="derby-banner" style="border-radius:10px;margin-bottom:12px">🔥 ${esc(rivalry.name.toUpperCase())} — PRESS ROOM PACKED — EVERY WORD MATTERS 🔥</div>` : ""}
+      <div class="pre" style="background:rgba(0,0,0,.25);border-color:#0f3460;color:#cbd5e0;font-style:italic">
+        Reporter: "${rivalry ? `This ${esc(rivalry.name)} means everything to the fans. How do you handle that pressure?` : f.code === "UCL" ? "Champions League nights are special — what's your message to the fans?" : `Next up: ${esc(f.away)} away. Tough place to go. How do you approach it?`}"
+      </div>
+      <p class="small" style="margin-top:10px;color:#9aa8bd">Your answer affects board confidence, fan sentiment, and player morale. Choose wisely — media twists everything.</p>
+      <div class="grid g2" style="margin-top:12px;gap:8px">
+        <button class="btn primary" onclick="press('confident')">💪 “We fear no one — we’ll win”<br><span class="small" style="font-weight:500;opacity:.8">Fans +++, Board ++, Pressure +</span></button>
+        <button class="btn" onclick="press('balanced')">⚖️ “Respect the opponent, focus on us”<br><span class="small muted">Balanced — safe option</span></button>
+        <button class="btn" onclick="press('defensive')">🛡️ “We’ll set up to be solid”<br><span class="small muted">Board ++ if underdog, Fans -</span></button>
+        <button class="btn danger" onclick="press('critical')">🔥 “Some players need to step up”<br><span class="small muted">High risk — can fire up or destroy morale</span></button>
+      </div>
+    </div>` : `<div class="card" style="margin-bottom:12px"><h3>Press conference</h3>
+      <p class="small muted">No upcoming match — press room quiet. When you have a fixture, hype builds here with rivalry context and meaningful choices.</p>
+      <div class="row" style="margin-top:10px">
         <button class="btn" onclick="press('confident')">Back the players publicly</button>
         <button class="btn" onclick="press('balanced')">Stay balanced</button>
         <button class="btn" onclick="press('defensive')">Deflect questions</button>
-        <button class="btn danger" onclick="press('critical')">Be critical of the squad</button>
+        <button class="btn danger" onclick="press('critical')">Be critical</button>
       </div>
-    </div>
+    </div>`}
+
     <div class="card tight" style="padding:0">
-      <div class="sec-h" style="padding:10px 12px 4px"><h3>World news feed</h3></div>
-      <div style="max-height:60vh;overflow:auto">
-      ${j.news.map(n => `<div class="mrow slim" style="cursor:default"><span class="mdot"></span>
-        <div class="mmain"><div class="msub" style="white-space:normal">${esc(n.text).replace("for €0k on loan", "on loan")}</div>
-        <div class="mmeta"><span class="mcat">${esc(n.cat)}</span><span>${fmtDate(n.date)}</span></div></div></div>`).join("")}
+      <div class="sec-h" style="padding:14px 16px 8px"><h3>🌍 World news feed — living world</h3><span class="spacer"></span><span class="small muted">Other clubs buy, sell, sack managers</span></div>
+      <div style="max-height:62vh;overflow:auto">
+      ${j.news.map(n => {
+        const isTransfer = (n.cat||"").toLowerCase().includes("transfer") || (n.text||"").toLowerCase().includes("joins") || (n.text||"").toLowerCase().includes("signs");
+        const icon = isTransfer ? "💸" : (n.cat||"").includes("MANAGER") ? "👔" : "📰";
+        return `<div class="mrow slim" style="cursor:default;min-height:56px">
+          <div style="width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg, var(--sf3), var(--sf2));display:grid;place-items:center;font-size:14px;flex:none">${icon}</div>
+          <div class="mmain"><div class="msub" style="white-space:normal;font-size:13.5px;line-height:1.4">${esc(n.text).replace("for €0k on loan", "on loan")}</div>
+          <div class="mmeta"><span class="mcat">${esc(n.cat)}</span><span>${fmtDate(n.date)}</span></div></div></div>`;
+      }).join("") || '<div class="inbox-empty" style="padding:24px"><div class="small muted">No news yet — world is just starting</div></div>'}
       </div>
     </div>`;
 }

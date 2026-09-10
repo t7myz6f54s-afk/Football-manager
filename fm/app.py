@@ -260,6 +260,9 @@ def api_screen(name: str, id: int = 0):
     if name == "training":
         return V.training(c, s) if s["club_id"] else {"error": "no club"}
     if name == "transfers":
+        club_row = E.club(c, s["club_id"]) if s["club_id"] else None
+        squad_cnt = c.execute("SELECT COUNT(*) FROM players WHERE club_id=?", (s["club_id"],)).fetchone()[0] if s["club_id"] else 0
+        listed_cnt = c.execute("SELECT COUNT(*) FROM players WHERE club_id=? AND listed=1", (s["club_id"],)).fetchone()[0] if s["club_id"] else 0
         return {"window": E.window_state(E.d(s["date"]), s["season"]),
                 "windows": {k: str(v) if not isinstance(v, tuple) else [str(x) for x in v]
                             for k, v in E.season_windows(s["season"]).items()},
@@ -267,7 +270,11 @@ def api_screen(name: str, id: int = 0):
                 "my_offers": V.my_offers(c, s) if s["club_id"] else [],
                 "shortlist_ids": list(s.get("targets", [])),
                 "shortlist": V.scouting(c, s)["targets"] if s["club_id"] else [],
-                "budget": E.club(c, s["club_id"])["transfer_budget"] if s["club_id"] else 0}
+                "budget": club_row["transfer_budget"] if club_row else 0,
+                "wage_budget": club_row["wage_budget"] if club_row else 0,
+                "wage_bill": club_row["wage_bill"] if club_row else 0,
+                "squad_count": squad_cnt,
+                "listed_count": listed_cnt}
     if name == "scouting":
         return V.scouting(c, s) if s["club_id"] else {"error": "no club"}
     if name == "finances":

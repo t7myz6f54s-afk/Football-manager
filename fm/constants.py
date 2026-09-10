@@ -670,6 +670,90 @@ STARS = [
     ("BRI", "Kaoru Mitoma", "Japan", 29, "AML", "AMC", 16, 16, "R", 0.12, 55),
 ]
 
+# Realistic rivalries and derbies - prevents unrealistic transfers and adds hype
+RIVALRIES = {
+    # England - Premier League
+    "MCI": ["MUN", "LIV", "ARS"],  # City vs United, Liverpool, Arsenal
+    "MUN": ["MCI", "LIV", "LEE", "ARS"],  # United vs City, Liverpool, Leeds, Arsenal
+    "LIV": ["MUN", "MCI", "EVE"],  # Liverpool vs United, City, Everton
+    "ARS": ["TOT", "CHE", "MUN"],  # Arsenal vs Tottenham, Chelsea, United
+    "TOT": ["ARS", "CHE", "WHU"],  # Tottenham vs Arsenal, Chelsea, West Ham
+    "CHE": ["ARS", "TOT", "FUL"],  # Chelsea vs Arsenal, Tottenham, Fulham
+    "EVE": ["LIV"],  # Everton vs Liverpool
+    "WHU": ["TOT", "MIL"],  # West Ham vs Tottenham, Millwall
+    "NEW": ["SUN"],  # Newcastle vs Sunderland
+    "AVL": ["BIR", "WBA"],  # Villa vs Birmingham, West Brom
+    "BRI": ["CRY"],  # Brighton vs Palace
+    "FUL": ["CHE", "QPR", "BRE"],  # Fulham vs Chelsea, QPR, Brentford
+    "WOL": ["WBA", "AVL"],  # Wolves vs West Brom, Villa
+    "NOT": ["DER", "LEI"],  # Forest vs Derby, Leicester
+    "LEI": ["COV", "DER", "NOT"],  # Leicester vs Coventry, Derby, Forest
+    # Spain
+    "RMA": ["BAR", "ATM"],  # Real vs Barca, Atleti
+    "BAR": ["RMA", "ESP"],  # Barca vs Real, Espanyol
+    "ATM": ["RMA", "SEV"],  # Atleti vs Real, Sevilla
+    "SEV": ["BET"],  # Sevilla vs Betis
+    "BET": ["SEV"],  # Betis vs Sevilla
+    "VAL": ["LEV"],  # Valencia vs Levante
+    # Italy
+    "INT": ["ACM", "JUV"],  # Inter vs Milan, Juve
+    "ACM": ["INT", "JUV"],  # Milan vs Inter, Juve
+    "JUV": ["INT", "ACM", "TOR"],  # Juve vs Inter, Milan, Torino
+    "ROM": ["LAZ"],  # Roma vs Lazio
+    "LAZ": ["ROM"],  # Lazio vs Roma
+    "NAP": ["ROM"],  # Napoli vs Roma
+    # Germany
+    "BAY": ["BVB", "M60"],  # Bayern vs Dortmund, 1860
+    "BVB": ["BAY", "SCH"],  # Dortmund vs Bayern, Schalke
+    "SCH": ["BVB", "DUS"],  # Schalke vs Dortmund, Dusseldorf
+    # France
+    "PSG": ["OM", "OL"],  # PSG vs Marseille, Lyon
+    "OM": ["PSG", "OL"],  # Marseille vs PSG, Lyon
+    "OL": ["ASSE", "OM"],  # Lyon vs Saint-Etienne, Marseille
+    # Scotland
+    "CEL": ["RAN"],  # Celtic vs Rangers
+    "RAN": ["CEL"],  # Rangers vs Celtic
+    # etc.
+}
+
+# Derby names for hype
+DERBY_NAMES = {
+    ("MCI", "MUN"): "Manchester Derby",
+    ("MUN", "MCI"): "Manchester Derby",
+    ("LIV", "EVE"): "Merseyside Derby",
+    ("EVE", "LIV"): "Merseyside Derby",
+    ("ARS", "TOT"): "North London Derby",
+    ("TOT", "ARS"): "North London Derby",
+    ("CHE", "ARS"): "London Derby",
+    ("ARS", "CHE"): "London Derby",
+    ("CHE", "TOT"): "London Derby",
+    ("TOT", "CHE"): "London Derby",
+    ("RMA", "BAR"): "El Clásico",
+    ("BAR", "RMA"): "El Clásico",
+    ("RMA", "ATM"): "Madrid Derby",
+    ("ATM", "RMA"): "Madrid Derby",
+    ("SEV", "BET"): "Seville Derby",
+    ("BET", "SEV"): "Seville Derby",
+    ("INT", "ACM"): "Derby della Madonnina",
+    ("ACM", "INT"): "Derby della Madonnina",
+    ("ROM", "LAZ"): "Derby della Capitale",
+    ("LAZ", "ROM"): "Derby della Capitale",
+    ("JUV", "TOR"): "Derby della Mole",
+    ("TOR", "JUV"): "Derby della Mole",
+    ("BAY", "BVB"): "Der Klassiker",
+    ("BVB", "BAY"): "Der Klassiker",
+    ("CEL", "RAN"): "Old Firm",
+    ("RAN", "CEL"): "Old Firm",
+    ("BOCA", "RIV"): "Superclásico",
+    ("RIV", "BOCA"): "Superclásico",
+    ("PSG", "OM"): "Le Classique",
+    ("OM", "PSG"): "Le Classique",
+}
+
+# Elite clubs that should dominate - prevents Fulham topping PL
+ELITE_CLUBS = ["MCI", "ARS", "LIV", "RMA", "BAR", "BAY", "PSG", "INT", "JUV", "ACM", "BVB", "CHE", "MUN"]
+TOP_CLUBS = ["MCI", "ARS", "LIV", "CHE", "MUN", "TOT", "NEW", "AVL", "RMA", "BAR", "ATM", "BAY", "BVB", "LEV1", "PSG", "OM", "INT", "JUV", "ACM", "NAP"]
+
 # national name pools: first / last
 NATIONS = {
     "England": 400, "Spain": 260, "France": 260, "Germany": 220, "Italy": 220,

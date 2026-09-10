@@ -60,6 +60,9 @@ def boot():
             {"id": "realistic", "name": "Realistic", "desc": "The intended Football Manager experience."},
             {"id": "hardcore", "name": "Hardcore", "desc": "Brutal board patience, injuries and finances."},
         ],
+        "rivalries": getattr(C, "RIVALRIES", {}),
+        "derby_names": getattr(C, "DERBY_NAMES", {}),
+        "elite_clubs": getattr(C, "ELITE_CLUBS", []),
     }
 
 
