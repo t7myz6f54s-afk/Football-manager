@@ -12,7 +12,7 @@ const allFns = new Set([...src.matchAll(/(?:async )?function ([a-zA-Z_]+)\(/g)].
 const missingHandlers = onclickFns.filter(f => !allFns.has(f) && !['go', 'closeModal'].includes(f));
 // CSS classes referenced by JS must exist in stylesheet (spot list)
 const css = fs.readFileSync(__dirname + '/../fm/static/style.css', 'utf8');
-const needCss = ['.dock', '.mhero', '.ev-goal', '.crest', '.cellclub', '.pitch', '.escore', '.tcard', '.tbadge', '.slogo', '.dead-box', '.mom-bar', '.order-row'];
+const needCss = ['.dock', '.mhero', '.ev-goal', '.crest', '.cellclub', '.pitch', '.escore', '.tcard', '.tbadge', '.slogo', '.dead-box', '.mom-bar', '.order-row', '.stat-row', '.xgt-row', '.sheet-group', '.menu-item'];
 const missingCss = needCss.filter(c => !css.includes(c));
 if (missing.length || missingHandlers.length || missingCss.length) {
   console.error('MISSING render fns:', missing, '| handlers:', missingHandlers, '| css:', missingCss);

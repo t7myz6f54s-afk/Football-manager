@@ -298,6 +298,8 @@ def api_screen(name: str, id: int = 0):
         return V.comp_detail(c, s, id) if id else {"error": "no comp"}
     if name == "table":
         return V.league_table(c, s) or {"rows": []}
+    if name == "stats":
+        return V.stats_screen(c, s) if s["club_id"] else {"error": "no club"}
     if name == "inbox":
         return V.inbox(c, s)
     raise HTTPException(404, f"unknown screen {name}")

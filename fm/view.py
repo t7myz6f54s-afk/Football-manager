@@ -882,3 +882,110 @@ def match_result_view(con, save, data, fx):
             "date": save["date"],
             "board_confidence": round(save["board"]["confidence"], 1),
             "fan_sentiment": round(save["fans"]["sentiment"], 1)}
+
+
+# ---------------------------------------------------------------- statistics
+def stats_screen(con, save):
+    """Stats Center: golden races, xG-vs-actual, squad leaders, form guide."""
+    cid = save["club_id"]
+    me = E.club(con, cid)
+    season = save["season"]
+    # clubs.league stores the competition CODE (e.g. "ENG1"); resolve the row
+    comp = None
+    if me and me["league"]:
+        comp = con.execute("SELECT id, name, code FROM competitions WHERE code=?",
+                           (me["league"],)).fetchone()
+    comp_id = comp["id"] if comp else None
+
+    def club_brief(row):
+        c = E.club(con, row["club_id"]) if "club_id" in row.keys() else None
+        return {"code": c["code"] if c else "", "club": c["name"] if c else ""}
+
+    scorers = []
+    assists = []
+    csheets = []
+    if comp_id:
+        q = """SELECT p.id pid, p.name, p.pos, p.goals g, p.assists a, p.apps ap,
+                      p.clean_sheets cs, c.code ccode, c.name club
+               FROM players p JOIN clubs c ON c.id = p.club_id
+               WHERE c.league = ? AND p.club_id IS NOT NULL AND (? IS NULL OR 1=1)"""
+        rows = con.execute(q + " AND p.goals > 0 ORDER BY p.goals DESC, p.assists DESC LIMIT 15",
+                           (comp_id, None)).fetchall()
+        scorers = [dict(pid=r["pid"], name=r["name"], pos=r["pos"], goals=r["g"],
+                        assists=r["a"], code=r["ccode"], club=r["club"]) for r in rows]
+        rows = con.execute(q + " AND p.assists > 0 ORDER BY p.assists DESC, p.goals DESC LIMIT 10",
+                           (comp_id, None)).fetchall()
+        assists = [dict(pid=r["pid"], name=r["name"], pos=r["pos"], assists=r["a"],
+                        goals=r["g"], code=r["ccode"], club=r["club"]) for r in rows]
+        rows = con.execute(q + " AND p.clean_sheets > 0 ORDER BY p.clean_sheets DESC LIMIT 10",
+                           (comp_id, None)).fetchall()
+        csheets = [dict(pid=r["pid"], name=r["name"], pos=r["pos"], cs=r["cs"],
+                        code=r["ccode"], club=r["club"]) for r in rows]
+
+    # xG vs actual for the league, aggregated from played fixture reports
+    xg = {}
+    if comp_id:
+        fxs = con.execute("""SELECT home_id, away_id, hg, aw, report FROM fixtures
+                             WHERE comp_id=? AND season=? AND played=1 AND report IS NOT NULL""",
+                          (comp_id, season)).fetchall()
+        for f in fxs:
+            try:
+                rep = json.loads(f["report"]) if isinstance(f["report"], str) else (f["report"] or {})
+            except Exception:
+                continue
+            for side, opp in (("home", "away"), ("away", "home")):
+                cid_s = f["home_id"] if side == "home" else f["away_id"]
+                d = xg.setdefault(cid_s, dict(p=0, gf=0, ga=0, xgf=0.0, xga=0.0))
+                d["p"] += 1
+                d["gf"] += f["hg"] if side == "home" else f["aw"]
+                d["ga"] += f["aw"] if side == "home" else f["hg"]
+                d["xgf"] += float(rep.get("xg_" + side) or 0.0)
+                d["xga"] += float(rep.get("xg_" + opp) or 0.0)
+    xg_rows = []
+    if xg:
+        names = {c["id"]: c for c in
+                 con.execute("SELECT id, name, code FROM clubs WHERE league=?",
+                             (comp["code"],)).fetchall()}
+        for cid_s, d in xg.items():
+            n = names.get(cid_s)
+            if not n:
+                continue
+            xg_rows.append(dict(code=n["code"], name=n["name"], p=d["p"], gf=d["gf"], ga=d["ga"],
+                                xgf=round(d["xgf"], 1), xga=round(d["xga"], 1),
+                                delta=round(d["gf"] - d["xgf"], 1)))
+        xg_rows.sort(key=lambda r: -r["delta"])
+
+    # my squad leaders
+    leaders = dict(goals=[], assists=[], rating=[])
+    rows = con.execute("""SELECT id pid, name, pos, goals g, assists a, apps ap, avg_rating ar
+                          FROM players WHERE club_id=? AND (goals>0 OR assists>0 OR apps>0)
+                          ORDER BY goals DESC LIMIT 5""", (cid,)).fetchall()
+    leaders["goals"] = [dict(pid=r["pid"], name=r["name"], pos=r["pos"], v=r["g"]) for r in rows]
+    rows = con.execute("""SELECT id pid, name, pos, assists a FROM players WHERE club_id=?
+                          AND assists>0 ORDER BY assists DESC LIMIT 5""", (cid,)).fetchall()
+    leaders["assists"] = [dict(pid=r["pid"], name=r["name"], pos=r["pos"], v=r["a"]) for r in rows]
+    rows = con.execute("""SELECT id pid, name, pos, avg_rating ar, apps ap FROM players
+                          WHERE club_id=? AND apps>=3 AND avg_rating>0
+                          ORDER BY avg_rating DESC LIMIT 5""", (cid,)).fetchall()
+    leaders["rating"] = [dict(pid=r["pid"], name=r["name"], pos=r["pos"],
+                              v=round(r["ar"], 2), apps=r["ap"]) for r in rows]
+
+    # form guide: last 5 played, my perspective
+    form = []
+    rows = con.execute("""SELECT f.*, k.name comp_name, k.code comp_code FROM fixtures f
+                          LEFT JOIN competitions k ON k.id=f.comp_id
+                          WHERE f.played=1 AND (f.home_id=? OR f.away_id=?)
+                          ORDER BY f.match_date DESC LIMIT 5""", (cid, cid)).fetchall()
+    for f in reversed(rows):
+        home = (f["home_id"] == cid)
+        gf, ga = (f["hg"], f["aw"]) if home else (f["aw"], f["hg"])
+        opp = E.club(con, f["away_id"] if home else f["home_id"])
+        form.append(dict(opp=opp["name"] if opp else "?", code=opp["code"] if opp else "",
+                         home=home, gf=gf, ga=ga,
+                         res="W" if gf > ga else ("D" if gf == ga else "L"),
+                         comp=f["comp_code"] or "", date=f["match_date"]))
+
+    return dict(comp=comp["name"] if comp else "", code=comp["code"] if comp else "",
+                my_code=me["code"] if me else "", my_name=me["name"] if me else "",
+                season=season, scorers=scorers, assists=assists, csheets=csheets,
+                xg=xg_rows[:20], leaders=leaders, form=form)

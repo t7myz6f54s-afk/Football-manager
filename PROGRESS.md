@@ -130,3 +130,8 @@ verified in-browser; repo pushed; release shipped.
 - Touchline orders (all_out_attack / sit_deep / press_hard / time_waste / go_long / calm_down): mutate the live tactical model; max 3 + 10' cooldown + context rules; chance rates now computed live each minute (was cached at kickoff — orders could not affect volume before this change).
 - Live subs (5 total incl. HT 3). Match recovery after restart (/api/match/live_state + boot pending_phase).
 - Tests: tests/live_match_test.py (black-box API, end-to-end PASS), tests/order_effect_test.py (paired-seed statistical proof: +0.71 shots / +0.12 xG for ALL-OUT ATTACK, PASS), browser walkthrough (live HUD → HT → mid-half order → FT, zero errors, PASS), smoke + season PASS.
+
+## v1.12.0 — FEATURE #2: Stats Center + declutter pass (2026-09-10)
+- Stats Center (/api/screen/stats + tab): golden boot w/ bars, assists, clean sheets, xG-vs-actual league table (aggregated from fixture reports, over/under-performance deltas), squad leaders, form guide. clubs.league is a CODE — resolve comps by code (bug fixed during build).
+- Declutter: 108 emoji stripped from UI chrome and headings; nav = Home/Squad/Match/Stats + grouped More (Club/Market/World/Office with descriptions); launcher cleaned (no float/bubble/badges); home gauges → compact season strip; marketing strips removed; flat primary buttons; fixed broken \U escape that rendered "U0001F501 SUB" in the live HUD.
+- Browser walkthrough extended (stats + grouped menu assertions): all green, zero console errors. smoke PASS.

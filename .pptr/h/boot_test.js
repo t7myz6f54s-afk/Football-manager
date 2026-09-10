@@ -108,6 +108,24 @@ const puppeteer = require('puppeteer');
       console.log(reachedFT ? 'PASS: reached full-time through live UI' : 'FAIL: never reached full-time');
       const liveErrs = errors.filter(e => !/favicon/i.test(e));
       if (liveErrs.length) { console.log('LIVE PAGE ERRORS:'); liveErrs.forEach(e => console.log('  ' + e)); }
+      // ---- Stats Center: advance a few days so league games are played, then check ----
+      for (let k = 0; k < 6; k++) { await page.evaluate(async () => { await doContinue(); }); await new Promise(r => setTimeout(r, 600)); }
+      await page.evaluate(() => go('stats'));
+      await new Promise(r => setTimeout(r, 1200));
+      const statsOk = await page.evaluate(() => {
+        const t = ((document.querySelector('#content') || {innerText: ''}).innerText || '').toLowerCase();
+        return t.includes('statistics') && t.includes('golden boot') && t.includes('expected goals') && t.includes('form guide');
+      });
+      console.log((statsOk ? 'PASS: ' : 'FAIL: ') + 'stats screen renders (golden boot + xG sections)');
+      // grouped More menu
+      await page.evaluate(() => openSheet());
+      await new Promise(r => setTimeout(r, 500));
+      const menuOk = await page.evaluate(() => {
+        const t = ((document.querySelector('#sheet-grid') || {innerText: ''}).innerText || '').toLowerCase();
+        return ['club','market','world','office'].every(x => t.includes(x));
+      });
+      console.log((menuOk ? 'PASS: ' : 'FAIL: ') + 'grouped More menu (Club/Market/World/Office, no emoji)');
+      await page.evaluate(() => closeSheet());
       // transfer flow end-to-end (exercises the fixed would_sell / player_willing)
       const bid = await page.evaluate(async () => {
         const sr = await fetch('/api/transfer/search?max_fee=60&age_max=24').then(x => x.json());

@@ -179,7 +179,23 @@ Massive overhaul addressing **"It still feels like a browser trying to act like 
 
 A standalone build of the same game is published as a release asset:
 
-**[Touchline-1.11.0-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.11.0/Touchline-1.11.0-arm64.apk)** — ~14 MB, Android 7.0+, 64-bit ARM, versionCode 14.
+**[Touchline-1.12.0-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.12.0/Touchline-1.12.0-arm64.apk)** — ~14 MB, Android 7.0+, 64-bit ARM, versionCode 15.
+
+### What changed in 1.12 — STATS CENTER + the declutter
+**New: Stats Center** (its own tab):
+- Golden boot race with goal bars, assists and clean-sheets leaderboards for your league
+- **Expected goals vs actual** — per-club xG for/against from every played match, with over/under-performance deltas (who's finishing above their xG?)
+- Your squad leaders (goals / assists / avg rating) and a form guide (last 5 with results)
+
+**Interface rebuilt — every element must justify its space:**
+- Removed every emoji icon in the interface (108 of them) — clean text labels instead
+- **Grouped navigation**: the "More" wall of 13 tiles is now four labelled sections — Club / Market / World / Office — each item with a one-line description
+- Tabs that matter: Home · Squad · Match · Stats (+ grouped More). News unread badge now lives on the More tile too
+- Launcher is a launcher: no floating logo, no version bubble, no marketing badges
+- Home lost the animated gauges for a compact season strip (position, points, board, fans, form)
+- Flat buttons, no decorative glows or marketing strips ("cinematic VAR cards goals" line is gone), quieter Godfather card
+
+v1.11.0 remains Match Day Live+ (live stepping, touchline shouts, momentum, live subs).
 
 ### What changed in 1.11 — MATCH DAY LIVE+
 You're on the touchline now, not in the stands:

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Build the Touchline Android APK.
 #
-#   ./make_apk.sh            -> release/Touchline-1.11.0-arm64.apk
+#   ./make_apk.sh            -> release/Touchline-1.12.0-arm64.apk
 #
 # Toolchain lives outside the workspace (/usr/local) so the repo stays lean.
 # The game itself is NOT duplicated in git: fm/ is copied in here at build time.
@@ -38,11 +38,11 @@ echo "[3/4] collecting APK"
 APK=app/build/outputs/apk/debug/app-debug.apk
 test -f "$APK" || { echo "APK not found"; exit 1; }
 mkdir -p ../release
-cp "$APK" ../release/Touchline-1.11.0-arm64.apk
-ls -lh ../release/Touchline-1.11.0-arm64.apk
+cp "$APK" ../release/Touchline-1.12.0-arm64.apk
+ls -lh ../release/Touchline-1.12.0-arm64.apk
 
 echo "[4/4] verifying"
 BT=/usr/local/android-sdk/build-tools/34.0.0
-"$BT/aapt2" dump badging ../release/Touchline-1.11.0-arm64.apk | head -6 || true
-unzip -l ../release/Touchline-1.11.0-arm64.apk | grep -cE "assets/game/|assets/chaquopy|lib/arm64-v8a" || true
+"$BT/aapt2" dump badging ../release/Touchline-1.12.0-arm64.apk | head -6 || true
+unzip -l ../release/Touchline-1.12.0-arm64.apk | grep -cE "assets/game/|assets/chaquopy|lib/arm64-v8a" || true
 echo "done"
