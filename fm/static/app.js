@@ -15,7 +15,7 @@ const api = {
     return j;
   }
 };
-const VERSION = "1.13.0";
+const VERSION = "1.14.1";
 let DEAD = false;
 function deadScreen() { if (DEAD) return; DEAD = true; const d = $("#dead"); if (d) d.classList.remove("hidden"); }
 const G = { boot: null, home: null, screen: "home", sub: null, static: null, busy: false, prevScreen: null };
@@ -64,7 +64,7 @@ const bar = (v,cls)=>`<div class="bar ${cls||""}"><i style="width:${pct(v)}%"></
 async function boot(){
   try{
     const v=$("#ver"); if(v) v.textContent="v"+VERSION;
-    [["#tb-budget","finances"],["#tb-board","board"],["#tb-next","match"],["#tb-club","club"]].forEach(([sel,sc])=>{
+    [["#tb-budget","finances"],["#tb-board","board"],["#tb-next","match"],["#tb-club","club"],["#tb-inbox","inbox"]].forEach(([sel,sc])=>{
       const el=$(sel); if(!el) return; el.classList.add("tap"); el.onclick=()=>{ if(!document.body.classList.contains("pregame")) go(sc); };
     });
     $("#splash-msg").textContent="Loading world…";
@@ -298,12 +298,13 @@ function paintTop(){
     paintCrest(h.club.code);
   }
   $("#tb-date").innerHTML=`${fmtDate(h.date).replace(/, \d{4}$/,"").split(" ").slice(0,2).join(" ")}`;
+  const _ib=$("#tb-inbox"); if(_ib&&!_ib.dataset.count) _ib.innerHTML=`<span class="chip-ic"></span><span>News</span>`;
   const nf=h.next_fixture;
   if(nf){ const isRival=isRivalry(nf.home_code,nf.away_code); $("#tb-next").innerHTML=`${isRival?'':''}<b>${esc(nf.home_short)} v ${esc(nf.away_short)}</b>`; }
   else $("#tb-next").innerHTML=`—`;
   $("#btn-continue").disabled=G.busy; $("#btn-continue").classList.toggle("busy",G.busy);
 }
-async function refreshBadges(){ try{ const j=await api.get("/api/inbox?unread=true"); const n=j.items.length; const spots=[...document.querySelectorAll('[data-badge="inbox"],[data-badge="__more"]')]; const b=$("#nb-inbox"); if(b) spots.push(b); spots.forEach(el=>{ el.textContent=n; el.classList.toggle("hidden",!n); }); } catch(e){} }
+async function refreshBadges(){ try{ const j=await api.get("/api/inbox?unread=true"); const n=j.items.length; const spots=[...document.querySelectorAll('[data-badge="inbox"],[data-badge="__more"]')]; const b=$("#nb-inbox"); if(b) spots.push(b); spots.forEach(el=>{ el.textContent=n; el.classList.toggle("hidden",!n); }); const ib=$("#tb-inbox"); if(ib){ ib.innerHTML=`<span class="chip-ic"></span><span${n?' style="color:var(--acc);font-weight:950"':""}>News${n?` · ${n}`:""}</span>`; } } catch(e){} }
 
 /* CONTINUE */
 $("#btn-continue").addEventListener("click",doContinue);
@@ -886,12 +887,12 @@ function renderTabbar(items){
 }
 function renderSheet(items){
   const el=$("#sheet-grid"); if(!el) return;
-  const have=new Set(items.map(i=>i[0])); have.add("inbox"); have.add("board"); have.add("media"); have.add("career"); have.add("staff"); have.add("youth");
+  const have=new Set(items.map(i=>i[0])); have.add("inbox"); have.add("board"); have.add("media"); have.add("career"); have.add("staff"); have.add("youth"); have.add("facilities");
   el.innerHTML=MENU_GROUPS.map(g=>{
     const rows=g.items.filter(([id])=>have.has(id)).map(([id,label,desc])=> `<button class="menu-item" data-s="${id}" onclick="Juice.haptic('tap');go('${id}')"><span class="mi-t">${label}<small>${desc}</small></span><span class="mi-go">›</span><span class="tbadge hidden" data-badge="${id}"></span></button>`).join("");
     return `<div class="sheet-group"><h4>${g.label}</h4>${rows}</div>`;
   }).join("");
-  const sheet=$("#sheet"); if(sheet&&!sheet.querySelector("#sheet-head b")){ const inner=sheet.innerHTML; sheet.innerHTML=`<div id="sheet-panel"><div id="sheet-head"><b style="font-size:13px">All sections</b><button onclick="closeSheet()" style="width:28px;height:28px;border-radius:8px;background:rgba(255,255,255,.08)">✕</button></div><div id="sheet-grid">${inner}</div></div>`; sheet.addEventListener("click",e=>{ if(e.target.id==="sheet") closeSheet(); }); }
+  const sheet=$("#sheet"); if(sheet&&!sheet.querySelector("#sheet-panel #sheet-grid")){ const inner=sheet.innerHTML; sheet.innerHTML=`<div id="sheet-panel"><div id="sheet-head"><h2>All sections</h2><button class="btn sm" onclick="closeSheet()">Close</button></div><div id="sheet-grid">${inner}</div></div>`; sheet.addEventListener("click",e=>{ if(e.target.id==="sheet") closeSheet(); }); }
 }
 function openSheet(){ Juice.haptic("light"); const s=$("#sheet"); if(!s) return; if(!s.querySelector("#sheet-panel")) renderSheet(NAV); s.classList.add("open"); requestAnimationFrame(()=>s.classList.add("vis")); }
 function closeSheet(){ const s=$("#sheet"); if(!s||!s.classList.contains("open")) return; s.classList.remove("vis"); setTimeout(()=>s.classList.remove("open"),260); }

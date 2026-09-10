@@ -179,7 +179,13 @@ Massive overhaul addressing **"It still feels like a browser trying to act like 
 
 A standalone build of the same game is published as a release asset:
 
-**[Touchline-1.14.0-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.14.0/Touchline-1.14.0-arm64.apk)** — ~14 MB, Android 7.0+, 64-bit ARM, versionCode 18.
+**[Touchline-1.14.1-arm64.apk](https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.14.1/Touchline-1.14.1-arm64.apk)** — ~14 MB, Android 7.0+, 64-bit ARM, versionCode 19.
+
+### What changed in 1.14.1 — NAV BUG PATCH
+- **Fixed: the Facilities screen was unreachable** (missing from the More sheet in 1.14.0)
+- **Inbox one tap away** — new News chip in the status bar with unread count, visible on every screen
+- Fixed a doubled header inside the More sheet
+- Version label now shows the real release
 
 ### What changed in 1.14 — FACILITIES & INFRASTRUCTURE
 Invest in your club, not just your squad. New **Facilities** screen (Club section): four investment areas — **training ground, medical centre, youth academy, stadium** — each with a 10-segment level bar, live cost, and build time.
