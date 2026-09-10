@@ -99,22 +99,37 @@ const NAV_START = [];
 function showStartScreen() {
   renderNav(NAV_START);
   $("#content").innerHTML = `
-    <div style="max-width:840px;margin:40px auto;text-align:center">
-      <h1 style="font-size:34px;letter-spacing:4px">TOUCHLINE</h1>
-      <p class="sub">A persistent, multi-season football management simulation.<br>
-      402 clubs · 21 leagues · Europe · South America. Every match simulated.</p>
-      <div class="row" style="justify-content:center;margin-top:26px">
-        <button class="btn primary" style="padding:12px 26px;font-size:15px" onclick="stepChooseClub()">NEW CAREER</button>
+    <div class="start">
+      <div class="start-hero">
+        <svg class="start-logo" viewBox="0 0 40 40" aria-hidden="true">
+          <path d="M20 2 L36 8 V20 C36 30 29 36 20 38 C11 36 4 30 4 20 V8 Z" fill="#0d3b26"/>
+          <path d="M20 2 L36 8 V20 C36 30 29 36 20 38 C11 36 4 30 4 20 V8 Z" fill="none" stroke="#35e08a" stroke-width="1.4"/>
+          <circle cx="20" cy="19" r="6.5" fill="none" stroke="#35e08a" stroke-width="1.3"/>
+          <path d="M20 12.5v13M13.5 19h13M15.4 14.4l9.2 9.2M24.6 14.4l-9.2 9.2" stroke="#35e08a" stroke-width=".8" opacity=".7"/>
+        </svg>
+        <h1>TOUCHLINE</h1>
+        <p class="start-tag">The permanent football world. Every club, every fixture, every summer window — simulated with or without you.</p>
+        <div class="row" style="justify-content:center;margin-top:22px">
+          <button class="btn primary" style="padding:0 26px;min-height:46px;font-size:14.5px" onclick="stepChooseClub()">NEW CAREER ▸</button>
+        </div>
+        <p class="small muted" style="margin-top:10px">Starting a new career rebuilds the world and replaces any saved career.</p>
       </div>
-      <p class="small muted" style="margin-top:10px">Starting a new career rebuilds the world and replaces any saved career.</p>
-      <div class="grid g3" style="margin-top:40px;text-align:left">
-        <div class="card"><h3>Manage everything</h3><div class="small muted">Tactics, roles and duties, training, contracts, scouting, transfers, staff, youth, finances, media and the board.</div></div>
-        <div class="card"><h3>A living world</h3><div class="small muted">Other clubs sack and appoint managers, buy and sell players, win and lose. Leagues, cups and Europe run without you.</div></div>
-        <div class="card"><h3>Your career</h3><div class="small muted">Get sacked and find a new job. Build a reputation. Trophy room, records and season reviews are kept forever.</div></div>
+      <div class="strip" style="margin:26px 0 12px">
+        <div class="st"><span class="st-l">Clubs</span><span class="st-v">402</span></div>
+        <div class="st"><span class="st-l">Leagues</span><span class="st-v">21</span></div>
+        <div class="st"><span class="st-l">Players</span><span class="st-v">9,000+</span></div>
+        <div class="st"><span class="st-l">Seasons</span><span class="st-v">∞</span></div>
+      </div>
+      <div class="grid g3">
+        <div class="card tight"><div class="row" style="gap:8px">${svg("tactics")}<b style="font-size:13px">Manage everything</b></div>
+          <p class="small muted" style="margin-top:6px">Tactics, roles and duties, training, contracts, scouting, transfers, staff, youth, finances, media and the board.</p></div>
+        <div class="card tight"><div class="row" style="gap:8px">${svg("comps")}<b style="font-size:13px">A living world</b></div>
+          <p class="small muted" style="margin-top:6px">Other clubs sack and appoint managers, buy and sell players, win and lose. Leagues, cups and Europe run without you.</p></div>
+        <div class="card tight"><div class="row" style="gap:8px">${svg("career")}<b style="font-size:13px">Your career</b></div>
+          <p class="small muted" style="margin-top:6px">Get sacked and find a new job. Build a reputation. Trophy room, records and season reviews are kept forever.</p></div>
       </div>
     </div>`;
 }
-
 let CLUB_PICK = null;
 async function stepChooseClub() {
   renderNav(NAV_START);
@@ -871,7 +886,7 @@ function pitchHTML(xi, clickable) {
   return `<div class="pitch"><div class="lines"></div>${xi.map((x, i) => {
     const c = POS_COORDS[x.pos] || [50, 50];
     const off = byPos[x.pos].indexOf(i) - (byPos[x.pos].length - 1) / 2;
-    const left = Math.max(7, Math.min(93, c[0] + off * 15));
+    const left = Math.max(6, Math.min(94, c[0] + off * 19));
     const p = x.player;
     return `<div class="slot ${p ? "" : "empty"}" style="left:${left}%;top:${c[1]}%"
       ${clickable ? `onclick="pickSlot(${i},'${x.pos}')"` : ""}>
