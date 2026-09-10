@@ -598,3 +598,11 @@ select { min-width: 0; max-width: 100%; }
   border: 1px solid var(--line); color: var(--tx2); font-size: 11px; font-weight: 700;
   display: grid; place-items: center; margin-top: 1px; }
 .step-list b { font-size: 13px; }
+@media (max-width: 620px) {
+  table.mc:not(.mh) .frm .fm-i { width: 7px; height: 7px; padding: 0; font-size: 0; border-radius: 2px; }
+  table.mc:not(.mh) .frm { display: flex; gap: 2px; }
+  table.mc:not(.mh) .cellclub i { display: none; }
+  table.mc:not(.mh) { width: 100%; }
+  table.mc:not(.mh) tbody td, table.mc:not(.mh) thead th { padding: 8px 3px; }
+  table.mc:not(.mh) th.num, table.mc:not(.mh) td.num { font-size: 12px; }
+}
