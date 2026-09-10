@@ -84,3 +84,18 @@ Design tokens in style.css; nav restructure (bottom bar: Home/Squad/Tactics/Matc
 - Engine 1-season test PASSED (temp DB): finances/inbox/progression sane.
 - audit2 16/16 clean; ui_sanity green; make_apk.sh re-stages fm/ + static at build time (final build will include everything).
 - FREEZE 05:27: no more feature edits; final regression -> APK -> release -> report.
+
+## FINAL HOUR (05:27-06:27 UTC)
+- Freeze regression: node --check, ui_sanity (20 screens/43 handlers/12 css hooks), audit2 16/16 clean @393px, zero page errors; engine 1-season test passed earlier; two-season proof stands (tests/multiseason.py).
+- P0 FIXED at 05:20: reopening a match paused at half-time after reload showed a dead screen (halftime state was client-memory only). Added HT recovery card ("Send them back out" no-changes resume / "Auto-finish") + guarded full-mode second-half render. Verified: pending clears, second half completes.
+- APK REBUILT 05:24: release/Touchline-1.6.0-arm64.apk, 14 MB (14,265,227 B), versionCode 8 / 1.6.0, arm64-v8a, apksigner-verified; packaged assets confirmed to contain today's fixes (HT recovery card, step-list, restored hub funcs).
+- Workspace build caches removed (android/app/build, staged fm copies, local.properties).
+- GITHUB RELEASE v1.6.0 published with APK attached; release is repo latest.
+  Release: https://github.com/t7myz6f54s-afk/Football-manager/releases/tag/v1.6.0
+  APK:     https://github.com/t7myz6f54s-afk/Football-manager/releases/download/v1.6.0/Touchline-1.6.0-arm64.apk
+- README APK link already points at v1.6.0 tag.
+
+## SPRINT END STATE
+All P0/P1 closed; 16/16 screens clean at 393px; tablet + desktop passes clean; new-career,
+matchday (full/key/instant), HT resume, transfers, season progression and world simulation
+verified in-browser; repo pushed; release shipped.
