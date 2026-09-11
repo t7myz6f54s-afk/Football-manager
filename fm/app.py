@@ -566,6 +566,47 @@ def api_advance(payload: dict = Body(default={})):
             "log": brief_log(res)}
 
 
+@app.post("/api/sim")
+def api_sim(payload: dict = Body(default={})):
+    """One chunk of smart fast-forwarding; the client loops while stop_reason == 'chunk'."""
+    s = need_save()
+    no_pending()
+    target = payload.get("target") or "match"
+    chunk = max(3, min(30, int(payload.get("chunk", 14))))
+    res = E.fast_sim(con(), s, target, rng=S["rng"], chunk_days=chunk)
+    if res.get("ok") is False:
+        return {"ok": False, "msg": res.get("msg", "Simulation failed.")}
+    commit()
+    nf = E.next_fixture(con(), s) if s.get("club_id") else None
+    goal = None
+    if target in ("season", "next_season"):
+        goal = E.ds(E.season_backstop(s["season"]))
+    elif nf:
+        goal = nf["match_date"]
+    return {"ok": True, "stop_reason": res["stop_reason"], "date": s["date"],
+            "season": s["season"], "days_advanced": res["days_advanced"],
+            "log": brief_log({"log": res["log"]}, limit=24),
+            "fixture": V._fixture_brief(con(), s, nf) if nf else res.get("fixture"),
+            "urgent": E.unread_urgent(con(), s),
+            "goal_date": goal,
+            "rolled_over": res["stop_reason"] == "rollover"}
+
+
+@app.get("/api/trophies")
+def api_trophies():
+    s = need_save()
+    no_pending()
+    data = E.trophies(con(), s)
+    # mark every trophy shown as seen (drives the one-time "new trophy" animation)
+    seen = set(s["flags"].get("trophy_seen", []))
+    for g in data["groups"]:
+        for season in g["seasons"]:
+            seen.add(f"{g['code']}-{season}")
+    s["flags"]["trophy_seen"] = sorted(seen)
+    commit()
+    return data
+
+
 # ---------------------------------------------------------------------- match
 @app.get("/api/match/next")
 def api_match_next():

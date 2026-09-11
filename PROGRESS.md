@@ -252,3 +252,54 @@ priority: matchday → market → contracts → depth → season), all data-driv
   6. MLS/Saudi transfer eligibility  7. Godfather verdict + rejects  8. Godfather live guidance
      in a real live match  9. regression sweep (19 API screens, transfers, tactics, save, nav,
      toggle round-trip, instant match, version/wiring).
+
+## v1.18.0 — Premium Trophy Room + Smart Simulation (2026-09-11)
+Two systems, added on top of v1.17.0 (nothing previously shipped was removed).
+
+### Premium Trophy Room (3D club museum)
+- Real 3D environment built with Three.js (r128, bundled locally — no network needed,
+  works offline in the APK): polished reflective floor, dark museum walls, gilded cove
+  lighting, IBL studio environment for metallic reflections, dust-in-the-light particles,
+  slow camera drift + full drag/pinch/wheel orbit.
+- Trophies are procedurally modelled per competition with recognisable designs:
+  UCL "Big Ears" (large ear handles), Premier League (gold cup, black lid + lion),
+  FA Cup profile, UEL/UECL with competition-colour ribbons, top-flight league cups
+  (gold + star), domestic cups with country accent ribbons. Silver/gold PBR materials.
+- Each win gets a pedestal + glass display case + engraved nameplate (competition,
+  ×N, years). Most recent win is the hero pedestal; new wins animate in with a glow.
+- Competition result → trophy → history record: source of truth is the permanent
+  `history` table (cup finals + league champions), enriched with the manager's career
+  list ("won under you" + manager name). Multiple wins preserved (year list on plate
+  and detail panel). Details only from data that exists: final opponent + score +
+  date + venue (cups/continental), final season record (leagues).
+- Per-save rooms (filter by club), previous trophies never disappear, new career =
+  own room. Won a final → "TROPHY ROOM — IT'S YOURS" button on the full-time screen.
+- Performance: lazy-loads three.min.js + trophy.js only on first open, shared
+  geometry/materials, capped pixel ratio, render loop paused when the tab is hidden,
+  full dispose on screen exit. No WebGL → elegant 2D "shelf" fallback (tested in jsdom).
+
+### Smart Simulation ("take me there")
+- New SIM control bar on the home screen: 1D / 7D / NEXT EVENT / NEXT MATCH /
+  NEXT COMP / SEASON END / NEXT SEASON (existing Continue untouched).
+- Engine `fast_sim`: one HTTP call = one bounded chunk (≤14 in-game days) so the UI
+  never freezes; the client loops with a live progress overlay (date ticker, progress
+  bar, scrolling event log, STOP button).
+- Intelligent stopping (item: "do not skip important events"):
+  * NEXT EVENT — stops at the next own match or any urgent news
+  * NEXT MATCH — stops the day before the next own match (any competition)
+  * NEXT COMP — auto-plays league on the way; stops at the next own cup/continental
+    match (league-only clubs: next league match)
+  * SEASON END — auto-plays everything (instant mode) to the season rollover
+  * NEXT SEASON — auto-plays league only; stops at own cup/continental matches,
+    actionable urgent news (incoming bids, board decisions); pure-news urgents and
+    injuries are auto-processed; otherwise fast-forwards the whole offseason to the
+    new season in one button
+- Auto-played results appear as one-line log entries (W 2-1 v X — Premier League)
+  and are recorded normally (tables, stats, history, finances).
+- Verified: MCI 2026/27+2027/28 via the API — 87 chunks, worst chunk 13.7 s (UCL
+  knockout week), 26 cup/continental stops, both rollovers clean; 4 trophies
+  (UCL×2, PL×2, EFL Cup) with full final details in /api/trophies.
+
+### Regression
+competition_test 11/11, smoke, ui_sanity (24 screens / 61 handlers), node --check
+on app.js + trophy.js + three.min.js, jsdom 2D fallback test, asset serving check.

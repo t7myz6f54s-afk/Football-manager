@@ -15,7 +15,7 @@ const api = {
     return j;
   }
 };
-const VERSION = "1.17.0";
+const VERSION = "1.18.0";
 let DEAD = false;
 function deadScreen() { if (DEAD) return; DEAD = true; const d = $("#dead"); if (d) d.classList.remove("hidden"); }
 const G = { boot: null, home: null, screen: "home", sub: null, static: null, busy: false, prevScreen: null };
@@ -225,7 +225,7 @@ const NAV=[
 ];
 /* Grouped menu for the More sheet — every screen, organised, no emoji wall */
 const MENU_GROUPS=[
-  {label:"Club", items:[["tactics","Tactics","Formations & instructions"],["training","Training","Weekly schedule"],["youth","Youth","Academy & intake"],["facilities","Facilities","Invest in your ground"],["staff","Staff","Backroom team"]]},
+  {label:"Club", items:[["tactics","Tactics","Formations & instructions"],["training","Training","Weekly schedule"],["youth","Youth","Academy & intake"],["facilities","Facilities","Invest in your ground"],["staff","Staff","Backroom team"],["trophies","Trophy Room","The club museum"]]},
   {label:"Market", items:[["transfers","Transfers","Targets, bids, offers"],["scouting","Scouting","Scouts & knowledge"],["finances","Finances","Budget & ledger"]]},
   {label:"World", items:[["table","Table","League standings"],["comps","Competitions","All tournaments"],["history","History","Seasons & records"],["calendar","Calendar","Fixtures by date"],["inbox","News","Inbox & media"]]},
   {label:"Office", items:[["board","Board","Confidence & objectives"],["media","Media","Press & narrative"],["career","Career","History & trophies"]]},
@@ -238,10 +238,11 @@ function renderNav(items){
 }
 async function enterGame(){ $("#splash").classList.add("hidden"); $("#app").classList.remove("hidden"); renderNav(NAV); await go("home"); }
 async function resumeMatch(){ const r=await api.post("/api/match/abandon",{}); if(r&&r.ok){ G.pendingMatch=false; await refreshState(); showResult(r.result); } else toast(esc((r&&r.msg)||"No paused match"),4000); }
-const SCREEN_ORDER=["home","inbox","squad","tactics","match","comps","transfers","scouting","finances","calendar","table","club","board","training","career"];
+const SCREEN_ORDER=["home","inbox","squad","tactics","match","comps","transfers","scouting","finances","calendar","table","club","board","training","career","trophies"];
 function getNavDir(ns,os){ const a=SCREEN_ORDER.indexOf(os||"home"), b=SCREEN_ORDER.indexOf(ns||"home"); if(a===-1||b===-1) return 0; return b>a?1:b<a?-1:0; }
 async function go(screen,sub){
-  const prev=G.screen; G.prevScreen=prev; G.screen=screen; G.sub=sub||null;
+  const prev=G.screen; if(prev==="trophies"&&window.TrophyRoom){ TrophyRoom.destroy(); G._trophyActive=false; }
+  G.prevScreen=prev; G.screen=screen; G.sub=sub||null;
   $$("#nav button").forEach(b=>b.classList.toggle("active",b.dataset.s===screen));
   $$("#tabbar button").forEach(b=>b.classList.toggle("active",b.dataset.s===screen));
   $$("#sheet-grid button").forEach(b=>b.classList.toggle("active",b.dataset.s===screen));
@@ -272,6 +273,7 @@ async function go(screen,sub){
     else if(screen==="board") await renderBoard();
     else if(screen==="media") await renderMedia();
     else if(screen==="career") await renderCareer();
+    else if(screen==="trophies") await renderTrophyRoom();
     else if(screen==="jobs") await renderJobs();
   } catch(e){ if(e.status===400 && /no active career/i.test(e.message||"")){ showStartScreen(); return; } $("#content").innerHTML=`<div class="card" style="border-color:#5a1a22"><h3 style="color:var(--red)">Error</h3><p class="small muted">${esc(e.message)}</p><div style="display:flex;gap:8px;margin-top:10px"><button class="btn sm" onclick="go('${screen}')">Retry</button><button class="btn sm primary" onclick="go('home')">Home</button></div></div>`; }
   $("#content").scrollTop=0; polish($("#content")); refreshBadges();
@@ -332,6 +334,134 @@ function showContinueModal(j){
     <h3 style="margin-top:10px">What happened</h3> <div style="max-height:38vh;overflow:auto;margin-top:6px">${items.length?items.slice().reverse().map(e=>e.type==="match_scheduled"?`<div style="padding:8px;border-radius:10px;background:var(--panel2);margin-bottom:6px"><b style="font-size:12px">Match day: ${e.fixtures.map(f=>`${esc(f.home)} v ${esc(f.away)}`).join(", ")}</b></div>`:`<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:12px"><span class="small muted">${esc(e.date||"")}</span> ${esc(e.text||"")}</div>`).join(""):'<p class="small muted">Nothing notable</p>'}</div> <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end"><button class="btn sm" onclick="closeModal()">Close</button><button class="btn primary sm" onclick="closeModal();doContinue()">CONTINUE ▶</button></div>`, true);
 }
 
+/* ------------------------------------------------ SIM CONTROLS (fast-forward) */
+let _simStop=false;
+const SIM_LABELS={event:"Next event",match:"Next match",comp:"Next competition event",season:"End of season",next_season:"Go to next season"};
+function openSimOverlay(label){
+  closeSimOverlay(); _simStop=false;
+  const ov=document.createElement("div"); ov.id="sim-overlay";
+  ov.innerHTML=`<div class="sim-panel"><div class="sim-head"><span class="sim-spin"></span><b>${esc(label)}</b><span class="sim-stop" onclick="_simStop=true">STOP &middot;</span></div>
+    <div class="sim-date" id="sim-date">…</div>
+    <div class="sim-track"><div class="sim-fill" id="sim-fill"></div></div>
+    <div class="sim-log" id="sim-log"></div></div>`;
+  document.body.appendChild(ov);
+}
+function closeSimOverlay(){ const o=$("#sim-overlay"); if(o) o.remove(); }
+function setSimProgress(startD,curD,goalD,dateStr){
+  const d=$("#sim-date"); if(d) d.textContent=fmtDate(dateStr);
+  const f=$("#sim-fill"); if(!f) return;
+  if(goalD&&goalD>startD){ const pct=Math.max(0,Math.min(100,(curD-startD)/(goalD-startD)*100)); f.style.width=pct+"%"; f.classList.remove("ind"); }
+  else f.classList.add("ind");
+}
+function addSimLog(logArr,dateStr){
+  const el=$("#sim-log"); if(!el) return;
+  let html="";
+  for(const it of (logArr||[])){
+    if(it.type==="match_scheduled"){
+      html+=`<div class="sim-li"><span class="sim-ld">${esc(it.date||dateStr||"")}</span> Match day: ${esc((it.fixtures||[]).map(f=>f.home+" v "+f.away).join(", "))}</div>`;
+    } else if(it.type==="urgent_mail"){
+      html+=`<div class="sim-li urg"><span class="sim-ld">${esc(it.date||dateStr||"")}</span> ${esc((it.items||[]).map(u=>u.subject).join(" · "))}</div>`;
+    } else if(it.text){
+      html+=`<div class="sim-li"><span class="sim-ld">${esc(it.date||dateStr||"")}</span> ${esc(it.text)}</div>`;
+    }
+  }
+  el.insertAdjacentHTML("beforeend",html);
+  const kids=el.children; while(kids.length>70) el.removeChild(kids[0]);
+  el.scrollTop=el.scrollHeight;
+}
+async function doAdvance(days){
+  if(G.busy) return; if(G.pendingMatch){ toast("Finish paused match first",4000); go("match"); return; }
+  G.busy=true; setBusy(true); paintTop();
+  try{
+    const j=await api.post("/api/advance",{days});
+    await refreshState();
+    const notes=(j.log||[]).filter(x=>x.text).slice(-2).map(x=>x.text).join(" · ");
+    toast((days===1?"Advanced 1 day":"Advanced 7 days")+" → "+esc(G.home?G.home.date:"")+(notes?" — "+esc(notes):""),3800);
+    if(j.stop_reason==="match"&&G.home&&G.home.next_fixture&&G.home.next_fixture.date===G.home.date) toast("Match day: "+esc(G.home.next_fixture.home)+" v "+esc(G.home.next_fixture.away),4200);
+  }catch(e){ toast("Advance failed: "+esc(e.message),5000); }
+  G.busy=false; setBusy(false); paintTop();
+}
+async function doSim(target){
+  if(G.busy) return; if(G.pendingMatch){ toast("Finish paused match first",4000); go("match"); return; }
+  G.busy=true; setBusy(true); paintTop();
+  openSimOverlay(SIM_LABELS[target]||"Simulating");
+  let hops=0, startD=Date.parse((G.home&&G.home.date)||new Date().toISOString()), goalD=null;
+  try{
+    while(hops++<90 && !_simStop){
+      const j=await api.post("/api/sim",{target});
+      if(!j.ok){ closeSimOverlay(); toast(esc(j.msg||"Simulation failed"),4200); return; }
+      addSimLog(j.log,j.date);
+      if(j.goal_date&&!goalD){ goalD=Date.parse(j.goal_date); }
+      setSimProgress(startD,Date.parse(j.date),goalD,j.date);
+      if(j.stop_reason==="chunk"){ await new Promise(r=>setTimeout(r,90)); continue; }
+      closeSimOverlay();
+      await refreshState();
+      if(j.stop_reason==="rollover"){
+        Juice.haptic("success"); try{ Juice.play("success"); }catch(e){}
+        toast("Season "+j.season+"/"+String(j.season+1).slice(2)+" — a new era begins",5200);
+        await go("home"); return;
+      }
+      if(j.stop_reason==="match"){
+        const fx=j.fixture;
+        if(fx){
+          if(fx.date===j.date){ Juice.haptic("nav"); await go("match"); }
+          else { toast("Stopped — "+esc(fx.comp||"match")+": "+esc(fx.home)+" v "+esc(fx.away)+" · "+esc(fx.date),4600); await go("home"); }
+        } else { await go("home"); }
+        return;
+      }
+      if(j.stop_reason==="urgent"){
+        toast("Important news needs your decision",4200);
+        await go("inbox"); return;
+      }
+      break;
+    }
+    closeSimOverlay();
+    if(_simStop) toast("Simulation stopped by you",3000);
+    await refreshState(); await go("home");
+  }catch(e){ closeSimOverlay(); toast("Sim failed: "+esc(e.message),5000); }
+  G.busy=false; setBusy(false); paintTop();
+}
+
+/* ------------------------------------------------ TROPHY ROOM */
+async function renderTrophyRoom(){
+  const j=await api.get("/api/trophies");
+  G.trophies=j;
+  $("#content").innerHTML=`<div id="trophy-stage" style="position:relative;height:calc(100dvh - 96px);min-height:430px;background:#050608;overflow:hidden"></div><div id="trophy-detail" class="hidden"></div>`;
+  if(!window.TrophyRoom){
+    await new Promise((res,rej)=>{ const s=document.createElement("script"); s.src="trophy.js"; s.onload=res; s.onerror=()=>rej(new Error("trophy.js")); document.head.appendChild(s); });
+  }
+  await TrophyRoom.mount($("#trophy-stage"), j, { club:G.home&&G.home.club, onSelect:showTrophyDetail, onDeselect:closeTrophyDetail });
+  G._trophyActive=TrophyRoom.active;
+}
+function showTrophyDetail(g){
+  const el=$("#trophy-detail"); if(!el) return;
+  if(!g){ el.classList.add("hidden"); return; }
+  const d=g.detail||{};
+  const seasons=g.seasons.slice().reverse();
+  const yrs=s=>s+"/"+String(s+1).slice(2);
+  el.innerHTML=`<div class="td-back" onclick="closeTrophyDetail()"></div><div class="td-panel">
+    <button class="td-close" onclick="closeTrophyDetail()">✕</button>
+    <div class="td-kicker">${esc(g.ctype==="league"?"LEAGUE TITLE":g.ctype==="continental"?"CONTINENTAL CUP":"DOMESTIC CUP")}</div>
+    <h2 class="td-name">${esc(g.comp)}</h2>
+    <div class="td-count">${g.count}× WINNER${g.count>1?"S":""}</div>
+    <div class="td-years">${seasons.map(s=>`<span class="td-year${s===g.last?" now":""}">${yrs(s)}</span>`).join("")}</div>
+    <div class="td-rows">
+      ${d.type==="final"?`
+        <div class="kv"><span>Final</span><b>${esc(d.opp)} — ${esc(d.score)}</b></div>
+        <div class="kv"><span>Date</span><b>${esc(fmtDate(d.date))}</b></div>
+        <div class="kv"><span>Venue</span><b>${d.is_home?"At home":"Away"}</b></div>`
+      :d.type==="league"?`
+        <div class="kv"><span>Season record</span><b>${d.won}W ${d.drawn}D ${d.lost}L</b></div>
+        <div class="kv"><span>Points</span><b>${d.points} from ${d.played}</b></div>
+        <div class="kv"><span>Goal difference</span><b>${d.gf-d.ga>=0?"+":""}${d.gf-d.ga}</b></div>`:""}
+      ${g.mine&&g.mine.length?`<div class="kv"><span>Manager</span><b>${esc((G.trophies&&G.trophies.manager)||"—")} · ${esc(g.mine.map(yrs).join(", "))}</b></div>`:""}
+      <div class="kv"><span>Club</span><b>${esc((G.trophies&&G.trophies.club&&G.trophies.club.name)||"")}</b></div>
+    </div>
+  </div>`;
+  el.classList.remove("hidden");
+}
+function closeTrophyDetail(){ const el=$("#trophy-detail"); if(el) el.classList.add("hidden"); }
+
 /* comps helpers */
 function compLabel(f){ return f.comp || (f.stage && f.stage!=="league"?f.stage:"") || "Match"; }
 function compColor(code){ code=code||""; if(code==="UCL") return "#2a5bd7"; if(code==="UEL") return "#ff6900"; if(code==="UECL") return "#00b050"; if(code==="FACUP") return "#ff4444"; if(code==="EFLCUP") return "#00c851"; if(code.includes("CUP")||code.includes("POKAL")||code.includes("COUPE")) return "#ffb454"; if(code==="ENG1") return "#37003c"; if(code.startsWith("ENG")) return "#37003c"; if(code.startsWith("ESP")) return "#ff4b44"; if(code.startsWith("ITA")) return "#008c99"; if(code.startsWith("GER")) return "#d20515"; if(code.startsWith("FRA")) return "#091c3e"; return "#2cff8a"; }
@@ -367,6 +497,7 @@ async function renderHome(){
   $("#content").innerHTML=`
     ${intBreak?`<div style="margin-bottom:10px;padding:12px;border-radius:14px;background:linear-gradient(135deg,#121e3a,#162a4a);border:1px solid #1a3a5a"><div style="display:flex;align-items:center;gap:10px"><div style="width:36px;height:36px;border-radius:10px;background:rgba(77,158,255,.15);display:grid;place-items:center"></div><div style="flex:1"><b style="font-size:12px;color:#7fb2ff">International break</b><div class="small muted" style="font-size:10px">Youth training with first team</div></div><button class="btn sm" onclick="go('squad')">Squad</button></div></div>`:""}
     ${f?`${rivalry?`<div class="derby-banner">${esc(rivalry.name.toUpperCase())} — DERBY</div>`:""}<div class="mhero ${compClass(f.code)}" style="--comp:${compColor(f.code)}"><div class="mhero-top">${compLogo(f.code)}<span class="comp-dot"></span><span>${esc(compLabel(f))}${f.stage&&f.stage!=="league"?" · "+esc(f.stage):""}</span><span class="spacer"></span><span style="font-size:10px">${fmtDate(f.date).split(",")[0]}</span></div><div class="mhero-body"><div class="mhero-club"><div style="width:56px;height:56px;border-radius:14px;background:var(--panel3);border:1px solid var(--line);display:grid;place-items:center;box-shadow:var(--shadow)">${crest(f.home_code,"lg")}</div><div class="nm">${esc(f.home)}</div><div class="small muted" style="font-size:10px">${f.is_home?"HOME":"AWAY"}</div><div style="margin-top:4px;display:flex;justify-content:center;gap:2px">${formPills(f.is_home?(G.home.form||[]):[],3)}</div></div><div class="mhero-mid"><div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(180deg,var(--acc2),var(--acc));display:grid;place-items:center;font-weight:950;font-size:12px;color:#031a0c;box-shadow:0 4px 14px var(--acc-glow)">VS</div><div style="font-size:9px;font-weight:900;letter-spacing:.1em;color:var(--tx3);margin-top:6px">${f.is_home?"AT HOME":"AWAY"}</div></div><div class="mhero-club"><div style="width:56px;height:56px;border-radius:14px;background:var(--panel3);border:1px solid var(--line);display:grid;place-items:center;box-shadow:var(--shadow)">${crest(f.away_code,"lg")}</div><div class="nm">${esc(f.away)}</div><div class="small muted" style="font-size:10px">${!f.is_home?"HOME":"AWAY"}</div><div style="margin-top:4px;display:flex;justify-content:center;gap:2px">${formPills(!f.is_home?(G.home.form||[]):[],3)}</div></div></div><div class="mhero-foot"><button class="btn primary" style="flex:1;min-height:44px;border-radius:12px" onclick="Juice.haptic('heavy');go('match')">▶ MATCH CENTRE</button><button class="btn" style="min-height:44px;min-width:48px;border-radius:12px" onclick="quickPlay()">SIM</button></div></div><div style="margin-top:8px">${pressHypeForFixture(f)}</div>`: `<div style="padding:20px;border-radius:16px;background:var(--panel);border:1px solid var(--line);text-align:center"><h3 style="margin-top:6px">Season done</h3><p class="small muted">Continue for awards & new season</p><button class="btn primary sm" style="margin-top:8px" onclick="doContinue()">Continue ▶</button></div>`}
+    <div class="simbar" style="margin-top:10px"><span class="simbar-lbl">SIM</span><button onclick="doAdvance(1)">1D</button><button onclick="doAdvance(7)">7D</button><button class="sim-accent" onclick="doSim('event')">NEXT EVENT</button><button class="sim-accent" onclick="doSim('match')">NEXT MATCH</button><button onclick="doSim('comp')">NEXT COMP</button><button onclick="doSim('season')">SEASON END</button><button class="sim-gold" onclick="doSim('next_season')">NEXT SEASON &#9197;</button></div>
     <div class="card tight" style="margin-top:12px"> <div style="display:flex;align-items:center;justify-content:space-between"><b style="font-size:12px">Season</b><span class="small muted">${G.home.season_label}</span></div> <div class="kvgrid"> <div class="kv-c"><small>Position</small><b>${pos?pos.pos+"th":"–"}<i>of ${pos?pos.size:"–"}</i></b></div> <div class="kv-c"><small>Points</small><b>${pos?pos.pts:0}<i>${pos&&pos.gd?(pos.gd>0?"+":"")+pos.gd:""}</i></b></div> <div class="kv-c"><small>Board</small><b style="color:${h.board.confidence<35?"var(--red)":h.board.confidence<55?"var(--amber)":"var(--acc)"}">${Math.round(h.board.confidence)}</b></div> <div class="kv-c"><small>Fans</small><b style="color:${h.fans.sentiment<35?"var(--red)":h.fans.sentiment<55?"var(--amber)":"var(--acc)"}">${Math.round(h.fans.sentiment)}</b></div> </div> <div style="display:flex;align-items:center;gap:8px;margin-top:8px"><small class="muted" style="font-size:10px">Form</small>${pills||"—"}<span class="spacer"></span><button class="btn sm" onclick="go('stats')">Stats ▸</button></div> </div><div style="padding:8px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.05);text-align:center"><div style="font-size:9px;color:var(--tx3);font-weight:900;letter-spacing:.08em">FORM</div><div style="margin-top:4px;display:flex;justify-content:center;gap:2px">${pills||"—"}</div></div><div style="padding:8px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.05);text-align:center"><div style="font-size:9px;color:var(--tx3);font-weight:900;letter-spacing:.08em">CASH</div><div style="font-weight:950;font-size:13px;margin-top:2px;color:var(--acc);font-family:var(--ff-mono)">${money(h.finances.cash)}</div></div></div> </div> <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:8px"> <button onclick="Juice.haptic('tap');go('squad')" style="text-align:left;padding:12px;border-radius:12px;background:var(--panel);border:1px solid var(--line);color:var(--tx)"><div style="font-weight:800;font-size:12px">Squad</div><div style="font-size:10.5px;color:var(--tx3);margin-top:3px">${avail} fit · ${ss.injured} injured · ${ss.suspended} banned</div>${avail<14?'<div style="margin-top:6px;font-size:10px;color:#ff8a94">Squad thin — sign or promote</div>':""}</button> <button onclick="Juice.haptic('tap');go('board')" style="text-align:left;padding:12px;border-radius:12px;background:var(--panel);border:1px solid var(--line);color:var(--tx)"><div style="font-weight:800;font-size:12px">Board</div><div style="font-size:10.5px;color:var(--tx3);margin-top:3px">${h.board.objectives[0]?esc(h.board.objectives[0].text).slice(0,40):"No objectives"}</div><div style="margin-top:6px;font-size:10px;font-weight:800;color:${h.board.warning?"#ff8a94":"var(--acc)"}">${h.board.warning?"UNDER PRESSURE":"CONFIDENT"}</div></button> </div> ${godCard(adv)}
     <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:8px"> <div style="padding:0;border-radius:14px;background:var(--panel);border:1px solid var(--line);overflow:hidden;box-shadow:var(--shadow-float)"><div style="padding:10px 12px 6px;display:flex;align-items:center;justify-content:space-between"><b style="font-size:11px"> ${esc(h.club.league)}</b><button class="btn sm" onclick="go('table')">Full ▸</button></div><div style="padding:0 6px 6px;display:grid;gap:3px">${top.map(rowHtml).join("")}${mine&&mine.pos>5?`<div style="text-align:center;padding:4px;font-size:9px;color:var(--tx3)">you are ${mine.pos}th</div>${rowHtml(mine)}`:""}</div></div> <div style="padding:0;border-radius:14px;background:var(--panel);border:1px solid var(--line);overflow:hidden;box-shadow:var(--shadow-float)"><div style="padding:10px 12px 6px;display:flex;align-items:center;justify-content:space-between"><b style="font-size:11px"> News</b><div style="display:flex;gap:4px;align-items:center">${h.unread?`<span style="min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--red);color:white;font-size:10px;font-weight:900;display:grid;place-items:center">${h.unread}</span>`:""}<button class="btn sm" onclick="go('inbox')">Open ▸</button></div></div><div id="home-inbox" style="padding:0 6px 6px;display:grid;gap:3px"></div></div> </div>`;
   const ib=await api.get("/api/inbox");
@@ -758,7 +889,7 @@ function showResult(r){
   const C=G.codes||{}, hCode=r.home_code||C.home||"", aCode=r.away_code||C.away||""; G.codes={home:hCode,away:aCode,comp:r.comp_code||r.code||C.comp,compName:r.comp||C.compName,stage:C.stage,venue:C.venue,date:C.date}; const motm=(r.players||[]).find(p=>p.pid===r.motm);
   if(res==="W"){ Juice.confetti(); Juice.haptic("success"); Juice.play("success"); }
   $("#content").innerHTML=`
-    <div class="mhero ${compClass(C.comp||r.code)}" style="--comp:${compColor(C.comp)}"><div class="mhero-top">${compLogo(C.comp||r.code)}<span class="comp-dot"></span><span>${esc(r.comp||C.compName||"Match")}</span><span class="spacer"></span><span>FULL-TIME</span></div><div class="mhero-body"><div class="mhero-club">${crest(hCode,"xl")}<div class="nm">${esc(r.home)}</div></div><div class="mhero-mid"><div class="lscore" style="font-size:30px">${r.hg} – ${r.ag}</div><span class="tag ${res}" style="margin-top:6px">${res==="W"?"WIN":res==="D"?"DRAW":"LOSS"}</span>${r.penalties?`<div class="small muted" style="font-size:10px;margin-top:4px">pens ${esc(JSON.stringify(r.penalties.home))}–${esc(JSON.stringify(r.penalties.away))}</div>`:""}</div><div class="mhero-club">${crest(aCode,"xl")}<div class="nm">${esc(r.away)}</div></div></div>${motm?`<div style="padding:0 12px 12px"><div class="motm"><div><div class="lbl">MAN OF THE MATCH</div><b style="font-size:13px">${esc(motm.name)}</b> <span class="small muted">${esc(motm.pos)} · ${motm.rating.toFixed(2)}${motm.goals?" · "+motm.goals+"g":""}${motm.assists?" · "+motm.assists+"a":""}</span></div></div></div>`:""}</div> <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px"><div class="card tight"><h3>Stats</h3><div style="margin-top:8px">${statsBlock(r.stats,false)}</div></div><div class="card tight"><h3>Events <span class="small muted">${esc(r.mode)}</span></h3><div style="max-height:260px;overflow:auto;margin-top:8px">${scoreEvents(shown.slice(),[0,0]).reverse().map(evRow).join("")||'<p class="small muted">Nothing</p>'}</div></div></div> <div class="card tight" style="margin-top:8px;padding:0"><div style="padding:10px 12px 4px"><h3>Your players</h3></div><div style="padding:0 10px 10px;display:grid;gap:3px">${(r.players||[]).map(p=>`<div style="display:flex;gap:8px;align-items:center;padding:6px 8px;border-radius:8px;background:${p.pid===r.motm?"rgba(44,255,138,.12)":"var(--panel2)"};border:1px solid ${p.pid===r.motm?"rgba(44,255,138,.18)":"var(--line)"}"><span class="pos" style="min-width:28px">${esc(p.pos)}</span><span style="flex:1;font-size:11px;font-weight:800">${esc(p.name)}${p.pid===r.motm?' <span style="color:var(--gold)">★</span>':""}</span><span style="font-size:10px">${p.mins}'</span><span style="font-size:10px">${p.goals||""}G ${p.assists||""}A</span><b style="font-size:11px;font-family:var(--ff-mono)">${p.rating.toFixed(2)}</b></div>`).join("")}</div></div> <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px"><div class="card tight"><h3>Aftermath</h3><div class="kv"><span>Board</span><b>${r.board_confidence}</b></div><div class="kv"><span>Fans</span><b>${r.fan_sentiment}</b></div><div class="kv"><span>Weather</span><b style="font-size:11px">${esc(r.weather||"—")}</b></div>${r.injuries&&r.injuries.length?r.injuries.map(i=>`<div class="kv"><span style="color:#ff8a94">${esc(i.name)}</span><b style="font-size:11px">${esc(i.injury)} · ${i.days}d</b></div>`).join(""):""}</div><div class="card tight"><h3>Continue</h3><p class="small muted" style="font-size:11px">Result recorded across tables, cups, finances, morale, news</p><div style="display:grid;gap:6px;margin-top:10px"><button class="btn primary" onclick="go('home')">Office ▶</button><button class="btn" onclick="go('inbox')">Inbox</button></div></div></div>`;
+    <div class="mhero ${compClass(C.comp||r.code)}" style="--comp:${compColor(C.comp)}"><div class="mhero-top">${compLogo(C.comp||r.code)}<span class="comp-dot"></span><span>${esc(r.comp||C.compName||"Match")}</span><span class="spacer"></span><span>FULL-TIME</span></div><div class="mhero-body"><div class="mhero-club">${crest(hCode,"xl")}<div class="nm">${esc(r.home)}</div></div><div class="mhero-mid"><div class="lscore" style="font-size:30px">${r.hg} – ${r.ag}</div><span class="tag ${res}" style="margin-top:6px">${res==="W"?"WIN":res==="D"?"DRAW":"LOSS"}</span>${r.penalties?`<div class="small muted" style="font-size:10px;margin-top:4px">pens ${esc(JSON.stringify(r.penalties.home))}–${esc(JSON.stringify(r.penalties.away))}</div>`:""}</div><div class="mhero-club">${crest(aCode,"xl")}<div class="nm">${esc(r.away)}</div></div></div>${motm?`<div style="padding:0 12px 12px"><div class="motm"><div><div class="lbl">MAN OF THE MATCH</div><b style="font-size:13px">${esc(motm.name)}</b> <span class="small muted">${esc(motm.pos)} · ${motm.rating.toFixed(2)}${motm.goals?" · "+motm.goals+"g":""}${motm.assists?" · "+motm.assists+"a":""}</span></div></div></div>`:""}</div> <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px"><div class="card tight"><h3>Stats</h3><div style="margin-top:8px">${statsBlock(r.stats,false)}</div></div><div class="card tight"><h3>Events <span class="small muted">${esc(r.mode)}</span></h3><div style="max-height:260px;overflow:auto;margin-top:8px">${scoreEvents(shown.slice(),[0,0]).reverse().map(evRow).join("")||'<p class="small muted">Nothing</p>'}</div></div></div> <div class="card tight" style="margin-top:8px;padding:0"><div style="padding:10px 12px 4px"><h3>Your players</h3></div><div style="padding:0 10px 10px;display:grid;gap:3px">${(r.players||[]).map(p=>`<div style="display:flex;gap:8px;align-items:center;padding:6px 8px;border-radius:8px;background:${p.pid===r.motm?"rgba(44,255,138,.12)":"var(--panel2)"};border:1px solid ${p.pid===r.motm?"rgba(44,255,138,.18)":"var(--line)"}"><span class="pos" style="min-width:28px">${esc(p.pos)}</span><span style="flex:1;font-size:11px;font-weight:800">${esc(p.name)}${p.pid===r.motm?' <span style="color:var(--gold)">★</span>':""}</span><span style="font-size:10px">${p.mins}'</span><span style="font-size:10px">${p.goals||""}G ${p.assists||""}A</span><b style="font-size:11px;font-family:var(--ff-mono)">${p.rating.toFixed(2)}</b></div>`).join("")}</div></div> <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px"><div class="card tight"><h3>Aftermath</h3><div class="kv"><span>Board</span><b>${r.board_confidence}</b></div><div class="kv"><span>Fans</span><b>${r.fan_sentiment}</b></div><div class="kv"><span>Weather</span><b style="font-size:11px">${esc(r.weather||"—")}</b></div>${r.injuries&&r.injuries.length?r.injuries.map(i=>`<div class="kv"><span style="color:#ff8a94">${esc(i.name)}</span><b style="font-size:11px">${esc(i.injury)} · ${i.days}d</b></div>`).join(""):""}</div><div class="card tight"><h3>Continue</h3><p class="small muted" style="font-size:11px">Result recorded across tables, cups, finances, morale, news</p><div style="display:grid;gap:6px;margin-top:10px"><button class="btn primary" onclick="go('home')">Office ▶</button>${res==="W"&&C.stage==="F"?`<button class="btn" style="border-color:rgba(212,175,55,.5);color:var(--gold);font-weight:950" onclick="go('trophies')">TROPHY ROOM — IT'S YOURS</button>`:""}<button class="btn" onclick="go('inbox')">Inbox</button></div></div></div>`;
 }
 
 /* TRANSFERS — marketplace */
@@ -1022,7 +1153,7 @@ async function press(answer){ const r=await api.post("/api/media/press",{answer}
 async function renderCareer(){
   const j=await api.get("/api/screen/career"); await refreshState();
   $("#content").innerHTML=`
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:13px"> CAREER · ${esc(j.manager.name)} · rep ${j.reputation}/95</b></div> <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px"><div style="padding:8px;border-radius:10px;background:var(--panel);border:1px solid var(--line);text-align:center"><div style="font-size:9px;color:var(--tx3);font-weight:900">CLUB</div><div style="font-weight:900;font-size:11px">${j.club?esc(j.club.name):"Unemployed"}</div></div><div style="padding:8px;border-radius:10px;background:var(--panel);border:1px solid var(--line);text-align:center"><div style="font-size:9px;color:var(--tx3);font-weight:900">TROPHIES</div><div style="font-weight:950;font-size:16px">${j.trophies.length}</div></div><div style="padding:8px;border-radius:10px;background:var(--panel);border:1px solid var(--line);text-align:center"><div style="font-size:9px;color:var(--tx3);font-weight:900">SEASONS</div><div style="font-weight:950">${j.season-2026+1}</div></div><div style="padding:8px;border-radius:10px;background:var(--panel);border:1px solid var(--line);text-align:center"><div style="font-size:9px;color:var(--tx3);font-weight:900">REP</div><div style="font-weight:950">${j.reputation}</div></div></div> <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div class="card"><h3>Club history</h3><div style="margin-top:8px;display:grid;gap:4px">${j.clubs.map(c=>`<div style="display:flex;gap:8px;padding:6px 8px;border-radius:8px;background:var(--panel2);font-size:11px"><b style="flex:1">${esc(c.name)}</b><span>${fmtDate(c.from).split(",")[0]}</span><span>${c.to?fmtDate(c.to).split(",")[0]:"—"}</span><span class="small muted">${esc(c.reason||"")}</span></div>`).join("")}</div>${j.unemployed?`<button class="btn primary sm" style="margin-top:8px" onclick="go('jobs')">Find job</button>`:""}</div><div class="card"><h3>Trophy room</h3><div style="margin-top:8px;display:grid;gap:6px">${j.trophies.length?j.trophies.map(t=>`<div style="padding:8px;border-radius:10px;background:linear-gradient(135deg,#2a1e0a,#1e1608);border:1px solid #5a4222"><div style="color:var(--gold);font-weight:900;font-size:12px"> ${esc(t.comp)}</div><div class="small muted" style="font-size:10px">${t.season}/${String(t.season+1).slice(2)} · ${esc(t.type||"")}</div></div>`).join(""):'<p class="small muted">No trophies yet</p>'}</div></div></div> <div class="card" style="margin-top:8px"><h3>Season record</h3><div style="margin-top:8px;max-height:40vh;overflow:auto;display:grid;gap:3px">${j.history.map(h=>`<div style="display:grid;grid-template-columns:40px 1fr 1fr 32px 1fr;gap:6px;padding:6px 8px;border-radius:8px;background:var(--panel2);font-size:10px"><span style="font-family:var(--ff-mono)">${h.season}</span><span>${esc(h.comp||"")}</span><span>${esc(h.club||"")}</span><span>${h.pos||""}</span><span>${esc(h.note||"")} ${h.trophy?'':""}</span></div>`).join("")||'<div class="small muted">No history</div>'}</div></div> <div class="card" style="margin-top:8px"><h3>Saved games</h3><p class="small muted" style="font-size:11px">Three slots. Switch career, export a backup file, or restore one.</p><button class="btn sm" style="margin-top:8px" onclick="openSaves()">Manage saves</button></div> <div class="card" style="margin-top:8px;border-color:rgba(255,59,74,.18);background:#2a1218"><h3 style="color:#ff8a94">Danger zone</h3><p class="small muted" style="font-size:11px">New career rebuilds world and deletes save — in this slot only</p><button class="btn danger sm" style="margin-top:8px" onclick="confirmNewCareer()">Start new career</button></div>`;
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:13px"> CAREER · ${esc(j.manager.name)} · rep ${j.reputation}/95</b><span style="flex:1"></span><button class="btn sm" style="border-color:rgba(212,175,55,.5);color:var(--gold);font-weight:900" onclick="go('trophies')">TROPHY ROOM</button></div> <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px"><div style="padding:8px;border-radius:10px;background:var(--panel);border:1px solid var(--line);text-align:center"><div style="font-size:9px;color:var(--tx3);font-weight:900">CLUB</div><div style="font-weight:900;font-size:11px">${j.club?esc(j.club.name):"Unemployed"}</div></div><div style="padding:8px;border-radius:10px;background:var(--panel);border:1px solid var(--line);text-align:center"><div style="font-size:9px;color:var(--tx3);font-weight:900">TROPHIES</div><div style="font-weight:950;font-size:16px">${j.trophies.length}</div></div><div style="padding:8px;border-radius:10px;background:var(--panel);border:1px solid var(--line);text-align:center"><div style="font-size:9px;color:var(--tx3);font-weight:900">SEASONS</div><div style="font-weight:950">${j.season-2026+1}</div></div><div style="padding:8px;border-radius:10px;background:var(--panel);border:1px solid var(--line);text-align:center"><div style="font-size:9px;color:var(--tx3);font-weight:900">REP</div><div style="font-weight:950">${j.reputation}</div></div></div> <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div class="card"><h3>Club history</h3><div style="margin-top:8px;display:grid;gap:4px">${j.clubs.map(c=>`<div style="display:flex;gap:8px;padding:6px 8px;border-radius:8px;background:var(--panel2);font-size:11px"><b style="flex:1">${esc(c.name)}</b><span>${fmtDate(c.from).split(",")[0]}</span><span>${c.to?fmtDate(c.to).split(",")[0]:"—"}</span><span class="small muted">${esc(c.reason||"")}</span></div>`).join("")}</div>${j.unemployed?`<button class="btn primary sm" style="margin-top:8px" onclick="go('jobs')">Find job</button>`:""}</div><div class="card"><h3>Trophy room</h3><div style="margin-top:8px;display:grid;gap:6px">${j.trophies.length?j.trophies.map(t=>`<div style="padding:8px;border-radius:10px;background:linear-gradient(135deg,#2a1e0a,#1e1608);border:1px solid #5a4222"><div style="color:var(--gold);font-weight:900;font-size:12px"> ${esc(t.comp)}</div><div class="small muted" style="font-size:10px">${t.season}/${String(t.season+1).slice(2)} · ${esc(t.type||"")}</div></div>`).join(""):'<p class="small muted">No trophies yet</p>'}</div></div></div> <div class="card" style="margin-top:8px"><h3>Season record</h3><div style="margin-top:8px;max-height:40vh;overflow:auto;display:grid;gap:3px">${j.history.map(h=>`<div style="display:grid;grid-template-columns:40px 1fr 1fr 32px 1fr;gap:6px;padding:6px 8px;border-radius:8px;background:var(--panel2);font-size:10px"><span style="font-family:var(--ff-mono)">${h.season}</span><span>${esc(h.comp||"")}</span><span>${esc(h.club||"")}</span><span>${h.pos||""}</span><span>${esc(h.note||"")} ${h.trophy?'':""}</span></div>`).join("")||'<div class="small muted">No history</div>'}</div></div> <div class="card" style="margin-top:8px"><h3>Saved games</h3><p class="small muted" style="font-size:11px">Three slots. Switch career, export a backup file, or restore one.</p><button class="btn sm" style="margin-top:8px" onclick="openSaves()">Manage saves</button></div> <div class="card" style="margin-top:8px;border-color:rgba(255,59,74,.18);background:#2a1218"><h3 style="color:#ff8a94">Danger zone</h3><p class="small muted" style="font-size:11px">New career rebuilds world and deletes save — in this slot only</p><button class="btn danger sm" style="margin-top:8px" onclick="confirmNewCareer()">Start new career</button></div>`;
 }
 function confirmNewCareer(){ modal(`<h2>Start new career?</h2><p class="small muted">Current career — every season, trophy, record — will be permanently deleted. World rebuilt from scratch.</p><div style="display:flex;gap:8px;margin-top:12px"><button class="btn danger" onclick="doResetCareer()">Yes, erase</button><button class="btn" onclick="closeModal()">Cancel</button></div>`); }
 async function doResetCareer(){ closeModal(); setBusy(true); try{ await api.post("/api/career/reset",{}); G.home=null; G.boot.has_save=false; G.pendingMatch=false; $("#crest").textContent="TL"; showStartScreen(); toast("Save erased"); } catch(e){ toast("Reset failed: "+esc(e.message),6000); } setBusy(false); }

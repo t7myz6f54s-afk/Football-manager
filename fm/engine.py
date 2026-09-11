@@ -4498,6 +4498,254 @@ def play_next_match(con, save, mode="key", rng=None, lineup=None):
     return {"ok": True, "fixture": nf, "data": data}
 
 
+# ------------------------------------------------------------------ fast simulation
+# Urgent categories the manager must decide on personally — fast-forward stops
+# for these so nothing important is silently accepted or declined.
+FAST_STOP_URGENT = ("BOARD", "TRANSFER")
+
+
+def _ack_urgent(con, save, cats=("BOARD", "MEDICAL", "TRANSFER")):
+    """Mark routine urgent mail as read (auto-processed during fast-forward)."""
+    ids = [u["id"] for u in unread_urgent(con, save, cats=cats)]
+    if ids:
+        con.execute("UPDATE inbox SET read=1 WHERE id IN (%s)" % ",".join("?" * len(ids)), ids)
+        con.commit()
+        persist(con, save)
+    return ids
+
+
+def _urgent_actionable(u):
+    """True when the manager must actually decide something (bid, offer, contract)."""
+    if u["cat"] == "BOARD":
+        return True  # board decisions always matter
+    try:
+        pl = json.loads(u.get("payload") or "{}")
+    except Exception:
+        return False
+    return bool(pl.get("action"))
+
+
+def _fast_log(r, limit=14):
+    out = []
+    for e in r.get("log", []):
+        kind = e.get("event") or e.get("kind")
+        if kind in ("match_scheduled", "urgent_mail", "world"):
+            continue
+        if e.get("text"):
+            out.append({"date": e.get("date") or r.get("date"), "text": e["text"]})
+    return out[-limit:]
+
+
+def _brief_stop_fixture(con, save, fx):
+    h = club(con, fx["home_id"]) or {}
+    a = club(con, fx["away_id"]) or {}
+    return {"id": fx["id"], "date": fx["match_date"], "comp": fx.get("comp_name") or "Friendly",
+            "code": fx.get("comp_code") or "", "ctype": fx.get("ctype") or "",
+            "stage": fx.get("stage") or "", "is_home": fx["home_id"] == save["club_id"],
+            "home": h.get("name", "?"), "away": a.get("name", "?"),
+            "home_short": h.get("short", "?"), "away_short": a.get("short", "?")}
+
+
+def fast_sim(con, save, target, rng=None, chunk_days=14):
+    """One chunk of smart fast-forwarding ("take me there").
+
+    target:
+      "event"        stop at the next meaningful event (own match or urgent news)
+      "match"        stop the day before the next own match, any competition
+      "comp"         stop at the next own cup/continental match; league games on the
+                     way are auto-played (league-only clubs: next league match)
+      "season"       auto-play every own match (league, cups, continental) and stop
+                     at the season rollover
+      "next_season"  auto-play league matches only; stop at own cup/continental
+                     matches or urgent news the manager must decide; otherwise
+                     fast-forward the whole offseason to the season rollover
+
+    Each call advances at most `chunk_days` of in-game time (season targets may
+    run to the backstop) so the UI can render progress between calls. The client
+    loops while stop_reason == "chunk".
+
+    Returns {stop_reason, date, season, days_advanced, log, fixture, urgent}.
+    stop_reason: "match" | "urgent" | "rollover" | "chunk" | "stuck"
+    """
+    if target not in ("event", "match", "comp", "season", "next_season"):
+        return {"ok": False, "msg": "Unknown simulation target."}
+    rng = rng or random.Random()
+    season0 = save["season"]
+    start = d(save["date"])
+    # every call is capped at chunk_days of in-game time so the UI can render
+    # progress between calls — a full season is many chunks, never one request
+    horizon = start + timedelta(days=chunk_days)
+    if target in ("season", "next_season"):
+        horizon = min(horizon, season_backstop(season0))
+    unemployed = bool(save["flags"].get("unemployed"))
+    log = []
+    guard = 0
+
+    def _ret(stop_reason, extra=None):
+        out = {"stop_reason": stop_reason, "date": save["date"], "season": save["season"],
+               "days_advanced": (d(save["date"]) - start).days, "log": log[-24:],
+               "fixture": None, "urgent": []}
+        if extra:
+            out.update(extra)
+        return out
+
+    def _has_future_opp_comp():
+        """Does the club have any cup/continental fixture left this season?"""
+        n = con.execute("""SELECT COUNT(*) n FROM fixtures f JOIN competitions k ON k.id=f.comp_id
+            WHERE (f.home_id=? OR f.away_id=?) AND f.played=0 AND f.season=?
+            AND k.ctype IN ('cup','continental')""", (save["club_id"], save["club_id"], season0)).fetchone()["n"]
+        return n > 0
+
+    while guard < 80:
+        guard += 1
+        if save["season"] != season0:
+            return _ret("rollover")
+        if d(save["date"]) >= horizon:
+            return _ret("chunk")
+        if unemployed:
+            r = advance(con, save, days=chunk_days, stop_for=(), rng=rng)
+            log += _fast_log(r)
+            continue
+        nf = next_fixture(con, save)
+        urg = unread_urgent(con, save)
+
+        if target == "event":
+            if urg:
+                return _ret("urgent", {"urgent": [{ "id": u["id"], "cat": u["cat"],
+                                                    "subject": u["subject"]} for u in urg]})
+            if nf and d(nf["match_date"]) <= horizon:
+                return _ret("match", {"fixture": _brief_stop_fixture(con, save, nf)})
+            stop_date = min((d(nf["match_date"]) - timedelta(days=1)) if nf else horizon,
+                            horizon - timedelta(days=1))
+            if stop_date <= d(save["date"]):
+                stop_date = d(save["date"]) + timedelta(days=1)
+            r = advance(con, save, until="date", days=ds(stop_date), stop_for=(), rng=rng)
+            log += _fast_log(r)
+            return _ret("chunk")
+
+        if target == "match":
+            _ack_urgent(con, save)
+            if nf:
+                nd = d(nf["match_date"])
+                if nd <= horizon:
+                    return _ret("match", {"fixture": _brief_stop_fixture(con, save, nf)})
+                stop_date = min(nd - timedelta(days=1), horizon - timedelta(days=1))
+                if stop_date <= d(save["date"]):
+                    stop_date = d(save["date"]) + timedelta(days=1)
+                r = advance(con, save, until="date", days=ds(stop_date), stop_for=(), rng=rng)
+                log += _fast_log(r)
+                return _ret("chunk")
+            r = advance(con, save, days=min(chunk_days, max(1, (horizon - d(save["date"])).days)),
+                        stop_for=(), rng=rng)
+            log += _fast_log(r)
+            continue
+
+        # comp / season / next_season -----------------------------------------
+        if target in ("comp", "next_season"):
+            stop_urg = [u for u in urg if _urgent_actionable(u)]
+            if stop_urg:
+                return _ret("urgent", {"urgent": [{"id": u["id"], "cat": u["cat"],
+                                                   "subject": u["subject"]} for u in stop_urg]})
+            _ack_urgent(con, save, cats=("BOARD", "MEDICAL", "TRANSFER"))
+        elif target == "season":
+            _ack_urgent(con, save)
+        if not nf:
+            # nothing left to play: run through the offseason toward the rollover
+            r = advance(con, save, days=min(chunk_days, max(1, (horizon - d(save["date"])).days)),
+                        stop_for=(), rng=rng)
+            log += _fast_log(r)
+            continue
+        nd = d(nf["match_date"])
+        ctype = nf.get("ctype") or "league"
+        if target == "comp" and ctype != "league" and _has_future_opp_comp():
+            return _ret("match", {"fixture": _brief_stop_fixture(con, save, nf), "important": True})
+        if target == "comp" and ctype == "league" and not _has_future_opp_comp():
+            # league-only club: the league IS their competition — stop here
+            return _ret("match", {"fixture": _brief_stop_fixture(con, save, nf), "important": True})
+        if target == "next_season" and ctype != "league":
+            return _ret("match", {"fixture": _brief_stop_fixture(con, save, nf), "important": True})
+        # auto-play this fixture (league always; cups/continental only for "season").
+        # "instant" mode: the manager only gets the one-line log, so skip the
+        # full event feed — this keeps long fast-forwards fast.
+        if nd > d(save["date"]):
+            r = advance(con, save, until="date", days=ds(nd - timedelta(days=1)), stop_for=(), rng=rng)
+            log += _fast_log(r)
+        res = play_next_match(con, save, mode="instant", rng=rng)
+        data = res.get("data") or {}
+        hg, ag = data.get("hg", 0), data.get("ag", 0)
+        mine = hg if nf["home_id"] == save["club_id"] else ag
+        theirs = ag if nf["home_id"] == save["club_id"] else hg
+        ch = "W" if mine > theirs else ("D" if mine == theirs else "L")
+        opp = (club(con, nf["away_id"] if nf["home_id"] == save["club_id"] else nf["home_id"]) or {}).get("short", "?")
+        log.append({"date": save["date"],
+                    "text": f"{ch} {mine}-{theirs} v {opp} — {nf.get('comp_name') or 'Friendly'}"})
+    return _ret("stuck")
+
+
+# ------------------------------------------------------------------ trophy room
+def _trophy_detail(con, save, comp_id, season, ctype):
+    """Details that actually exist in the simulation for the latest win."""
+    cid = save.get("club_id")
+    if ctype in ("cup", "continental"):
+        f = con.execute("""SELECT * FROM fixtures WHERE comp_id=? AND season=? AND played=1
+            ORDER BY match_date DESC, id DESC LIMIT 1""", (comp_id, season)).fetchone()
+        if not f:
+            return {}
+        out = {"type": "final", "date": f["match_date"]}
+        if f["home_id"] == cid:
+            out["opp"] = (club(con, f["away_id"]) or {}).get("name", "?")
+            out["score"] = f"{f['hg']}–{f['aw']}"
+            out["is_home"] = True
+        else:
+            out["opp"] = (club(con, f["home_id"]) or {}).get("name", "?")
+            out["score"] = f"{f['aw']}–{f['hg']}"
+            out["is_home"] = False
+        return out
+    st = con.execute("""SELECT * FROM standings WHERE season=? AND club_id=? AND stage='league' AND p>0
+        ORDER BY pts DESC LIMIT 1""", (season, cid)).fetchone()
+    if st:
+        return {"type": "league", "points": st["pts"], "played": st["p"], "won": st["w"],
+                "drawn": st["d"], "lost": st["l"], "gf": st["gf"], "ga": st["ga"]}
+    return {}
+
+
+def trophies(con, save):
+    """Trophy Room source of truth: the permanent history table (club record),
+    enriched with the current manager's career list for 'won under you'."""
+    cid = save.get("club_id")
+    cc = club(con, cid) if cid else None
+    out = {"club": dict(cc) if cc else None, "groups": [], "total": 0, "manager": ""}
+    if not cid:
+        return out
+    out["manager"] = ((save.get("career") or {}).get("manager") or {}).get("name", "")
+    rows = con.execute("""SELECT h.season, h.comp_id, h.note, k.name, k.code, k.ctype, k.tier
+        FROM history h JOIN competitions k ON k.id = h.comp_id
+        WHERE h.club_id=? AND h.trophy<>'' ORDER BY h.season, k.tier, k.id""", (cid,)).fetchall()
+    career = {}
+    for t in save["career"].get("trophies", []):
+        career.setdefault(t.get("comp"), set()).add(t.get("season"))
+    groups, order = {}, []
+    for r in rows:
+        if r["comp_id"] not in groups:
+            groups[r["comp_id"]] = {"comp": r["name"], "code": r["code"], "ctype": r["ctype"],
+                                    "tier": r["tier"], "seasons": [], "mine": []}
+            order.append(r["comp_id"])
+        g = groups[r["comp_id"]]
+        g["seasons"].append(r["season"])
+        if r["season"] in career.get(r["name"], ()):
+            g["mine"].append(r["season"])
+    seen = set(save["flags"].get("trophy_seen", []))
+    for comp_id in order:
+        g = groups[comp_id]
+        g["count"] = len(g["seasons"])
+        g["last"] = g["seasons"][-1]
+        g["detail"] = _trophy_detail(con, save, comp_id, g["last"], g["ctype"])
+        g["new_seasons"] = [s for s in g["seasons"] if f"{g['code']}-{s}" not in seen]
+        out["groups"].append(g)
+    out["total"] = sum(g["count"] for g in out["groups"])
+    return out
+
+
 # ------------------------------------------------------------------ delegation
 def set_training(con, save, day, session, focus=""):
     if session not in C.TRAINING_SESSIONS:
