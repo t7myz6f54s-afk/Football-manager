@@ -61,23 +61,28 @@ def main():
     for r in listed:
         con.execute("UPDATE players SET listed=1 WHERE id=?", (r["id"],))
     con.commit()
+    # Bids are perishable: an ignored bid lapses after 14 days (or is superseded
+    # in a bidding war), so record each bid as it appears rather than snapshotting.
     rng = random.Random(2026)
+    seen = {}
     for i in range(90):
         E.tick_day(con, save, rng, auto_human=False)
         con.commit()
-    bids = con.execute("""SELECT o.*, p.name, p.value FROM offers o JOIN players p ON p.id=o.player_id
-        WHERE o.from_id=? AND o.status='incoming'""", (cid,)).fetchall()
+        for b in con.execute("""SELECT o.*, p.name, p.value FROM offers o
+            JOIN players p ON p.id=o.player_id WHERE o.from_id=? AND o.id>?""",
+                             (cid, max(seen) if seen else 0)).fetchall():
+            seen[b["id"]] = b
+        dup = con.execute("""SELECT player_id, COUNT(*) n FROM offers WHERE from_id=?
+            AND status='incoming' GROUP BY player_id HAVING n>1""", (cid,)).fetchall()
+        assert not dup, f"duplicate pending bids on tick {i}: {dup}"
+    bids = list(seen.values())
     assert len(bids) >= 1, "no bids after 90 ticks with 3 listed players"
-    ok(f"{len(bids)} bid(s) received in 90 ticks with 3 listed players (window open)")
+    ok(f"{len(bids)} bid(s) arrived in 90 ticks with 3 listed players (window open)")
     for b in bids:
         assert b["fee"] > 0 and b["human"] == 0 and b["round"] == 1
         assert b["fee"] >= b["value"] * 0.39, f"bid below value floor: {dict(b)}"
     ok("every bid is AI-originated, round 1, and at/above the value floor")
-    # one pending approach per player
-    dup = con.execute("""SELECT player_id, COUNT(*) n FROM offers WHERE from_id=? AND status='incoming'
-        GROUP BY player_id HAVING n>1""", (cid,)).fetchall()
-    assert not dup, f"duplicate pending bids: {dup}"
-    ok("at most one pending approach per player")
+    ok("at most one pending approach per player (checked every tick)")
     # inbox: dedicated BID category with actionable payload
     bids_inbox = con.execute("SELECT * FROM inbox WHERE cat='BID' ORDER BY id DESC LIMIT 1").fetchone()
     assert bids_inbox, "no BID inbox item"
@@ -100,8 +105,9 @@ def main():
     for i in range(90):
         E.tick_day(con_b, save_b, rng_b, auto_human=False)
         con_b.commit()
-    bids_b = con_b.execute("""SELECT o.id, o.player_id, o.to_id, o.fee, o.date FROM offers o
-        WHERE o.from_id=? AND o.status='incoming' ORDER BY o.id""", (cid_b,)).fetchall()
+    # full offer history (bids lapse/get superseded, so compare every row)
+    bids_b = con_b.execute("""SELECT o.id, o.player_id, o.to_id, o.fee, o.date, o.status FROM offers o
+        WHERE o.from_id=? ORDER BY o.id""", (cid_b,)).fetchall()
     # re-read from t1 is gone; instead compare t2 with a third identical run
     ok(f"second identical world: {len(bids_b)} bid(s) — comparing with third run")
     con_b.close()
@@ -116,10 +122,10 @@ def main():
     for i in range(90):
         E.tick_day(con_c, save_c, rng_c, auto_human=False)
         con_c.commit()
-    bids_c = con_c.execute("""SELECT o.id, o.player_id, o.to_id, o.fee, o.date FROM offers o
-        WHERE o.from_id=? AND o.status='incoming' ORDER BY o.id""", (cid_c,)).fetchall()
-    ka = [(r["player_id"], r["to_id"], r["fee"], r["date"]) for r in bids_b]
-    kb = [(r["player_id"], r["to_id"], r["fee"], r["date"]) for r in bids_c]
+    bids_c = con_c.execute("""SELECT o.id, o.player_id, o.to_id, o.fee, o.date, o.status FROM offers o
+        WHERE o.from_id=? ORDER BY o.id""", (cid_c,)).fetchall()
+    ka = [(r["player_id"], r["to_id"], r["fee"], r["date"], r["status"]) for r in bids_b]
+    kb = [(r["player_id"], r["to_id"], r["fee"], r["date"], r["status"]) for r in bids_c]
     assert ka == kb and len(ka) >= 1, f"approach mechanism not deterministic: {ka} vs {kb}"
     ok("approach outcomes are deterministic per seed+date")
 
@@ -193,7 +199,7 @@ def main():
         ok(f"counter met with counter-offer {fee:.2f} → {new_offer['fee']}m (new offer {new_offer['id']})")
     elif r.get("ok") is False:
         assert "walked away" in r.get("msg", ""), f"unexpected counter failure: {r}"
-        assert o["status"] == "countered", "old offer left pending after walk-away"
+        assert o["status"] in ("countered", "rejected"), "old offer left pending after walk-away"
         ok("buyer walked away (counter above their ceiling) — offer closed cleanly")
     else:
         raise AssertionError(f"undocumented counter outcome: {r}")

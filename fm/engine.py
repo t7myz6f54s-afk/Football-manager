@@ -92,6 +92,93 @@ def window_state(dt, season=None):
     return None
 
 
+def current_window_open(save):
+    """Start date of the transfer window currently open (None if closed)."""
+    dt = d(save["date"])
+    w = season_windows(save["season"])
+    if w["open"] <= dt <= w["close"]:
+        return w["open"]
+    if w["winter"][0] <= dt <= w["winter"][1]:
+        return w["winter"][0]
+    return None
+
+
+def transfer_locked(con, save, pid):
+    """No same-window flipping: a player who joined via transfer during the
+    currently open window cannot be sold until it closes."""
+    wo = current_window_open(save)
+    if not wo:
+        return False
+    last = con.execute("""SELECT t.date FROM transfers t
+        WHERE t.player_id=? AND t.ctype='transfer' AND t.to_id=(SELECT club_id FROM players WHERE id=?)
+        ORDER BY t.date DESC LIMIT 1""", (pid, pid)).fetchone()
+    if not last:
+        return False
+    return d(last["date"]) >= wo
+
+
+def purchase_age_days(con, save, pid):
+    """Days since the player's last permanent purchase (None if never bought)."""
+    last = con.execute("""SELECT t.date FROM transfers t
+        WHERE t.player_id=? AND t.ctype='transfer'
+        ORDER BY t.date DESC LIMIT 1""", (pid,)).fetchone()
+    if not last:
+        return None
+    return (d(save["date"]) - d(last["date"])).days
+
+
+def club_success(con, save):
+    """0..4: trophies this season + league leaders + a cup/continental final
+    ahead. Drives how much bigger clubs covet your players."""
+    cid = save.get("club_id")
+    if not cid:
+        return 0
+    s = len([t for t in save["career"]["trophies"] if t["season"] == save["season"]])
+    pos = _league_position(con, save)
+    if pos and pos.get("pos") == 1:
+        s += 1
+    n = con.execute("""SELECT COUNT(*) n FROM fixtures f JOIN competitions k ON k.id=f.comp_id
+        WHERE (f.home_id=? OR f.away_id=?) AND f.season=? AND f.stage='F'
+        AND k.ctype IN ('cup','continental')""", (cid, cid, save["season"])).fetchone()["n"]
+    if n:
+        s += 1
+    return min(4, s)
+
+
+def would_buy(con, save, buyer_id, pid, fee, rng):
+    """AI club decision as the BUYER (evaluating a seller's price). Every buyer
+    has a hard budget (set by their board) and a max price built from the
+    player's value — recently flipped players get a discount, because the
+    market sees them as a short-term move. Returns (decision, counter_fee, note).
+    """
+    p = con.execute("SELECT * FROM players WHERE id=?", (pid,)).fetchone()
+    if not p:
+        return ("reject", 0, "Player not found.")
+    b = club(con, buyer_id)
+    if not b:
+        return ("reject", 0, "Buyer club not found.")
+    fee = float(fee)
+    max_price = p["value"] * 1.45
+    flip_note = ""
+    age = purchase_age_days(con, save, pid)
+    if age is not None and age < 90 and p["club_id"] != buyer_id:
+        max_price *= 0.85
+        flip_note = " They see him as a recent purchase and will not pay full value."
+    max_price = min(max_price, max(0.5, b["transfer_budget"]))  # board budget is the hard ceiling
+    if fee <= max_price:
+        if fee > max_price * 0.9 and rng.random() < 0.5:
+            counter = round(max_price * rng.uniform(0.92, 0.99), 2)
+            return ("counter", counter,
+                    f"They are at the ceiling of what they can spend — top offer {money(counter)}.")
+        return ("accept", fee, "Within their budget and valuation.")
+    if fee <= max_price * 1.12:
+        counter = round(max_price * rng.uniform(0.97, 1.0), 2)
+        return ("counter", counter,
+                f"That is above what they can stretch to — they top out at {money(counter)}.{flip_note}")
+    return ("reject", 0,
+            f"They cannot come anywhere near {money(fee)} — the board budget does not stretch that far.{flip_note}")
+
+
 # ------------------------------------------------------------------- loading
 def load_players(con, club_id=None, ids=None, all_squads=True):
     if ids:
@@ -2184,6 +2271,8 @@ def _weekly(con, save, rng, events):
     fans["sentiment"] = max(0, min(100, fans["sentiment"] + (board["confidence"] - fans["sentiment"]) * 0.04))
     # job market: big clubs may try to poach a successful, employed manager
     _poach_check(con, save, rng, events)
+    # trophy success: big players may want to come to a winning club
+    _trophy_player_interest(con, save, rng, events)
 
 
 def _league_position(con, save, season=None):
@@ -2478,6 +2567,50 @@ def job_market_tick(con, save, dt, rng, events):
         _season_end_unemployed(con, save, rng, events)
         save["flags"][f"season_done_{save['season'] - 1}"] = True
     return events
+
+
+def _trophy_player_interest(con, save, rng, events):
+    """Trophy success makes the club a destination: top players elsewhere ask
+    to be considered for a move. The player wants to come (personal terms are
+    a formality) but his club still has to agree to a fee."""
+    cid = save.get("club_id")
+    if not cid or save["flags"].get("unemployed"):
+        return
+    success = club_success(con, save)
+    if success < 2:
+        return
+    active = con.execute("""SELECT COUNT(*) n FROM offers WHERE to_id=? AND status='interested'""",
+                         (cid,)).fetchone()["n"]
+    if active >= 2:
+        return
+    if rng.random() >= 0.05 + 0.05 * (success - 1):
+        return
+    rows = con.execute("""SELECT * FROM players WHERE club_id IS NOT NULL AND club_id>0 AND club_id!=?
+        AND squad='First Team' AND ca>=16 AND age BETWEEN 18 AND 30 AND value>0.5
+        ORDER BY ca DESC LIMIT 8""", (cid,)).fetchall()
+    if not rows:
+        return
+    pl = rows[rng.randrange(min(4, len(rows)))]
+    if con.execute("""SELECT 1 FROM offers WHERE player_id=? AND status='interested' LIMIT 1""",
+                   (pl["id"],)).fetchone():
+        return
+    from_name = (club(con, pl["club_id"]) or {}).get("name", "his club")
+    to_name = (club(con, cid) or {}).get("name", "the club")
+    oid = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM offers").fetchone()[0]
+    con.execute("""INSERT INTO offers (id,player_id,from_id,to_id,fee,addons,wage,status,date,round,
+        clause,is_loan,loan_end,split,human,note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)""",
+        (oid, pl["id"], pl["club_id"], cid, 0.0, "{}", 0.0, "interested", save["date"], 1,
+         0, 0, None, 0, "enquiry"))
+    add_inbox(con, save, "TRANSFER", "URGENT", f"Transfer enquiry: {pl['name']}",
+              f"Your trophy success has made {to_name} a destination.\n\n"
+              f"{pl['name']} ({pl['pos']}, {pl['age']}, CA {pl['ca']:.1f}) of {from_name} has asked "
+              f"his agent to explore a move to the club. He would welcome it, so the personal terms "
+              f"are a formality — but {from_name} must agree on the fee (estimated value "
+              f"{money(pl['value'])}).\n\nUse the Transfers screen to make an offer before the "
+              f"window shuts.",
+              payload={"screen": "transfers", "action": "player", "pid": pl["id"]})
+    events.append(dict(kind="transfer", priority="IMPORTANT",
+                       text=f"{pl['name']} ({from_name}) has asked to be considered for a move."))
 
 
 def _poach_check(con, save, rng, events):
@@ -2889,7 +3022,9 @@ def would_sell(con, save, seller_id, pid, fee, rng):
     sc = club(con, seller_id)
     if not sc:
         return ("reject", 0, "Seller club not found.")
-    
+    if transfer_locked(con, save, pid):
+        return ("reject", 0, f"{sc['name']} signed {p['name']} this transfer window and will not resell him until it closes.")
+
     # Get buyer info for rivalry checks
     buyer_id = save.get("club_id") if save else None
     buyer_club = club(con, buyer_id) if buyer_id else None
@@ -3050,7 +3185,13 @@ def player_willing(con, save, pid, wage, promise, rng):
             score += 0.5
     except:
         pass
-    
+
+    # He has already asked to move to THIS club (trophy-success enquiry)
+    if save.get("club_id") and con.execute(
+            """SELECT 1 FROM offers WHERE player_id=? AND to_id=? AND status='interested' LIMIT 1""",
+            (pid, save["club_id"])).fetchone():
+        score += 2.5
+
     score += rng.gauss(0, 0.38)
     
     if score > 0.45:
@@ -3150,6 +3291,19 @@ def respond_counter(con, save, offer_id, accept, new_fee=None, rng=None):
     promise = o["note"] if (o["note"] or "") in C.PLAYING_TIME_PROMISES else "Squad Rotation"
     if accept:
         fee = o["fee"]
+        # Accepting while the seller is on a counter means agreeing to THEIR
+        # number. It is deterministic in unchanged state, so recompute it.
+        if o["status"] == "counter":
+            d2, y, _n2 = would_sell(con, save, p["club_id"], p["id"], fee, rng)
+            if d2 == "counter" and y > fee:
+                fee = y
+            elif d2 == "reject":
+                con.execute("UPDATE offers SET status='rejected', note='Terms lapsed.' WHERE id=?", (offer_id,))
+                return {"ok": False, "msg": "Too late — the club is no longer prepared to sell at that price."}
+        c0 = club(con, save["club_id"])
+        if c0 and fee > c0["transfer_budget"]:
+            con.execute("UPDATE offers SET status='withdrawn' WHERE id=?", (offer_id,))
+            return {"ok": False, "msg": f"{money(fee)} exceeds your transfer budget ({money(c0['transfer_budget'])})."}
         will, pnote = player_willing(con, save, o["player_id"], wage, promise, rng)
         if will is False:
             con.execute("UPDATE offers SET status='rejected_player' WHERE id=?", (offer_id,))
@@ -3165,8 +3319,28 @@ def respond_counter(con, save, offer_id, accept, new_fee=None, rng=None):
         con.execute("UPDATE offers SET status='accepted', fee=? WHERE id=?", (fee, offer_id))
         return {"ok": True, "msg": f"Signed for {money(fee)}."}
     if new_fee:
+        c0 = club(con, save["club_id"])
+        if not c0 or float(new_fee) > c0["transfer_budget"]:
+            con.execute("UPDATE offers SET status='withdrawn' WHERE id=?", (offer_id,))
+            have = money(c0["transfer_budget"]) if c0 else "€0.0m"
+            return {"ok": False, "msg": f"{money(float(new_fee))} exceeds your transfer budget ({have})."}
+        final_round = (o["round"] or 1) + 1 >= 4
         # put a revised bid to the selling club
         decision, counter, note = would_sell(con, save, p["club_id"], p["id"], float(new_fee), rng)
+        if final_round and decision == "counter":
+            # their final word: your price meets or tops theirs — done;
+            # otherwise they will not negotiate a fifth round
+            if float(new_fee) >= counter:
+                decision = "accept"
+                note = "Their final word — your price meets it."
+            else:
+                sn = (club(con, p["club_id"]) or {}).get("name", "The club")
+                con.execute("UPDATE offers SET status='withdrawn' WHERE id=?", (offer_id,))
+                add_inbox(con, save, "TRANSFER", "ROUTINE", f"Talks ended: {p['name']}",
+                          f"{sn} have ended the negotiations. Their final word was {money(counter)} "
+                          f"and they will not go higher.\n\n{p['name']} is not coming for less.",
+                          payload={"screen": "transfers", "pid": p["id"]})
+                return {"ok": False, "msg": f"Negotiations ended — their final word was {money(counter)} and they have walked away."}
         nid = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM offers").fetchone()[0]
         con.execute("""INSERT INTO offers (id,player_id,from_id,to_id,fee,addons,wage,status,date,round,
             clause,is_loan,loan_end,split,human,note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)""",
@@ -3177,8 +3351,10 @@ def respond_counter(con, save, offer_id, accept, new_fee=None, rng=None):
         if decision == "accept":
             return respond_counter(con, save, nid, True, rng=rng)
         if decision == "counter":
-            return {"ok": "counter", "msg": f"They countered again at {money(counter)}.",
-                    "counter": counter, "offer_id": nid}
+            msg = f"They countered again at {money(counter)}."
+            if (o["round"] or 1) + 1 >= 3:
+                msg += " They are running out of patience — the next round will be their final word."
+            return {"ok": "counter", "msg": msg, "counter": counter, "offer_id": nid}
         return {"ok": False, "msg": note, "offer_id": nid}
     con.execute("UPDATE offers SET status='withdrawn' WHERE id=?", (offer_id,))
     return {"ok": True, "msg": "Offer withdrawn."}
@@ -3264,9 +3440,11 @@ def renew_contract(con, save, pid, wage, years, promise, rng=None):
 
 
 def list_player(con, save, pid, listed=True):
-    p = con.execute("SELECT id, club_id FROM players WHERE id=?", (pid,)).fetchone()
+    p = con.execute("SELECT id, club_id, name FROM players WHERE id=?", (pid,)).fetchone()
     if not p or p["club_id"] != save["club_id"]:
         return {"ok": False, "msg": "Not your player."}
+    if listed and transfer_locked(con, save, pid):
+        return {"ok": False, "msg": f"{p['name']} signed during this transfer window — he is not for sale until it closes."}
     con.execute("UPDATE players SET listed=? WHERE id=?", (1 if listed else 0, pid))
     return True
 
@@ -3450,6 +3628,8 @@ def _approach_human_players(con, save, rng):
         if con.execute("""SELECT COUNT(*) n FROM offers WHERE player_id=? AND from_id=?
             AND status='incoming'""", (p["id"], cid)).fetchone()["n"]:
             continue
+        if transfer_locked(con, save, p["id"]):
+            continue  # no same-window flipping
         prob = (0.055 if win_open else 0.012) if p["listed"] else (0.02 if win_open else 0.005)
         if rr.random() >= prob:
             continue
@@ -3507,6 +3687,8 @@ def _world_transfer_activity(con, save, rng, events, volume=3):
             continue
         # is this one of my players?
         if p["club_id"] == save["club_id"]:
+            if transfer_locked(con, save, p["id"]):
+                continue  # no same-window flipping
             fee = round(asking_price(con, save, p["id"], rng) * rng.uniform(0.85, 1.3) * diff["neg"], 2)
             if fee < p["value"] * 0.4:
                 continue
@@ -3612,7 +3794,8 @@ def _window_briefing(con, save):
 
 
 def _tick_offers(con, save, rng, events):
-    """Resolve pending player-thinking offers and AI negotiation rounds."""
+    """Resolve pending player-thinking offers, stale negotiations, hijacks and
+    trophy-success enquiries."""
     rows = con.execute("SELECT * FROM offers WHERE status='player_thinking' AND human=1").fetchall()
     for o in rows:
         if rng.random() < 0.45:
@@ -3628,6 +3811,127 @@ def _tick_offers(con, save, rng, events):
                 add_inbox(con, save, "TRANSFER", "ROUTINE", f"Transfer collapsed: {p['name']}",
                           f"{p['name']} has decided against the move. {note}")
 
+    # ---- stale outgoing negotiations: the player has moved on, drop the offer
+    for o in con.execute("""SELECT * FROM offers WHERE to_id=? AND human=1
+        AND status IN ('counter', 'accept')""", (save["club_id"],)).fetchall():
+        p = con.execute("SELECT * FROM players WHERE id=?", (o["player_id"],)).fetchone()
+        if not p or p["club_id"] != o["from_id"]:
+            con.execute("UPDATE offers SET status='withdrawn', note='Player moved on.' WHERE id=?", (o["id"],))
+        elif (d(save["date"]) - d(o["date"])).days > 28:
+            con.execute("UPDATE offers SET status='withdrawn', note='Talks cooled.' WHERE id=?", (o["id"],))
+            add_inbox(con, save, "TRANSFER", "ROUTINE", f"Talks ended: {p['name']}",
+                      f"The negotiations with {club(con, o['from_id'])['name'] if club(con, o['from_id']) else 'the club'} "
+                      f"about {p['name']} have ended — the talks cooled and no deal was reached.",
+                      payload={"screen": "transfers", "pid": p["id"]})
+
+    # ---- transfer hijacks ---------------------------------------------------
+    # Outgoing (you are buying): a rival swoops in and outbids you while talks
+    # are live. The seller is free to pick the higher bidder.
+    for o in con.execute("""SELECT * FROM offers WHERE to_id=? AND human=1
+        AND status IN ('counter', 'player_thinking')""", (save["club_id"],)).fetchall():
+        p = con.execute("SELECT * FROM players WHERE id=?", (o["player_id"],)).fetchone()
+        if not p or p["club_id"] != o["from_id"]:
+            continue  # cleaned up above
+        age = (d(save["date"]) - d(o["date"])).days
+        if age > 21:
+            continue
+        hot = 1.5 if p["ca"] >= 16.5 else 1.0
+        prob = min(0.07, 0.015 + 0.004 * age) * hot
+        if rng.random() >= prob:
+            continue
+        seller = club(con, o["from_id"])
+        rivals = con.execute("""SELECT * FROM clubs WHERE id!=? AND id!=? AND code!='FREE'
+            AND rep>=? AND transfer_budget>? ORDER BY rep DESC LIMIT 8""",
+            (o["from_id"], save["club_id"], max(30, (seller["rep"] if seller else 0) + 4),
+             o["fee"] * 1.1)).fetchall()
+        if not rivals:
+            continue
+        rival = rivals[0] if len(rivals) == 1 else rng.choice(rivals)
+        new_fee = min(round(o["fee"] * rng.uniform(1.08, 1.3), 2), max(1.0, rival["transfer_budget"]))
+        if new_fee < o["fee"]:
+            continue
+        complete_transfer(con, save, p["id"], rival["id"], new_fee, round(p["wage"] * 1.15, 2),
+                          4, "Regular Starter", rng)
+        con.execute("UPDATE offers SET status='hijacked', note=? WHERE id=?",
+                    (f"Hijacked by {rival['name']}.", o["id"]))
+        sn = (seller or {}).get("name", "The club")
+        add_inbox(con, save, "TRANSFER", "URGENT", f"Transfer hijacked: {p['name']}",
+                  f"Your deal for {p['name']} has been hijacked.\n\n{rival['name']} swooped in with "
+                  f"{money(new_fee)} and {sn} accepted — they were always faster on their feet.\n\n"
+                  f"Next time, bid earlier, bid higher, and do not let talks drag on.",
+                  payload={"screen": "transfers"})
+        my = club(con, save["club_id"])
+        add_news(con, save, "TRANSFER",
+                 f"{rival['name']} hijack the {p['name']} deal, outbidding {my['name'] if my else 'a rival'} for {money(new_fee)}.",
+                 rival["id"], p["id"])
+        events.append(dict(kind="transfer", priority="IMPORTANT",
+                           text=f"{rival['name']} hijacked the {p['name']} deal at {money(new_fee)}."))
+
+    # Incoming (you are selling): while you negotiate, a bigger club is circling.
+    # They outbid the current buyer and start a bidding war — a chance to sell
+    # for more, or a chance to lose the deal entirely.
+    for o in con.execute("SELECT * FROM offers WHERE from_id=? AND status='incoming'",
+                         (save["club_id"],)).fetchall():
+        p = con.execute("SELECT * FROM players WHERE id=?", (o["player_id"],)).fetchone()
+        if not p or p["club_id"] != save["club_id"]:
+            con.execute("UPDATE offers SET status='withdrawn', note='Player moved on.' WHERE id=?", (o["id"],))
+            continue
+        age = (d(save["date"]) - d(o["date"])).days
+        if age > 14:
+            con.execute("UPDATE offers SET status='withdrawn', note='Bid lapsed.' WHERE id=?", (o["id"],))
+            continue
+        rnd = o["round"] or 1
+        prob = min(0.04, 0.008 + 0.006 * (rnd - 1) + 0.002 * min(age, 10))
+        if rng.random() >= prob:
+            continue
+        buyer = club(con, o["to_id"])
+        if not buyer:
+            continue
+        rivals = con.execute("""SELECT * FROM clubs WHERE id!=? AND id!=? AND code!='FREE'
+            AND rep>? AND transfer_budget>? ORDER BY rep DESC LIMIT 6""",
+            (save["club_id"], buyer["id"], buyer["rep"], o["fee"] * 1.15)).fetchall()
+        if not rivals:
+            continue
+        rival = rivals[0] if len(rivals) == 1 else rng.choice(rivals)
+        new_fee = min(round(o["fee"] * rng.uniform(1.15, 1.35), 2), max(1.0, rival["transfer_budget"]))
+        if new_fee <= o["fee"]:
+            continue
+        con.execute("UPDATE offers SET status='hijacked', note=? WHERE id=?",
+                    (f"Outbid by {rival['name']}.", o["id"]))
+        oid = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM offers").fetchone()[0]
+        con.execute("""INSERT INTO offers (id,player_id,from_id,to_id,fee,addons,wage,status,date,round,
+            clause,is_loan,loan_end,split,human,note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?)""",
+            (oid, p["id"], save["club_id"], rival["id"], new_fee, "{}", round(p["wage"] * 1.12, 2),
+             "incoming", save["date"], 1, 0, 0, None, 0, "bidding war"))
+        war_ask = asking_price(con, save, p["id"], rng)
+        add_inbox(con, save, "BID", "URGENT", f"Bidding war: {p['name']}",
+                  f"{rival['name']} have hijacked the auction for {p['name']} and outbid "
+                  f"{buyer['name']}'s offer of {money(o['fee'])} with {money(new_fee)}.\n\n"
+                  f"Your trophy success is driving the price up. Decide quickly — this kind of "
+                  f"attention does not last, and {buyer['name']} may come back with a higher offer of their own.",
+                  payload={"screen": "transfers", "action": "incoming_bid", "offer_id": oid,
+                           "pid": p["id"], "fee": new_fee,
+                           "asking": war_ask, "value": p["value"]})
+        add_news(con, save, "TRANSFER",
+                 f"{rival['name']} join the race for {p['name']}, outbidding {buyer['name']} at {money(new_fee)}.",
+                 save["club_id"], p["id"])
+        events.append(dict(kind="transfer", priority="IMPORTANT",
+                           text=f"Bidding war on {p['name']}: {rival['name']} bid {money(new_fee)}."))
+
+    # ---- trophy-success enquiries lapse --------------------------------------
+    for o in con.execute("SELECT * FROM offers WHERE status='interested' AND to_id=?",
+                         (save["club_id"],)).fetchall():
+        p = con.execute("SELECT * FROM players WHERE id=?", (o["player_id"],)).fetchone()
+        lapsed = (not p) or p["club_id"] != o["from_id"] or (d(save["date"]) - d(o["date"])).days > 30
+        if lapsed:
+            con.execute("UPDATE offers SET status='withdrawn', note='Enquiry lapsed.' WHERE id=?", (o["id"],))
+            if p:
+                cn = (club(con, save["club_id"]) or {}).get("name", "the club")
+                add_inbox(con, save, "TRANSFER", "ROUTINE", f"Enquiry lapsed: {p['name']}",
+                          f"The interest of {p['name']} in a move to {cn} has cooled. "
+                          f"He has put the idea to one side — for now.",
+                          payload={"screen": "transfers"})
+
 
 def handle_incoming_bid(con, save, offer_id, decision, counter_fee=None, rng=None):
     """Human responds to a bid for one of their players."""
@@ -3639,7 +3943,18 @@ def handle_incoming_bid(con, save, offer_id, decision, counter_fee=None, rng=Non
         return {"ok": False, "msg": "This bid is no longer open for negotiation."}
     p = con.execute("SELECT * FROM players WHERE id=?", (o["player_id"],)).fetchone()
     buyer = club(con, o["to_id"])
+    if transfer_locked(con, save, p["id"]):
+        con.execute("UPDATE offers SET status='withdrawn', note='Player signed this window.' WHERE id=?", (offer_id,))
+        return {"ok": False, "msg": f"{p['name']} signed during this transfer window — he cannot be sold until it closes."}
     if decision == "accept":
+        # a club cannot sign a player it cannot fund
+        if buyer["transfer_budget"] < o["fee"] * 0.98 and buyer["cash"] < o["fee"]:
+            con.execute("UPDATE offers SET status='rejected', note='Buyer could not fund the fee.' WHERE id=?", (offer_id,))
+            add_inbox(con, save, "TRANSFER", "IMPORTANT", f"Deal fell through: {p['name']}",
+                      f"Your deal with {buyer['name']} for {money(o['fee'])} has fallen through — "
+                      f"their board could not release the funds. The bid is now closed.",
+                      payload={"screen": "transfers", "pid": p["id"]})
+            return {"ok": False, "msg": f"Deal fell through — {buyer['name']}'s board could not fund the fee."}
         wage = round(max(p["wage"] * 1.15, o["wage"]), 2)
         years = rng.choice([3, 4, 5])
         complete_transfer(con, save, p["id"], buyer["id"], o["fee"], wage, years,
@@ -3664,28 +3979,59 @@ def handle_incoming_bid(con, save, offer_id, decision, counter_fee=None, rng=Non
                     "new_offer": oid}
         return {"ok": True, "msg": "Bid rejected."}
     if decision == "counter":
+        if not counter_fee or float(counter_fee) <= 0:
+            return {"ok": False, "msg": "Enter a counter amount."}
         con.execute("UPDATE offers SET status='countered' WHERE id=?", (offer_id,))
-        decision2, counter2, note = would_sell(con, save, save["club_id"], p["id"], counter_fee, rng)
-        accept_p = rng.random() < (0.75 if counter_fee >= p["value"] * 1.05 else
-                                   (0.45 if counter_fee >= p["value"] * 0.9 else 0.15))
-        if accept_p:
+        # The buyer has a board budget and a valuation ceiling — it does not
+        # simply accept whatever the manager asks for.
+        decision2, counter2, note = would_buy(con, save, buyer["id"], p["id"], float(counter_fee), rng)
+        rnd = (o["round"] or 1) + 1
+        if rnd >= 4:
+            # negotiation fatigue: this is their last word — they either meet a
+            # sane price or walk, whatever the manager asks
+            if decision2 == "accept":
+                wage = round(max(p["wage"] * 1.15, o["wage"]), 2)
+                complete_transfer(con, save, p["id"], buyer["id"], float(counter_fee), wage, 4,
+                                  "Regular Starter", rng)
+                con.execute("UPDATE offers SET status='accepted' WHERE id=?", (offer_id,))
+                return {"ok": True, "msg": f"{buyer['name']} accepted {money(counter_fee)}."}
+            cap = counter2 if decision2 == "counter" else 0
+            if cap:
+                wage = round(max(p["wage"] * 1.15, o["wage"]), 2)
+                complete_transfer(con, save, p["id"], buyer["id"], cap, wage, 4,
+                                  "Regular Starter", rng)
+                con.execute("UPDATE offers SET status='accepted', fee=? WHERE id=?", (cap, offer_id))
+                return {"ok": True, "msg": f"Final offer — {buyer['name']} signed at their ceiling of {money(cap)}.",
+                        "final_fee": cap}
+            con.execute("UPDATE offers SET status='rejected', note=? WHERE id=?",
+                        ("Negotiations ended — the buyer walked.", offer_id))
+            add_inbox(con, save, "TRANSFER", "ROUTINE", f"Talks ended: {p['name']}",
+                      f"{buyer['name']} had their final word: {note}\n\nThey have walked away.",
+                      payload={"screen": "transfers", "pid": p["id"]})
+            return {"ok": False, "msg": f"Final word — {buyer['name']} walked away."}
+        if decision2 == "accept":
             wage = round(max(p["wage"] * 1.15, o["wage"]), 2)
-            complete_transfer(con, save, p["id"], buyer["id"], counter_fee, wage, 4,
+            complete_transfer(con, save, p["id"], buyer["id"], float(counter_fee), wage, 4,
                               "Regular Starter", rng)
-            return {"ok": True, "msg": f"{buyer['name']} accepted {money(counter_fee)}."}
-        if rng.random() < 0.5:
-            new_fee = round((counter_fee + o["fee"]) / 2 * rng.uniform(0.98, 1.06), 2)
+            con.execute("UPDATE offers SET status='accepted' WHERE id=?", (offer_id,))
+            return {"ok": True, "msg": f"{buyer['name']} accepted {money(counter_fee)}. {note}"}
+        if decision2 == "counter":
             oid = con.execute("SELECT COALESCE(MAX(id),0)+1 FROM offers").fetchone()[0]
             con.execute("""INSERT INTO offers (id,player_id,from_id,to_id,fee,addons,wage,status,date,round,
                 clause,is_loan,loan_end,split,human,note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,'incoming')""",
-                (oid, p["id"], save["club_id"], buyer["id"], new_fee, "{}", o["wage"], "incoming",
-                 save["date"], o["round"] + 1, 0, 0, None, 0))
+                (oid, p["id"], save["club_id"], buyer["id"], counter2, "{}", o["wage"], "incoming",
+                 save["date"], rnd, 0, 0, None, 0))
             add_inbox(con, save, "TRANSFER", "IMPORTANT", f"Counter: {p['name']}",
-                      f"{buyer['name']} countered your asking price with {money(new_fee)}.",
+                      f"{buyer['name']} countered your asking price with {money(counter2)}.",
                       payload={"screen": "transfers", "action": "incoming_bid", "offer_id": oid,
-                               "pid": p["id"], "fee": new_fee})
-            return {"ok": "counter", "msg": f"They countered with {money(new_fee)}.", "new_offer": oid}
-        return {"ok": False, "msg": f"{buyer['name']} walked away from negotiations."}
+                               "pid": p["id"], "fee": counter2})
+            return {"ok": "counter", "msg": f"{note} They countered with {money(counter2)}.", "new_offer": oid}
+        con.execute("UPDATE offers SET status='rejected', note=? WHERE id=?",
+                    ("Buyer walked away after the counter.", offer_id))
+        add_inbox(con, save, "TRANSFER", "ROUTINE", f"Walked away: {p['name']}",
+                  f"{note}\n\n{buyer['name']} have withdrawn from the negotiations.",
+                  payload={"screen": "transfers", "pid": p["id"]})
+        return {"ok": False, "msg": f"{note} {buyer['name']} walked away."}
     return {"ok": False, "msg": "Unknown decision."}
 
 

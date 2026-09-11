@@ -402,3 +402,55 @@ Profiled a full season (cProfile): 75% of time was 583K tiny SQL calls.
 competition_test 11/11, live_match, smoke, order_effect, multiseason
 (2 seasons; 2-season transfer budget now correctly reflects prize money),
 dynasty_test 33/33, ui_sanity (24 screens / 62 handlers), node --check.
+
+## v1.20.0 — Transfer market realism: caps, lockout, hijacks, trophy magnetism (2026-09-11)
+
+Player feedback: counters were always accepted no matter how high, a player
+could be bought and flipped in the same window, winning trophies attracted
+no interest, and deals could quietly be stolen — "realism please".
+
+### 1. The AI has a budget — counters are capped
+- Every AI buyer now computes a real valuation: market value ×1.45, with a
+  hard cap at their transfer budget (never less than €0.5m of face value).
+- When YOU counter an incoming bid: at/under their ceiling it's accepted;
+  within 12% they push back at their ceiling; beyond that they walk away and
+  the offer is closed (no more "counter 100× value, instant accept").
+- When a buyer counters your outgoing bid: the same budget logic now applies
+  to their number too — a counter above their budget is refused outright,
+  and after four rounds the talks end (final word).
+- Funding guard on accept: a deal can no longer close above your cash.
+
+### 2. No same-window flipping
+- A player you signed during the current transfer window is locked until it
+  closes: he cannot be listed, the AI refuses to sell him to you this
+  window, and incoming bids for him are withdrawn on arrival.
+- Related realism: buyers discount players who were bought recently at
+  their current club (a ~15% haircut for under-90-days of service) — flip
+  buyers exist, but they know what they're doing.
+
+### 3. Winning brings suitors
+- A club with trophies in the last two seasons attracts elite players:
+  once a season a top player (CA ≥ ~16) from a rival sends an URGENT
+  "Transfer enquiry" — he wants to join a winning project. The offer card
+  carries his terms; willing players accept easier (willingness +2.5).
+  Enquiries lapse after 30 days if you do nothing.
+- Trophies already raised reputation (v1.19.0); now they move people.
+
+### 4. Transfer hijacks (both directions)
+- Outgoing: while your talks drag on, a richer rival with a higher
+  reputation may outbid you on the player — the deal is marked hijacked,
+  the player signs elsewhere, news is published. Bid earlier, bid higher.
+- Incoming: while you negotiate an incoming bid, a bigger club can open a
+  bidding war — the old bid is marked hijacked and the rival's higher
+  offer arrives (URGENT inbox). A chance to sell for more — or to lose the
+  deal if you stall.
+- Bids are perishable: an ignored incoming bid lapses after 14 days (inbox
+  items carry the full action payload, including asking price and value).
+
+### Regression
+market_test 16/16 (new: counter caps, lockout, flip haircut, final round,
+both hijack directions, trophy enquiries + willingness), transfer_test
+10/10, dynasty_test 33/33, competition_test 11/11, order_effect,
+multiseason (2 seasons), staff 10/10, slots, facilities 11/11,
+android_paths (EROFS emulation), live_match, smoke, ui_sanity
+(24 screens / 62 handlers / 17 hooks).

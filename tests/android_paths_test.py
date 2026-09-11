@@ -83,6 +83,7 @@ st, j = call("/api/career/new", {"club_code": "BAR",
 assert st == 200 and j.get("ok"), f"career/new failed: {st} {str(j)[:200]}"
 st, j = call("/api/continue", {})
 assert st == 200, f"continue failed: {st} {str(j)[:200]}"
-assert os.path.exists(os.path.join(FILES, "data", "saves", "career1.json"))
+# slot-era layout (fm/slots.py): saves live under data/slots/<slotN>/career.json
+assert os.path.exists(os.path.join(FILES, "data", "slots", "slot1", "career.json"))
 assert not os.path.exists("/home/user/data/saves/career1.json.tmp")
 print("android_paths_test: PASS — career created and advanced with /home read-only")
