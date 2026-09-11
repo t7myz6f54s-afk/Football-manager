@@ -303,3 +303,39 @@ Two systems, added on top of v1.17.0 (nothing previously shipped was removed).
 ### Regression
 competition_test 11/11, smoke, ui_sanity (24 screens / 61 handlers), node --check
 on app.js + trophy.js + three.min.js, jsdom 2D fallback test, asset serving check.
+
+## v1.18.1 — Hotfix: matches stuck on old saves + Trophy Room lock (2026-09-11)
+Bug reported from device (v1.18.0): live matches got stuck near full-time with
+"Match feed lost", and the Trophy Room was inaccessible / looked empty.
+
+### Root cause (reproduced exactly in the sandbox)
+- v1.17.0 added the per-competition stats tables (`season_player_stats`,
+  `career_player_stats`, `awards`) — but existing save files keep their pre-1.17.0
+  `world.db` (the schema was never migrated in place). Any competitive match on
+  an upgraded save died with `sqlite3.OperationalError: no such table:
+  season_player_stats` during match finish (and on any day where another
+  competitive match is simulated). The pending-match guard then locked the whole
+  UI (Continue / Smart Sim / Trophy Room all rejected while the match "hung").
+- Repro: v1.16.0-era world + save, v1.18.0 code → crash at `_bump_season_stats`;
+  with the hotfix the same save plays the match through and continues cleanly.
+
+### Fixes
+- `fm/world.py`: new `migrate_world()` (idempotent CREATE TABLE IF NOT EXISTS for
+  the three v1.17.0 tables, exact same DDL) now runs on every DB connect —
+  upgrading saves self-heal on first launch, no data touched, no rebuild.
+- `fm/engine.py`: human-match finish now runs in a guarded transaction — any
+  failure rolls back the whole finish instead of leaving the fixture half-applied
+  (previously a crash before `apply_result` left partial stats in the world).
+- `fm/match.py`: `finalize()` is now idempotent (early exit if already finished)
+  so a retried finish can never re-roll the result.
+- `fm/app.py`: `/api/trophies` no longer blocked while a match is pending — the
+  Trophy Room is reachable at any time (read-only; match state untouched).
+- `fm/static/app.js`: live-feed and Smart-Sim error toasts now surface the real
+  server error message instead of a generic one.
+- Verified end-to-end: old save boots, live competitive match completes,
+  Continue + Trophy Room work mid-match and after FT.
+
+### Note to player
+Force-stop Touchline once after updating (clears the stuck match from memory),
+then reopen — the upgrade repairs your save automatically and the stuck match
+can be replayed from the Match Centre.

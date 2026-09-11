@@ -594,8 +594,8 @@ def api_sim(payload: dict = Body(default={})):
 
 @app.get("/api/trophies")
 def api_trophies():
+    # read-only museum — deliberately allowed mid-match (no_pending not called)
     s = need_save()
-    no_pending()
     data = E.trophies(con(), s)
     # mark every trophy shown as seen (drives the one-time "new trophy" animation)
     seen = set(s["flags"].get("trophy_seen", []))

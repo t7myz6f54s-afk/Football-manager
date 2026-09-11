@@ -15,7 +15,7 @@ const api = {
     return j;
   }
 };
-const VERSION = "1.18.0";
+const VERSION = "1.18.1";
 let DEAD = false;
 function deadScreen() { if (DEAD) return; DEAD = true; const d = $("#dead"); if (d) d.classList.remove("hidden"); }
 const G = { boot: null, home: null, screen: "home", sub: null, static: null, busy: false, prevScreen: null };
@@ -389,7 +389,7 @@ async function doSim(target){
   try{
     while(hops++<90 && !_simStop){
       const j=await api.post("/api/sim",{target});
-      if(!j.ok){ closeSimOverlay(); toast(esc(j.msg||"Simulation failed"),4200); return; }
+      if(!j.ok){ closeSimOverlay(); toast(esc(j.msg||j.error||"Simulation failed"),4200); return; }
       addSimLog(j.log,j.date);
       if(j.goal_date&&!goalD){ goalD=Date.parse(j.goal_date); }
       setSimProgress(startD,Date.parse(j.date),goalD,j.date);
@@ -800,7 +800,7 @@ async function liveLoop(){
     let j;
     try{ j=await api.post("/api/match/live_step",{mode:LIVE.fast?"fast":LIVE.mode,ev_i:LIVE.ev_i}); }
     catch(e){ stopLive(); return; }
-    if(!j||!j.ok){ toast(esc((j&&j.msg)||"Match feed lost"),5000); stopLive(); return; }
+    if(!j||!j.ok){ toast(esc(((j&&(j.msg||j.error))||"Match feed lost")),6000); stopLive(); return; }
     if(j.result){
       stopLive(); G.pendingMatch=false; G.halftimeState=null;
       try{ await refreshState(); }catch(e){}

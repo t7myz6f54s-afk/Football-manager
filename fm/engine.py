@@ -1252,7 +1252,22 @@ def play_human_match(con, save, fx, mode="key", rng=None, custom_lineup=None, ha
 
 
 def _finish_human_match(con, save, fx, ctx, result, mode="key"):
-    """Post-match processing: player updates, cards, injuries, morale, board."""
+    """Post-match processing: player updates, cards, injuries, morale, board.
+
+    Every write is one transaction: if anything fails mid-way the whole finish
+    rolls back, the fixture stays unplayed, and the match can be retried clean
+    instead of corrupting player/standings data."""
+    try:
+        return _finish_human_match_tx(con, save, fx, ctx, result, mode)
+    except Exception:
+        try:
+            con.rollback()
+        except Exception:
+            pass
+        raise
+
+
+def _finish_human_match_tx(con, save, fx, ctx, result, mode="key"):
     cid = ctx["cid"]; is_home = ctx["is_home"]; players = ctx["players"]; tac = ctx["tac"]
     hrating = ctx["hrating"]; oxi = ctx["oxi"]; ctype = ctx["ctype"]; rng = ctx["rng"]
     comp_id = fx.get("comp_id")          # 0 = friendly: excluded from season stats

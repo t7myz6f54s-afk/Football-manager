@@ -200,6 +200,7 @@ def connect():
     con.execute("PRAGMA synchronous=NORMAL")
     con.execute("PRAGMA busy_timeout=8000")
     ensure_facilities_schema(con)
+    migrate_world(con)
     return con
 
 
@@ -235,6 +236,38 @@ def ensure_facilities_schema(con):
                 train_base,med_base,youth_base,stad_base) VALUES (?,?,?,?,?,?,?,?,?)""",
                 (c["id"], l, l, l, l, l, l, l, l))
         con.commit()
+
+
+def migrate_world(con):
+    """Idempotent schema migration for old saves (v1.16.0 and earlier worlds).
+
+    The persistent-stats/records features (v1.17.0+) added four tables. Without
+    this, finishing a match on an upgraded save crashed mid-write with
+    'no such table' — the live match then could never complete.
+    """
+    con.execute("""CREATE TABLE IF NOT EXISTS comp_state (
+      comp_id INT, season INT, status TEXT DEFAULT 'active', winner_id INT,
+      finished TEXT, PRIMARY KEY(comp_id, season)
+    )""")
+    con.execute("""CREATE TABLE IF NOT EXISTS season_player_stats (
+      player_id INT, season INT, comp_id INT,
+      apps INT DEFAULT 0, starts INT DEFAULT 0, minutes INT DEFAULT 0,
+      goals INT DEFAULT 0, assists INT DEFAULT 0, yellow INT DEFAULT 0, red INT DEFAULT 0,
+      clean_sheets INT DEFAULT 0, rating_sum REAL DEFAULT 0, rating_n INT DEFAULT 0,
+      PRIMARY KEY(player_id, season, comp_id)
+    )""")
+    con.execute("""CREATE TABLE IF NOT EXISTS career_player_stats (
+      player_id INT, season INT, club_id INT,
+      apps INT DEFAULT 0, minutes INT DEFAULT 0, goals INT DEFAULT 0, assists INT DEFAULT 0,
+      yellow INT DEFAULT 0, red INT DEFAULT 0, clean_sheets INT DEFAULT 0,
+      rating_sum REAL DEFAULT 0, rating_n INT DEFAULT 0,
+      PRIMARY KEY(player_id, season)
+    )""")
+    con.execute("""CREATE TABLE IF NOT EXISTS awards (
+      id INTEGER PRIMARY KEY, season INT, name TEXT, player_id INT, club_id INT,
+      detail TEXT
+    )""")
+    con.commit()
 
 
 # -------------------------------------------------------------- player making

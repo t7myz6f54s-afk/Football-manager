@@ -1165,6 +1165,10 @@ class MatchRunner:
 
     def finalize(self):
         """Finalise ratings, then extra time and penalties if the tie needs a winner."""
+        if self.finished:
+            # already finalised (a previous finish attempt crashed after this):
+            # return the same result without re-rolling ratings or replaying pens
+            return self.result()
         # finalise self.ratings
         for side in ("H", "A"):
             xi = self.xi_of(side)
