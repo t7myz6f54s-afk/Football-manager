@@ -693,6 +693,8 @@ body.tension #content::after { content: ""; position: fixed; inset: 0; pointer-e
 .t2-head h2 { font-size:21px; font-weight:950; margin-top:6px; }
 .t2-head h2 span { color:var(--gold); }
 .t2-head p { font-size:11px; color:var(--tx3); margin-top:4px; }
+.t2-section { margin-top:16px; }
+.t2-sec-title { font-size:10px; font-weight:900; letter-spacing:.16em; color:var(--gold); opacity:.85; margin:0 0 8px 2px; }
 .t2-shelf { display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:14px; max-width:860px; margin:0 auto; }
 .t2-item { cursor:pointer; }
 .t2-case { border-radius:12px; background:linear-gradient(180deg,rgba(140,180,210,.09),rgba(140,180,210,.03));

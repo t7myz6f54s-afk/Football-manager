@@ -72,6 +72,27 @@
     x.fillText(years.slice(0, 6).join("  ·  "), 256, 144);
     const t = new THREE.CanvasTexture(c); t.anisotropy = 4; return t;
   }
+  /* wall plaque above a gallery section: competition + tally + years */
+  function sectionTexture(name, count, seasons) {
+    const c = makeCanvas(1024, 256), x = c.getContext("2d");
+    x.fillStyle = "rgba(8,10,15,.94)"; x.fillRect(0, 0, 1024, 256);
+    x.strokeStyle = "rgba(212,175,55,.75)"; x.lineWidth = 5; x.strokeRect(10, 10, 1004, 236);
+    x.textAlign = "center"; x.textBaseline = "middle";
+    x.fillStyle = "#e8c96a";
+    let fs = 72;
+    const nm = String(name).toUpperCase().slice(0, 26);
+    while (fs > 40 && x.measureText(nm).width > 920) { fs -= 4; x.font = "900 " + fs + "px Arial"; }
+    x.font = "900 " + fs + "px Arial";
+    x.fillText(nm, 512, 92);
+    const years = (seasons || []).slice().reverse().map(s => s + "/" + String(s + 1).slice(2)).join("   ");
+    const line = (count > 1 ? count + "×   " : "") + years;
+    x.fillStyle = "#c9b073";
+    let fs2 = 50;
+    while (fs2 > 28 && x.measureText(line).width > 920) { fs2 -= 4; x.font = "600 " + fs2 + "px Arial"; }
+    x.font = "600 " + fs2 + "px Arial";
+    x.fillText(line, 512, 182);
+    const t = new THREE.CanvasTexture(c); t.anisotropy = 4; return t;
+  }
   function wallTexture(clubName, colA) {
     const c = makeCanvas(1024, 384), x = c.getContext("2d");
     const bg = x.createLinearGradient(0, 0, 0, 384);
@@ -250,9 +271,24 @@
     const groups = [];               // raycast targets
     const pickables = [];
     const groupsList = (data.groups || []).slice();
-    // hero first (most recent win)
-    groupsList.sort((a, b) => (b.last || 0) - (a.last || 0));
+    // organised like a real club museum — sections in order of prestige:
+    // continental, top-flight leagues, other leagues, domestic cups; within
+    // a section by number of wins, then most recent.
+    const sectionOf = g => (g.code === "UCL" || g.code === "UEL" || g.code === "UECL")
+      ? 0 : g.ctype === "league" ? ((g.tier || 9) <= 1 ? 1 : 2) : 3;
+    groupsList.sort((a, b) => {
+      const s = sectionOf(a) - sectionOf(b);
+      if (s) return s;
+      if ((b.count || 1) - (a.count || 1)) return (b.count || 1) - (a.count || 1);
+      return (b.last || 0) - (a.last || 0);
+    });
     const n = groupsList.length;
+    const m = n - 1;
+    // wall gallery: one tidy arc around the room, evenly spaced, with a gap
+    // left for the branding wall behind the hero pedestal; >12 trophies get a
+    // second inner ring so sections never crowd
+    const A0 = 0.95, SPAN = Math.PI * 2 - A0 * 2;
+    const outerN = m <= 12 ? m : Math.ceil(m / 2);
     groupsList.forEach((g, i) => {
       const spec = specFor(g.code, g.ctype, g.tier);
       const unit = new THREE.Group();
@@ -270,16 +306,24 @@
         new THREE.MeshBasicMaterial({ map: plateTexture(g.comp, g.count, years, spec.metal === 1) }));
       label.position.set(0, 0.62, plinth.userData.h + 0.02); label.rotation.x = -0.32;
       unit.add(label);
-      // layout: hero centre, rest on two arcs
-      if (i === 0) unit.position.set(0, 0, 0.6);
+      // layout: hero centre; the rest on the wall gallery arc
+      if (i === 0) unit.position.set(0, 0, 0.9);
       else {
-        const ring = i <= 6 ? 1 : 2;
-        const idx = ring === 1 ? i - 1 : i - 7;
-        const count = ring === 1 ? Math.min(n - 1, 6) : n - 7;
-        const a = (idx / Math.max(1, count)) * Math.PI * 2 + (ring === 1 ? 0.5 : 0.25);
-        const r = ring === 1 ? 3.35 : 5.5;
-        unit.position.set(Math.sin(a) * r, 0, -Math.cos(a) * r + 0.9);
-        unit.lookAt(0, 0, 2.4);
+        const j = i - 1;
+        const outer = j < outerN;
+        const cnt = outer ? outerN : m - outerN;
+        const k = outer ? j : j - outerN;
+        const a = A0 + ((k + 0.5) / Math.max(1, cnt)) * SPAN;
+        const r = outer ? 8.35 : 6.15;
+        unit.position.set(Math.sin(a) * r, 0, -Math.cos(a) * r);
+        unit.lookAt(0, 0, 0);
+        // section plaque on the wall above each display
+        const plaque = new THREE.Mesh(new THREE.PlaneGeometry(2.1, 0.52),
+          new THREE.MeshBasicMaterial({ map: sectionTexture(g.comp, g.count, g.seasons), transparent: true }));
+        const pr = r + 1.7;
+        plaque.position.set(Math.sin(a) * pr, 2.05, -Math.cos(a) * pr);
+        plaque.lookAt(0, 2.05, 0);
+        scene.add(plaque);
       }
       scene.add(unit);
       unit.userData.trophy = g;
@@ -384,7 +428,17 @@
   function mount2D(container, data, opts) {
     const club = (data.club || {});
     const gold = c => c === "UCL" || c === "ENG1" || c === "UEL" || c === "UECL";
-    const cups = (data.groups || []).slice().sort((a, b) => (b.last || 0) - (a.last || 0));
+    const cups = (data.groups || []).slice();
+    // organised by section (same order as the 3D room)
+    const secDef = [
+      ["CONTINENTAL", g => g.code === "UCL" || g.code === "UEL" || g.code === "UECL"],
+      ["TOP-FLIGHT LEAGUES", g => g.ctype === "league" && (g.tier || 9) <= 1],
+      ["OTHER LEAGUES", g => g.ctype === "league"],
+      ["CUPS", g => g.ctype !== "league"],
+    ];
+    const sections = secDef.map(t => ({ title: t[0],
+      items: cups.filter(t[1]).sort((a, b) => ((b.count || 1) - (a.count || 1)) || ((b.last || 0) - (a.last || 0))) }))
+      .filter(s => s.items.length);
     const item = g => {
       const spec = specFor(g.code, g.ctype, g.tier);
       const c = spec.metal === 1 ? "#d8ab3c" : "#c9ced6";
@@ -403,7 +457,7 @@
       <div class="t2-head"><div class="t2-kicker">THE MUSEUM</div>
         <h2>${esc2(club.name || "")} <span>Trophy Room</span></h2>
         <p>${data.total} trophy${data.total === 1 ? "" : "ies"} · ${club.league || ""}</p></div>
-      ${cups.length ? `<div class="t2-shelf">${cups.map(item).join("")}</div>`
+      ${cups.length ? sections.map(s => `<div class="t2-section"><div class="t2-sec-title">${esc2(s.title)}</div><div class="t2-shelf">${s.items.map(item).join("")}</div></div>`).join("")
         : `<div class="t2-empty"><h3>The shelves await their first winner.</h3><p>Win a competition and its trophy will stand here, forever.</p></div>`}
     </div>`;
     container.querySelectorAll(".t2-item").forEach(el =>

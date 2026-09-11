@@ -339,3 +339,66 @@ Bug reported from device (v1.18.0): live matches got stuck near full-time with
 Force-stop Touchline once after updating (clears the stuck match from memory),
 then reopen — the upgrade repairs your save automatically and the stuck match
 can be replayed from the Match Centre.
+
+## v1.19.0 — Trophy Dynasty: organised museum, poaching, prize money, fast sim (2026-09-11)
+Four additions on top of v1.18.1 (nothing previously shipped was removed).
+
+### 1. Trophy Room reorganised ("unorganized" feedback)
+- 3D room is now a real museum gallery: trophies are grouped by section in
+  order of prestige — Continental (UCL/UEL/UECL) → Top-flight leagues → Other
+  leagues → Domestic cups — within a section by number of wins, then recency.
+- The most prestigious win is the hero pedestal (centre); the rest stand on a
+  tidy, evenly spaced wall arc with a gap left for the branding wall. More
+  than 12 trophies get a second inner ring so sections never crowd.
+- Each wall display gets an engraved section plaque above it (competition,
+  ×N, years). 2D fallback is sectioned with labelled shelves (verified in a
+  DOM-mock test: 13/13 layout assertions).
+
+### 2. The market knows your name (manager poaching)
+- Winning trophies raises manager reputation: +4.0 (prestige ≥90: top league
+  / UCL), +2.5 (≥70: major domestic cup / strong league), +1.5 (≥50), +1.0 —
+  synced to the managers table and recorded in the season review.
+- While employed, recent success (reputation + trophies in the last two
+  seasons) sets "poach heat"; each week a clearly bigger top-flight club
+  (rep +6 above you, or — if you are already at the summit — an elite rival
+  abroad) may make a poaching approach: URGENT inbox + career-screen offer
+  card with Accept / Decline (new /api/career/reject). Gossip news is
+  published. Offers expire after 14 days.
+- Accepting a poach moves the manager mid-career: old club is backfilled
+  with an AI manager (world stays consistent), departure news is published,
+  the career chapter closes as "left", the new board starts at fresh
+  confidence. Verified end-to-end (33-assertion dynasty test).
+
+### 3. Competition prize money funds the transfer market
+- League-position + continental prize money (existing values, unchanged
+  scale) is now paid out in full AND added to the transfer budget at season
+  end; the season review says so.
+- Cup finals pay the winner and 40% to the runner-up into cash, balance and
+  transfer budget (message updated). Success funds the next window.
+
+### 4. Simulation no longer takes hours (performance)
+Profiled a full season (cProfile): 75% of time was 583K tiny SQL calls.
+- League table re-sort after every match → lazy once-per-read dirty set
+  (table() / _league_position / weekly AI sackings flush it; season end
+  always fresh). ~200K calls removed.
+- Cup/continental stage processing: previously every finished stage was
+  re-scanned and re-queried on every single day of the season (10.9K no-op
+  calls). Now a stage is processed exactly once, the first tick after its
+  last match (pending queue), plus a one-per-season catch-up scan for legacy
+  saves; persisted cup_advanced flags make it idempotent across restarts.
+  RNG draw order preserved.
+- Per-goal player writes in the daily AI match sim: one UPDATE per player
+  and one batched per-competition stats upsert (was: per goal and per
+  assist).
+- advance() no longer rewrites the whole save file on every simulated day
+  (that per-day JSON rewrite + flash write dominated sim time on phones);
+  it commits daily and persists once at the end. `played` flags make a
+  restart mid-sim safe.
+- Result: desktop full-season fast_sim 55.6s → 17.3s (3.2×; 583K → 275K
+  SQL calls). On phone storage the per-day rewrite removal adds a further
+  large margin — Next Season is minutes, not hours.
+
+### Regression
+competition_test 11/11, live_match, smoke, order_effect, multiseason
+(2 seasons; 2-season transfer budget now correctly reflects prize money),
+dynasty_test 33/33, ui_sanity (24 screens / 62 handlers), node --check.

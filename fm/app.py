@@ -1166,6 +1166,14 @@ def api_apply(payload: dict = Body(...)):
     return res
 
 
+@app.post("/api/career/reject")
+def api_reject(payload: dict = Body(...)):
+    s = need_save()
+    res = E.reject_job(con(), s, int(payload["club_id"]))
+    commit()
+    return res
+
+
 @app.get("/api/career/jobs")
 def api_jobs():
     s = need_save()

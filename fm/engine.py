@@ -499,6 +499,8 @@ def _check_facility_completions(con, save, dt, events):
 # --------------------------------------------------------------- team ratings
 STRENGTH_CACHE = {}      # club_id -> (squad_hash, strength dict)
 SQUAD_CACHE = {}         # club_id -> (squad_hash, rows)
+TABLE_DIRTY = set()      # comp_ids whose league-table order is stale
+PENDING_STAGES = set()   # (comp_id, stage, ctype, code) with a just-finished match
 _VERSION = [0]
 
 
@@ -508,6 +510,7 @@ def bump():
     _VERSION[0] += 1
     STRENGTH_CACHE.clear()
     SQUAD_CACHE.clear()
+    TABLE_DIRTY.clear()
 
 
 def bump_clubs(*club_ids):
@@ -937,7 +940,11 @@ def apply_result(con, save, fx, hg, ag, data, rng):
                 pts=pts+?, form=? WHERE comp_id=? AND season=? AND club_id=? AND stage='league'""",
                         (w, dd, l, gf, ga, (3 if w else (1 if dd else 0)), form,
                          fx["comp_id"], save["season"], cidc))
-        retable(con, save, fx["comp_id"])
+        # re-sort happens lazily (once) when the table is actually read —
+        # not after every single match of the day
+        TABLE_DIRTY.add(fx["comp_id"])
+    if ctype in ("cup", "continental") and fx.get("comp_id"):
+        PENDING_STAGES.add((fx["comp_id"], stage, ctype, fx.get("comp_code") or ""))
     # attendance / matchday income
     if hc and ctype != "friendly":
         att = int(min(hc["capacity"], hc["capacity"] * (0.72 + 0.28 * min(1, hc["rep"] / 90.0)) *
@@ -952,6 +959,7 @@ def apply_result(con, save, fx, hg, ag, data, rng):
 
 
 def retable(con, save, comp_id):
+    TABLE_DIRTY.discard(comp_id)
     rows = con.execute("""SELECT * FROM standings WHERE comp_id=? AND season=? AND stage='league'""",
                        (comp_id, save["season"])).fetchall()
     order = sorted(rows, key=lambda r: (-r["pts"], -(r["gf"] - r["ga"]), -r["gf"], r["club_id"]))
@@ -962,9 +970,11 @@ def retable(con, save, comp_id):
 
 
 def table(con, save, comp_id, limit=None):
+    if comp_id in TABLE_DIRTY:
+        retable(con, save, comp_id)
     rows = con.execute("""SELECT s.*, c.name, c.short, c.rep, c.code FROM standings s JOIN clubs c ON c.id=s.club_id
         WHERE s.comp_id=? AND s.season=? AND s.stage='league' ORDER BY s.pos""",
-        (comp_id, save["season"])).fetchall()
+                       (comp_id, save["season"])).fetchall()
     out = [dict(r) for r in rows]
     return out[:limit] if limit else out
 
@@ -1872,20 +1882,28 @@ def _simulate_day_matches(con, save, dt, rng, include_human=False):
                     w *= 0.12
                 ws.append(max(0.01, w))
                 aw.append(max(0.01, (0.2 + v.get("passing", 5) / 20.0)))
+            # credit goals/assists per player, then write once per player and
+            # once for the per-competition stats (was: one UPDATE + one upsert
+            # per goal and per assist)
+            agg = {}
             for _ in range(gcount):
                 idx = rng.choices(range(n2), weights=ws, k=1)[0]
-                con.execute("UPDATE players SET goals=goals+1, apps=apps+1, minutes=minutes+80, form=MIN(2.5,form+0.25), sharpness=MIN(100,sharpness+6) WHERE id=?",
-                            (pool[idx]["id"],))
-                # persistent per-competition stats (mirrors the player columns:
-                # the AI model credits apps/minutes to the scorer only)
-                _bump_season_stats(con, save["season"], fx["comp_id"],
-                                   [(pool[idx]["id"], dict(minutes=80, goals=1))])
+                g0, a0 = agg.get(idx, (0, 0))
+                agg[idx] = (g0 + 1, a0)
                 # assist
                 if rng.random() < 0.75:
                     j = rng.choices(range(n2), weights=[aw[k] if k != idx else 0.0001 for k in range(n2)], k=1)[0]
-                    con.execute("UPDATE players SET assists=assists+1 WHERE id=?", (pool[j]["id"],))
-                    _bump_season_stats(con, save["season"], fx["comp_id"],
-                                       [(pool[j]["id"], dict(apps=0, assists=1))])
+                    g1, a1 = agg.get(j, (0, 0))
+                    agg[j] = (g1, a1 + 1)
+            if agg:
+                upds = []
+                for pidx, (g, a) in agg.items():
+                    pid = pool[pidx]["id"]
+                    con.execute("""UPDATE players SET goals=goals+?, assists=assists+?, apps=apps+?,
+                        minutes=minutes+?, form=MIN(2.5,form+?), sharpness=MIN(100,sharpness+?) WHERE id=?""",
+                        (g, a, g, 80 * g, 0.25 * g, 6 * g, pid))
+                    upds.append((pid, dict(apps=g, minutes=80 * g, goals=g, assists=a)))
+                _bump_season_stats(con, save["season"], fx["comp_id"], upds)
         # squad-wide fatigue/sharpness for participants
         for team_id in (fx["home_id"], fx["away_id"]):
             con.execute("""UPDATE players SET fatigue=MIN(100, fatigue+18), sharpness=MIN(100,sharpness+7),
@@ -1902,10 +1920,16 @@ def _bump_season_stats(con, season, comp_id, updates):
     clean_sheets, rating, apps (default 1). Friendlies (comp_id 0) skipped."""
     if not season or not comp_id:
         return
+    rows = []
     for pid, u in updates:
         if not pid:
             continue
-        con.execute("""INSERT INTO season_player_stats
+        rows.append((pid, season, comp_id, u.get("apps", 1), u.get("starts", 0),
+                     u.get("minutes", 0), u.get("goals", 0), u.get("assists", 0),
+                     u.get("yellow", 0), u.get("red", 0), u.get("clean_sheets", 0),
+                     u.get("rating") or 0, 1 if u.get("rating") else 0))
+    if rows:
+        con.executemany("""INSERT INTO season_player_stats
             (player_id,season,comp_id,apps,starts,minutes,goals,assists,yellow,red,
              clean_sheets,rating_sum,rating_n)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -1915,11 +1939,7 @@ def _bump_season_stats(con, season, comp_id, updates):
             assists=assists+excluded.assists, yellow=yellow+excluded.yellow,
             red=red+excluded.red, clean_sheets=clean_sheets+excluded.clean_sheets,
             rating_sum=rating_sum+excluded.rating_sum,
-            rating_n=rating_n+excluded.rating_n""",
-            (pid, season, comp_id, u.get("apps", 1), u.get("starts", 0),
-             u.get("minutes", 0), u.get("goals", 0), u.get("assists", 0),
-             u.get("yellow", 0), u.get("red", 0), u.get("clean_sheets", 0),
-             u.get("rating") or 0, 1 if u.get("rating") else 0))
+            rating_n=rating_n+excluded.rating_n""", rows)
 
 
 SEASON_BACKSTOP = (7, 5)  # hard stop: season rolls over no later than 5 July after the final
@@ -2007,42 +2027,82 @@ def _cancel_leftovers(con, save):
 
 
 def _check_competitions(con, save, rng):
-    dt = d(save["date"])
+    """Process completed cup/continental stages.
+
+    A stage is processed exactly once — the first tick after its last match
+    (apply_result flags it in PENDING_STAGES) — plus a one-per-season catch-up
+    scan that covers legacy saves where a stage finished while the app was
+    closed. The persisted `cup_advanced` flags keep it idempotent across
+    restarts. (Previously every finished stage was re-scanned on every single
+    day of the season.)
+    """
+    season = save["season"]
+    adv = save["flags"].setdefault("cup_advanced", {})
+    if save["flags"].get("comp_catchup_season") != season:
+        save["flags"]["comp_catchup_season"] = season
+        _comp_catchup_scan(con, save, adv, rng)
+    if PENDING_STAGES:
+        for comp_id, stage, ctype, code in sorted(PENDING_STAGES):
+            _process_completed_stage(con, save, adv, rng, comp_id, stage, ctype, code)
+        PENDING_STAGES.clear()
+
+
+def _process_completed_stage(con, save, adv, rng, comp_id, stage, ctype, code):
+    key = f"{comp_id}-{save['season']}-{stage}"
+    if adv.get(key):
+        return
+    n = con.execute("SELECT COUNT(*) FROM fixtures WHERE comp_id=? AND season=? AND stage=? AND played=0",
+                    (comp_id, save["season"], stage)).fetchone()[0]
+    if n:
+        return
+    adv[key] = 1
+    if len(adv) > 80:  # prune finished seasons
+        save["flags"]["cup_advanced"] = {k: 1 for k in adv if f"-{save['season']}-" in k}
+        adv = save["flags"]["cup_advanced"]
+    if not code:
+        r = con.execute("SELECT code FROM competitions WHERE id=?", (comp_id,)).fetchone()
+        code = r["code"] if r else ""
+    if ctype == "cup":
+        rounds = CUP_ROUNDS.get(code)
+        if not rounds:
+            return
+        idx = [i for i, (s, _) in enumerate(rounds) if s == stage]
+        if not idx:
+            return
+        if idx[0] == len(rounds) - 1:
+            _cup_final_award(con, save, comp_id, stage, rng)
+        else:
+            advance_cup(con, save, comp_id, rng)
+    elif ctype == "continental":
+        if stage == "league":
+            continental_ko(con, save, comp_id, rng)
+        elif stage == "F":
+            _cup_final_award(con, save, comp_id, stage, rng)
+        else:
+            continental_ko(con, save, comp_id, stage and rng)
+
+
+def _comp_catchup_scan(con, save, adv, rng):
+    """One-per-season legacy scan: advances stages that finished while the
+    app was closed or before this version existed."""
     rows = con.execute("""SELECT DISTINCT f.comp_id, f.stage, k.ctype, k.code
         FROM fixtures f JOIN competitions k ON k.id=f.comp_id
         WHERE k.ctype IN ('cup','continental') AND f.season=?""", (save["season"],)).fetchall()
     for r in rows:
-        comp_id, stage, ctype, code = r["comp_id"], r["stage"], r["ctype"], r["code"]
-        unplayed = con.execute("SELECT COUNT(*) FROM fixtures WHERE comp_id=? AND season=? AND stage=? AND played=0",
-                               (comp_id, save["season"], stage)).fetchone()[0]
-        if unplayed:
-            continue
-        if ctype == "cup":
-            rounds = CUP_ROUNDS.get(code)
-            if not rounds:
-                continue
-            idx = [i for i, (s, _) in enumerate(rounds) if s == stage]
-            if not idx:
-                continue
-            if idx[0] == len(rounds) - 1:
-                _cup_final_award(con, save, comp_id, stage, rng)
-            else:
-                advance_cup(con, save, comp_id, rng)
-        elif ctype == "continental":
-            if stage == "league":
-                md = con.execute("SELECT MAX(round) FROM fixtures WHERE comp_id=? AND season=? AND stage='league'",
-                                 (comp_id, save["season"])).fetchone()[0]
-                played_all = con.execute("SELECT COUNT(*) FROM fixtures WHERE comp_id=? AND season=? AND stage='league' AND played=1",
-                                         (comp_id, save["season"])).fetchone()[0]
-                total = con.execute("SELECT COUNT(*) FROM fixtures WHERE comp_id=? AND season=? AND stage='league'",
-                                    (comp_id, save["season"])).fetchone()[0]
-                if played_all == total:
-                    continental_ko(con, save, comp_id, rng)
-            else:
-                if stage == "F":
-                    _cup_final_award(con, save, comp_id, stage, rng)
-                else:
-                    continental_ko(con, save, comp_id, stage and rng)
+        _process_completed_stage(con, save, adv, rng, r["comp_id"], r["stage"], r["ctype"], r["code"])
+
+
+def _trophy_reputation(con, save, prestige, ttype):
+    """Manager reputation bump on a trophy win (the world takes notice —
+    see _poach_check for the job-market side of this)."""
+    cid = save["club_id"]
+    if not cid:
+        return
+    boost = 4.0 if prestige >= 90 else (2.5 if prestige >= 70 else (1.5 if prestige >= 50 else 1.0))
+    save["career"]["reputation"] = min(95.0, save["career"]["reputation"] + boost)
+    con.execute("UPDATE managers SET reputation=? WHERE club_id=? AND human=1",
+                (save["career"]["reputation"], cid))
+    save["flags"]["poach_heat"] = int(save["flags"].get("poach_heat", 0)) + (14 if boost >= 4 else (10 if boost >= 2.5 else 6))
 
 
 def _cup_final_award(con, save, comp_id, stage, rng):
@@ -2069,15 +2129,20 @@ def _cup_final_award(con, save, comp_id, stage, rng):
     con.execute("INSERT INTO history (season,comp_id,club_id,pos,note,trophy) VALUES (?,?,?,?,?,?)",
                 (save["season"], comp_id, loser, 2, cname + " runners-up", ""))
     add_news(con, save, "CUP", f"{wname} win the {cname}.")
-    # prize money
-    prize = {98: 90.0, 82: 30.0, 70: 12.0}.get(con.execute("SELECT prestige FROM competitions WHERE id=?", (comp_id,)).fetchone()["prestige"], 6.0)
-    con.execute("UPDATE clubs SET cash=cash+?, balance=balance+? WHERE id=?", (prize, prize, winner))
-    con.execute("UPDATE clubs SET cash=cash+?, balance=balance+? WHERE id=?", (prize * 0.4, prize * 0.4, loser))
+    # prize money (paid out in full AND added to the transfer budget)
+    comp_row = con.execute("SELECT prestige FROM competitions WHERE id=?", (comp_id,)).fetchone()
+    prize = {98: 90.0, 82: 30.0, 70: 12.0}.get(comp_row["prestige"], 6.0)
+    con.execute("UPDATE clubs SET cash=cash+?, balance=balance+?, transfer_budget=transfer_budget+? WHERE id=?",
+                (prize, prize, prize, winner))
+    con.execute("UPDATE clubs SET cash=cash+?, balance=balance+?, transfer_budget=transfer_budget+? WHERE id=?",
+                (prize * 0.4, prize * 0.4, prize * 0.4, loser))
     con.execute("UPDATE clubs SET reputation=MIN(97,reputation+?) WHERE id=?", (1.5 if prize > 40 else 0.7, winner))
     if winner == save["club_id"]:
         save["career"]["trophies"].append({"season": save["season"], "comp": cname, "type": "cup"})
+        _trophy_reputation(con, save, comp_row["prestige"], "cup")
         add_inbox(con, save, "BOARD", "URGENT", f"{cname} champions!",
-                  f"You have won the {cname}. Prize money of {money(prize)} has been added to the club account.",
+                  f"You have won the {cname}. Prize money of {money(prize)} has been added to the club "
+                  f"account and the transfer budget.",
                   payload={"screen": "career"})
     mark_comp_complete(con, save["season"], comp_id, winner, ds(d(save["date"])))
 
@@ -2117,6 +2182,8 @@ def _weekly(con, save, rng, events):
             board["confidence"] = max(0, min(100, board["confidence"] + drift * 0.06))
     fans = save["fans"]
     fans["sentiment"] = max(0, min(100, fans["sentiment"] + (board["confidence"] - fans["sentiment"]) * 0.04))
+    # job market: big clubs may try to poach a successful, employed manager
+    _poach_check(con, save, rng, events)
 
 
 def _league_position(con, save, season=None):
@@ -2127,6 +2194,8 @@ def _league_position(con, save, season=None):
     comp_row = con.execute("SELECT id FROM competitions WHERE code=?", (c["league"],)).fetchone()
     r = None
     if comp_row:
+        if comp_row["id"] in TABLE_DIRTY:
+            retable(con, save, comp_row["id"])
         r = con.execute("""SELECT * FROM standings WHERE comp_id=? AND season=? AND club_id=?
             AND stage='league'""", (comp_row["id"], season, save["club_id"])).fetchone()
     if not r:
@@ -2144,6 +2213,8 @@ def _league_position(con, save, season=None):
 
 def _world_managers(con, save, rng, events):
     """AI clubs sack/hire managers based on results and board patience."""
+    for comp_id in list(TABLE_DIRTY):
+        retable(con, save, comp_id)
     rows = con.execute("""SELECT m.id mid, m.name, m.reputation, m.club_id, c.name club_name, c.rep,
         c.league, s.pts, s.p played, s.pos, k.id league_id
         FROM managers m JOIN clubs c ON c.id=m.club_id
@@ -2409,6 +2480,86 @@ def job_market_tick(con, save, dt, rng, events):
     return events
 
 
+def _poach_check(con, save, rng, events):
+    """While employed: recent trophy success draws poaching bids from clearly
+    bigger clubs. One poach offer at a time; offers expire after 14 days."""
+    dt = d(save["date"])
+    offers = save["flags"].setdefault("job_offers", [])
+    kept, lapsed = [], []
+    for o in offers:
+        if (dt - d(o["date"])).days <= o.get("expires_days", 10):
+            kept.append(o)
+        else:
+            lapsed.append(o)
+    save["flags"]["job_offers"] = kept
+    for o in lapsed:
+        add_inbox(con, save, "CAREER", "ROUTINE", f"Offer lapsed: {o['name']}",
+                  f"The job offer from {o['name']} has expired.",
+                  payload={"screen": "career"})
+    cid = save.get("club_id")
+    if not cid or save["flags"].get("unemployed"):
+        return
+    c = club(con, cid)
+    if not c:
+        return
+    if any(o.get("poach") for o in kept):
+        return
+    rep = save["career"]["reputation"]
+    heat = int(save["flags"].get("poach_heat", 0))
+    trophies_2y = len([t for t in save["career"]["trophies"] if t["season"] >= save["season"] - 1])
+    if heat <= 0 and not (rep >= 60 and trophies_2y >= 2):
+        return
+    p = max(0.05, min(0.5, 0.08 + 0.04 * min(4, trophies_2y) + 0.015 * heat))
+    # "clearly bigger" clubs; for managers already at the very top, the best
+    # rival clubs abroad qualify (you can't poach up from the summit)
+    rows = con.execute("""SELECT c.id, c.name, c.rep, c.league, c.tier, k.name AS league_name
+        FROM clubs c LEFT JOIN competitions k ON k.code = c.league
+        WHERE c.id != ? AND c.tier = 1 AND c.code != 'FREE'
+          AND c.id IN (SELECT club_id FROM managers WHERE human = 0)
+          AND (c.rep >= ? OR (c.rep >= ? AND c.country != ?))
+        ORDER BY c.rep DESC LIMIT 6""",
+        (cid, c["rep"] + 6, c["rep"] - 4, c["country"])).fetchall()
+    if not rows:
+        return
+    v = rows[rng.randrange(len(rows))]
+    offer = {"club_id": v["id"], "date": save["date"], "expires_days": 14,
+             "rep": v["rep"], "name": v["name"], "league": v["league"], "tier": v["tier"], "poach": True}
+    save["flags"]["job_offers"].append(offer)
+    mgr = save["career"]["manager"]["name"]
+    add_inbox(con, save, "CAREER", "URGENT", f"Job offer: {v['name']}",
+              f"Your trophy success has been noticed. {v['name']} ({v['league_name'] or v['league']}) "
+              f"want you as their manager — even though you are under contract at {c['name']}. "
+              f"They are prepared to handle the release.\n\nThe offer expires in 14 days.",
+              payload={"screen": "career", "action": "job_offer", "club_id": v["id"]})
+    add_news(con, save, "MANAGERS",
+             f"Report: {v['name']} in advanced talks with {c['name']} manager {mgr}.", club_id=None)
+    save["flags"]["poach_heat"] = max(0, heat - 4)
+    events.append(dict(kind="world", text=f"{v['name']} have made a managerial approach for {mgr}."))
+
+
+def reject_job(con, save, club_id, rng=None):
+    """Decline a job offer (poaching or vacancy)."""
+    offers = save["flags"].get("job_offers", [])
+    keep, gone = [], None
+    for o in offers:
+        if o["club_id"] == club_id:
+            gone = o
+        else:
+            keep.append(o)
+    if not gone:
+        return {"ok": False, "msg": "No active offer from that club."}
+    save["flags"]["job_offers"] = keep
+    if gone.get("poach") and save.get("club_id") and not save["flags"].get("unemployed"):
+        cur = club(con, save["club_id"])
+        add_news(con, save, "MANAGERS",
+                 f"{gone['name']} have dropped their pursuit of "
+                 f"{save['career']['manager']['name']} ({cur['name'] if cur else 'unattached'}).",
+                 club_id=None)
+    bump()
+    persist(con, save)
+    return {"ok": True, "msg": f"Offer from {gone['name']} declined."}
+
+
 def _season_end_unemployed(con, save, rng, events):
     con.execute("UPDATE players SET age=age+1, goals=0, assists=0, apps=0, minutes=0, avg_rating=0, "
                 "yellow=0, red=0, form=0, injured_weeks=0, condition='fit', injury_name='', "
@@ -2455,6 +2606,7 @@ def accept_job(con, save, club_id, rng=None):
                       payload={"screen": "career"})
             return {"ok": False, "msg": f"{c['name']} turned your application down."}
     save["flags"]["job_offers"] = [o for o in offers if o["club_id"] != club_id]
+    old_cid = save.get("club_id")
     # close the career chapter at the old club
     if save["career"]["clubs"] and save["career"]["clubs"][-1].get("to") is None:
         save["career"]["clubs"][-1]["to"] = save["date"]
@@ -2474,6 +2626,32 @@ def accept_job(con, save, club_id, rng=None):
                                     "reason": "hired"})
     ensure_human_setup(con, club_id, formation="4-2-3-1 Wide")
     setup_club_state(con, save)
+    if old_cid and old_cid != club_id:
+        # poached out of a current club: backfill the vacancy with an AI
+        # manager so the world stays consistent, and start fresh with the
+        # new board
+        oldc = club(con, old_cid)
+        oldname = oldc["name"] if oldc else "the club"
+        con.execute("DELETE FROM managers WHERE club_id=? AND human=1", (old_cid,))
+        newname = make_manager_name(rng)
+        con.execute("INSERT INTO managers (name,nat,age,club_id,reputation,style,hired,human,attrs) "
+                    "VALUES (?,?,?,?,?,?,?,0,?)",
+                    (newname, rng.choice(NATIONALITY_POOL), rng.randint(35, 62), old_cid,
+                     max(5.0, (oldc["rep"] if oldc else 50) * 0.72), rng.choice(
+                         ["Possession", "High press", "Counter-attack", "Direct", "Balanced",
+                          "Defensive solidity", "Wing play"]), save["date"],
+                     json.dumps({k: rng.randint(6, 17) for k in
+                                 ("attacking", "defending", "fitness", "tactical", "mental",
+                                  "technical", "youth", "man_mgmt", "motivation", "adaptability",
+                                  "judging")})))
+        add_news(con, save, "MANAGERS",
+                 f"{oldname} have confirmed the departure of {save['career']['manager']['name']} "
+                 f"to {c['name']} and appointed {newname} as manager.", club_id=old_cid)
+        save["board"]["confidence"] = 55.0
+        save["board"]["sack_risk"] = 0
+        save["board"]["warning"] = False
+        save["board"]["praised"] = False
+        save["fans"]["sentiment"] = 60.0
     add_inbox(con, save, "CAREER", "URGENT", f"Appointed: {c['name']}",
               f"You have been appointed manager of {c['name']}.\n\n"
               f"Stadium: {c['stadium']} ({c['capacity']:,})\n"
@@ -3894,6 +4072,7 @@ def _season_end(con, save, rng, events):
         if champ["club_id"] == cid:
             save["career"]["trophies"].append({"season": save["season"], "comp": lg["name"],
                                                "type": "league"})
+            _trophy_reputation(con, save, lg["prestige"], "league")
         # relegation / promotion (sizes stay constant: promoted == relegated)
         lower = con.execute("SELECT * FROM competitions WHERE country=? AND tier=?",
                             (lg["country"], lg["tier"] + 1)).fetchone()
@@ -3976,9 +4155,12 @@ def _season_end(con, save, rng, events):
     for o in save["board"].get("objectives") or []:
         o.pop("track", None)
     # --- finances roll-up
+    # league position + continental prize money: paid out in full AND added to
+    # the transfer budget (success funds the next window)
     c = club(con, cid)
     prize = _prize_money(con, save, c, pos, save["season"])
-    con.execute("UPDATE clubs SET cash=cash+?, balance=balance+? WHERE id=?", (prize, prize, cid))
+    con.execute("UPDATE clubs SET cash=cash+?, balance=balance+?, transfer_budget=transfer_budget+? WHERE id=?",
+                (prize, prize, prize, cid))
     # --- contracts expiring
     fa_club = ensure_free_agent_club(con)
     expiring = con.execute("SELECT * FROM players WHERE contract_end<=?",
@@ -4145,7 +4327,7 @@ def season_review_text(con, save, awards, summary, prize, season=None, pos=None,
     for _code, g in sorted(((k, v) for k, v in gbs.items() if k != "UCL"),
                            key=lambda kv: -kv[1]["goals"])[:2]:
         lines.append(f"{g['comp']} Golden Boot: {g['name']} — {g['goals']} goals")
-    lines.append(f"Prize money: {money(prize)}")
+    lines.append(f"Prize money: {money(prize)} (added to the transfer budget)")
     fin = con.execute("SELECT cash, balance, wage_bill, transfer_budget FROM clubs WHERE id=?", (cid,)).fetchone()
     lines.append(f"Financial result: balance {money(fin['balance'])}, cash {money(fin['cash'])}")
     lines.append(f"Board confidence: {save['board']['confidence']:.0f}/100")
@@ -4455,8 +4637,10 @@ def advance(con, save, days=1, until=None, stop_for=("match",), rng=None, ignore
             log.append({"date": save["date"], "event": "urgent_mail",
                         "items": [{"id": u["id"], "cat": u["cat"], "subject": u["subject"]} for u in urg]})
             break
+        # commit + persist happens once, at the end of the advance (was: every
+        # single day — the per-day save-file rewrite dominated sim time on
+        # phone storage). The `played` flags make a restart mid-advance safe.
         con.commit()
-        persist(con, save)
     # catch any overdue human fixture that was not played — only auto-play if explicitly allowed
     # to prevent the "38 games show as played" bug where Continue with until=week/month
     # would skip matches and auto-play them.
