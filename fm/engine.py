@@ -1030,6 +1030,8 @@ def advance_cup(con, save, comp_id, rng):
         if r["club_id"] not in winners:
             winners.append(r["club_id"])
     if len(winners) < 2:
+        # nobody left to draw the cup through — it cannot finish normally
+        mark_comp_complete(con, save["season"], comp_id, winners[0] if winners else None, "ended early")
         return
     nxt_stage, nxt_base = rounds[cur_idx + 1]
     nxt_date = _cup_round_date(nxt_base, save["season"], ccode["country"])
@@ -1062,9 +1064,17 @@ def continental_ko(con, save, comp_id, rng):
         return                      # current knockout round still to be played
     rows = retable(con, save, comp_id)
     if len(rows) < 24:
+        # no viable knockout field — competition cannot continue; close it out
+        mark_comp_complete(con, save["season"], comp_id, rows[0]["club_id"] if rows else None, "no KO field")
         return
-    stage_now = con.execute("SELECT MAX(stage) FROM fixtures WHERE comp_id=? AND season=? AND stage!='league'",
-                            (comp_id, save["season"])).fetchone()[0]
+    # rank-based latest round (MAX(stage) is lexicographic: "R16" > "QF",
+    # which froze the knockout after Round of 16)
+    _KO_ORDER = ("KO", "R16", "QF", "SF", "F")
+    have = {r[0] for r in con.execute(
+        "SELECT DISTINCT stage FROM fixtures WHERE comp_id=? AND season=? AND stage!='league'",
+        (comp_id, save["season"])).fetchall()}
+    stage_now = [s for s in _KO_ORDER if s in have]
+    stage_now = stage_now[-1] if stage_now else None
     order = [r["club_id"] for r in rows]
     maxid = con.execute("SELECT COALESCE(MAX(id),0) FROM fixtures").fetchone()[0]
     dates = {k: _cup_round_date(v, save["season"], "England") for k, v in
@@ -1245,6 +1255,7 @@ def _finish_human_match(con, save, fx, ctx, result, mode="key"):
     """Post-match processing: player updates, cards, injuries, morale, board."""
     cid = ctx["cid"]; is_home = ctx["is_home"]; players = ctx["players"]; tac = ctx["tac"]
     hrating = ctx["hrating"]; oxi = ctx["oxi"]; ctype = ctx["ctype"]; rng = ctx["rng"]
+    comp_id = fx.get("comp_id")          # 0 = friendly: excluded from season stats
     if ctype == "friendly":
         result["extra_time"] = None; result["penalties"] = None
     # determine final score incl. pens
@@ -1305,14 +1316,28 @@ def _finish_human_match(con, save, fx, ctx, result, mode="key"):
                      round(((p["avg_rating"] * p["apps"]) + rat) / max(1, p["apps"] + 1), 2) if p["apps"] else round(rat, 2),
                      p["id"]))
         pmap[p["id"]]["fitness"] = new_fit
+        # persistent per-competition stats (survive the season-end zeroing)
+        if comp_id and mins_played > 0:
+            _bump_season_stats(con, save["season"], comp_id, [(p["id"], dict(
+                starts=1 if p["id"] in starters else 0, minutes=mins_played,
+                goals=goals_p[i] if i < len(goals_p) else 0,
+                assists=assists_p[i] if i < len(assists_p) else 0,
+                clean_sheets=1 if (p["pos"] == "GK" and opp_goals == 0) else 0,
+                rating=rat))])
     # cards & suspensions
     for ev in result["events"]:
         if ev["side"] == ("H" if is_home else "A"):
             if ev["type"] == "yellow" and ev.get("pid") in pmap:
                 con.execute("UPDATE players SET yellow=yellow+1 WHERE id=?", (ev["pid"],))
+                if comp_id:
+                    _bump_season_stats(con, save["season"], comp_id,
+                                       [(ev["pid"], dict(apps=0, yellow=1))])
             if ev["type"] == "red" and ev.get("pid") in pmap:
                 ban = 3 if ev.get("reason") == "second yellow" else 4
                 con.execute("UPDATE players SET red=red+1, suspended=? WHERE id=?", (ban, ev["pid"]))
+                if comp_id:
+                    _bump_season_stats(con, save["season"], comp_id,
+                                       [(ev["pid"], dict(apps=0, red=1))])
     # injuries
     inj_ids = result["injuries_home"] if is_home else result["injuries_away"]
     inj_report = []
@@ -1339,6 +1364,13 @@ def _finish_human_match(con, save, fx, ctx, result, mode="key"):
                          (result["goals_away"] if is_home else result["goals_home"])[i] if i < len(result["goals_away"] if is_home else result["goals_home"]) else 0,
                          (result["assists_away"] if is_home else result["assists_home"])[i] if i < len(result["assists_away"] if is_home else result["assists_home"]) else 0,
                          1 if mp > 0 else 0, mp, m["pid"]))
+            if comp_id and mp > 0:
+                _bump_season_stats(con, save["season"], comp_id, [(m["pid"], dict(
+                    minutes=mp,
+                    goals=(result["goals_away"] if is_home else result["goals_home"])[i] if i < len(result["goals_away"] if is_home else result["goals_home"]) else 0,
+                    assists=(result["assists_away"] if is_home else result["assists_home"])[i] if i < len(result["assists_away"] if is_home else result["assists_home"]) else 0,
+                    clean_sheets=1 if (m.get("slot") == "GK" and my_goals == 0) else 0,
+                    rating=orat[i] if i < len(orat) else 0))])
     # --------------------------------------------------------- team-level
     st = result["stats"]["home"] if is_home else result["stats"]["away"]
     ost = result["stats"]["away"] if is_home else result["stats"]["home"]
@@ -1735,13 +1767,11 @@ def tick_day(con, save, rng, auto_human=False):
     # ---- monthly
     if dt.day == 1:
         _monthly(con, save, rng, events)
-    # ---- season end
-    if not save["flags"].get(f"season_done_{save['season']}"):
-        _last = con.execute("""SELECT MAX(f.match_date) FROM fixtures f JOIN competitions k ON k.id=f.comp_id
-            WHERE f.season=? AND k.ctype!='friendly'""", (save["season"],)).fetchone()[0]
-        if _last and ds(dt) >= _last:
-            _season_end(con, save, rng, events)
-            save["flags"][f"season_done_{save['season'] - 1}"] = True
+    # ---- season end (independent competition lifecycles: the season rolls only
+    # when every competition this season has actually finished, or the backstop passes)
+    if _season_end_due(con, save, dt):
+        _season_end(con, save, rng, events)
+        save["flags"][f"season_done_{save['season'] - 1}"] = True
     # NOTE: no global bump() here anymore — the squad/strength caches are
     # verified per matchday via structural hashes (see squad_hashes), so a
     # daily worldwide invalidation was pure waste.
@@ -1831,10 +1861,16 @@ def _simulate_day_matches(con, save, dt, rng, include_human=False):
                 idx = rng.choices(range(n2), weights=ws, k=1)[0]
                 con.execute("UPDATE players SET goals=goals+1, apps=apps+1, minutes=minutes+80, form=MIN(2.5,form+0.25), sharpness=MIN(100,sharpness+6) WHERE id=?",
                             (pool[idx]["id"],))
+                # persistent per-competition stats (mirrors the player columns:
+                # the AI model credits apps/minutes to the scorer only)
+                _bump_season_stats(con, save["season"], fx["comp_id"],
+                                   [(pool[idx]["id"], dict(minutes=80, goals=1))])
                 # assist
                 if rng.random() < 0.75:
                     j = rng.choices(range(n2), weights=[aw[k] if k != idx else 0.0001 for k in range(n2)], k=1)[0]
                     con.execute("UPDATE players SET assists=assists+1 WHERE id=?", (pool[j]["id"],))
+                    _bump_season_stats(con, save["season"], fx["comp_id"],
+                                       [(pool[j]["id"], dict(apps=0, assists=1))])
         # squad-wide fatigue/sharpness for participants
         for team_id in (fx["home_id"], fx["away_id"]):
             con.execute("""UPDATE players SET fatigue=MIN(100, fatigue+18), sharpness=MIN(100,sharpness+7),
@@ -1842,6 +1878,117 @@ def _simulate_day_matches(con, save, dt, rng, include_human=False):
                 WHERE club_id=? AND squad IN ('First Team','Reserve')""", (team_id,))
         n += 1
     return n
+
+
+def _bump_season_stats(con, season, comp_id, updates):
+    """Accumulate per-competition season stats (persistent, survives the
+    season-end zeroing of the players columns). updates: [(player_id, dict)]
+    with optional keys starts, minutes, goals, assists, yellow, red,
+    clean_sheets, rating, apps (default 1). Friendlies (comp_id 0) skipped."""
+    if not season or not comp_id:
+        return
+    for pid, u in updates:
+        if not pid:
+            continue
+        con.execute("""INSERT INTO season_player_stats
+            (player_id,season,comp_id,apps,starts,minutes,goals,assists,yellow,red,
+             clean_sheets,rating_sum,rating_n)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(player_id,season,comp_id) DO UPDATE SET
+            apps=apps+excluded.apps, starts=starts+excluded.starts,
+            minutes=minutes+excluded.minutes, goals=goals+excluded.goals,
+            assists=assists+excluded.assists, yellow=yellow+excluded.yellow,
+            red=red+excluded.red, clean_sheets=clean_sheets+excluded.clean_sheets,
+            rating_sum=rating_sum+excluded.rating_sum,
+            rating_n=rating_n+excluded.rating_n""",
+            (pid, season, comp_id, u.get("apps", 1), u.get("starts", 0),
+             u.get("minutes", 0), u.get("goals", 0), u.get("assists", 0),
+             u.get("yellow", 0), u.get("red", 0), u.get("clean_sheets", 0),
+             u.get("rating") or 0, 1 if u.get("rating") else 0))
+
+
+SEASON_BACKSTOP = (7, 5)  # hard stop: season rolls over no later than 5 July after the final
+
+
+def season_backstop(season):
+    """Latest date the season S/S+1 can still be running (after the last cup/continental final)."""
+    return date(season + 1, SEASON_BACKSTOP[0], SEASON_BACKSTOP[1])
+
+
+def comp_is_complete(con, season, comp_id, ctype):
+    """Has this competition truly finished for `season`?
+
+    Leagues finish when every scheduled matchday is played. Cups and continental
+    tournaments finish only when their final has been awarded (comp_state), so a
+    league ending never terminates a live Champions League.
+    """
+    if ctype == "league":
+        total = con.execute("SELECT COUNT(*) n FROM fixtures WHERE comp_id=? AND season=?",
+                            (comp_id, season)).fetchone()["n"]
+        if total == 0:
+            return True
+        left = con.execute("SELECT COUNT(*) n FROM fixtures WHERE comp_id=? AND season=? AND played=0",
+                           (comp_id, season)).fetchone()["n"]
+        return left == 0
+    row = con.execute("SELECT status FROM comp_state WHERE comp_id=? AND season=?",
+                      (comp_id, season)).fetchone()
+    return bool(row and row["status"] == "complete")
+
+
+def season_competitions_complete(con, season):
+    """True when every competition with fixtures/entries this season has finished."""
+    rows = con.execute("""SELECT DISTINCT f.comp_id, k.ctype FROM fixtures f
+        JOIN competitions k ON k.id=f.comp_id
+        WHERE f.season=? AND f.comp_id>0""", (season,)).fetchall()
+    for r in rows:
+        if not comp_is_complete(con, season, r["comp_id"], r["ctype"]):
+            return False
+    # continental/cup comps that qualified nobody (entries but no fixtures yet)
+    rows = con.execute("""SELECT DISTINCT e.comp_id, k.ctype FROM entries e
+        JOIN competitions k ON k.id=e.comp_id
+        WHERE e.season=? AND k.ctype IN ('cup','continental')""", (season,)).fetchall()
+    for r in rows:
+        has_fx = con.execute("SELECT 1 FROM fixtures WHERE comp_id=? AND season=? LIMIT 1",
+                             (r["comp_id"], season)).fetchone()
+        if not has_fx and not comp_is_complete(con, season, r["comp_id"], r["ctype"]):
+            return False
+    return True
+
+
+def mark_comp_complete(con, season, comp_id, winner_id=None, note=None):
+    con.execute("""INSERT INTO comp_state (comp_id,season,status,winner_id,finished) VALUES (?,?,?,?,?)
+        ON CONFLICT(comp_id,season) DO UPDATE SET status='complete',
+        winner_id=COALESCE(excluded.winner_id, comp_state.winner_id),
+        finished=COALESCE(excluded.finished, comp_state.finished)""",
+        (comp_id, season, "complete", winner_id, note))
+
+
+def _season_end_due(con, save, dt):
+    """Independent-lifecycle trigger: the season rolls only when every competition
+    actually represented this season has finished (or the calendar backstop passes)."""
+    season = save["season"]
+    if save["flags"].get(f"season_done_{season}"):
+        return False
+    if ds(dt) >= ds(season_backstop(season)):
+        return True
+    return season_competitions_complete(con, season)
+
+
+def _cancel_leftovers(con, save):
+    """Defensive: at the backstop, competitions that still have unplayed fixtures
+    are abandoned (0-0, flagged) rather than silently deleted. Normally this is a no-op."""
+    rows = con.execute("""SELECT f.comp_id, k.name FROM fixtures f
+        JOIN competitions k ON k.id=f.comp_id
+        WHERE f.season=? AND f.played=0 AND f.comp_id>0
+        GROUP BY f.comp_id""", (save["season"],)).fetchall()
+    for r in rows:
+        n = con.execute("UPDATE fixtures SET played=1, hg=0, aw=0, report='{}' WHERE comp_id=? AND season=? AND played=0",
+                        (r["comp_id"], save["season"])).rowcount
+        if n:
+            mark_comp_complete(con, save["season"], r["comp_id"], None, "abandoned")
+            add_news(con, save, "COMPETITION", f"The {r['name']} was abandoned with {n} match(es) unplayed.",
+                     None)
+    return bool(rows)
 
 
 def _check_competitions(con, save, rng):
@@ -1917,6 +2064,7 @@ def _cup_final_award(con, save, comp_id, stage, rng):
         add_inbox(con, save, "BOARD", "URGENT", f"{cname} champions!",
                   f"You have won the {cname}. Prize money of {money(prize)} has been added to the club account.",
                   payload={"screen": "career"})
+    mark_comp_complete(con, save["season"], comp_id, winner, ds(d(save["date"])))
 
 
 def _weekly(con, save, rng, events):
@@ -2239,13 +2387,10 @@ def job_market_tick(con, save, dt, rng, events):
                                   "youth", "man_mgmt", "motivation", "adaptability", "judging")})))
                     add_news(con, save, "MANAGERS", f"{v['name']} have appointed {newname} as manager.",
                              club_id=v["id"])
-    # season rollover still happens while unemployed
-    if not save["flags"].get(f"season_done_{save['season']}"):
-        _last = con.execute("""SELECT MAX(f.match_date) FROM fixtures f JOIN competitions k ON k.id=f.comp_id
-            WHERE f.season=? AND k.ctype!='friendly'""", (save["season"],)).fetchone()[0]
-        if _last and ds(dt) >= _last:
-            _season_end_unemployed(con, save, rng, events)
-            save["flags"][f"season_done_{save['season'] - 1}"] = True
+    # season rollover still happens while unemployed (same independent-lifecycle rule)
+    if _season_end_due(con, save, dt):
+        _season_end_unemployed(con, save, rng, events)
+        save["flags"][f"season_done_{save['season'] - 1}"] = True
     return events
 
 
@@ -3599,6 +3744,94 @@ def evaluate_objectives(con, save, rng=None, final=False):
     return lines, delta
 
 
+def _season_player_records(con, save, season):
+    """End-of-season player bookkeeping (must run BEFORE the players stat
+    reset and BEFORE save["season"] increments):
+
+    1. fold the season's per-competition rows into career_player_stats
+    2. Golden Boot for every competition that had scorers (persistent)
+    3. Ballon d'Or: season performance + trophy bonuses
+    """
+    out = dict(golden_boot={}, ballon=None)
+    # 1) career aggregation — one row per player per season, all comps
+    con.execute("""INSERT INTO career_player_stats
+        (player_id,season,club_id,apps,minutes,goals,assists,yellow,red,clean_sheets,rating_sum,rating_n)
+        SELECT s.player_id, s.season, COALESCE(p.club_id, -1),
+          SUM(s.apps), SUM(s.minutes), SUM(s.goals), SUM(s.assists), SUM(s.yellow),
+          SUM(s.red), SUM(s.clean_sheets), SUM(s.rating_sum), SUM(s.rating_n)
+        FROM season_player_stats s LEFT JOIN players p ON p.id=s.player_id
+        WHERE s.season=? GROUP BY s.player_id
+        ON CONFLICT(player_id,season) DO UPDATE SET
+        club_id=excluded.club_id, apps=apps+excluded.apps, minutes=minutes+excluded.minutes,
+        goals=goals+excluded.goals, assists=assists+excluded.assists,
+        yellow=yellow+excluded.yellow, red=red+excluded.red,
+        clean_sheets=clean_sheets+excluded.clean_sheets,
+        rating_sum=rating_sum+excluded.rating_sum, rating_n=rating_n+excluded.rating_n""",
+        (season,))
+    # 2) Golden Boot per competition (persistent — browsable in History)
+    for k in con.execute("""SELECT id, name, code FROM competitions
+        WHERE ctype IN ('league','cup','continental') ORDER BY id""").fetchall():
+        top = con.execute("""SELECT player_id, goals, assists, minutes FROM season_player_stats
+            WHERE season=? AND comp_id=? AND goals>0
+            ORDER BY goals DESC, minutes ASC, assists DESC LIMIT 1""",
+            (season, k["id"])).fetchone()
+        if not top:
+            continue
+        pr = con.execute("SELECT name, club_id FROM players WHERE id=?",
+                         (top["player_id"],)).fetchone()
+        cl = club(con, pr["club_id"]) if pr and pr["club_id"] else None
+        key = k["code"] or str(k["id"])
+        out["golden_boot"][key] = dict(name=pr["name"] if pr else "?",
+                                       club=cl["name"] if cl else "?",
+                                       goals=top["goals"], comp=k["name"],
+                                       player_id=top["player_id"])
+        con.execute("INSERT INTO awards (season,name,player_id,club_id,detail) VALUES (?,?,?,?,?)",
+                    (season, "Golden Boot — " + k["name"], top["player_id"],
+                     pr["club_id"] if pr else None,
+                     f"{top['goals']} goals for {cl['name'] if cl else '?'} in {k['name']}"))
+    # 3) Ballon d'Or — the season's best player in the world
+    trop = {}
+    for h in con.execute("""SELECT h.club_id, h.pos, k.code, k.ctype, k.tier
+        FROM history h JOIN competitions k ON k.id=h.comp_id
+        WHERE h.season=? AND h.pos IN (1,2)""", (season,)).fetchall():
+        b = {"UCL": 30.0, "UEL": 15.0, "UECL": 8.0}.get(h["code"])
+        if b is None:
+            b = {1: 12.0, 2: 6.0}.get(h["tier"], 8.0) if h["ctype"] == "league" else 8.0
+        trop[h["club_id"]] = trop.get(h["club_id"], 0.0) + (b if h["pos"] == 1 else b / 2.0)
+    best = None
+    for r in con.execute("""SELECT player_id, club_id, goals, assists, apps, rating_n,
+        rating_sum / NULLIF(rating_n, 0) AS avg_r
+        FROM career_player_stats WHERE season=?""", (season,)).fetchall():
+        if (r["goals"] + r["assists"]) < 3 and (r["avg_r"] or 0) < 6.8:
+            continue
+        score = (4.0 * r["goals"] + 3.0 * r["assists"] + 0.25 * r["apps"]
+                 + 8.0 * max(0.0, (r["avg_r"] or 0.0) - 6.5)
+                 + trop.get(r["club_id"], 0.0))
+        if best is None or score > best[0]:
+            best = (score, r)
+    if best:
+        score, r = best
+        pr = con.execute("SELECT name FROM players WHERE id=?", (r["player_id"],)).fetchone()
+        cl = club(con, r["club_id"]) if r["club_id"] and r["club_id"] > 0 else None
+        avg = round(r["avg_r"] or 0, 2)
+        out["ballon"] = dict(name=pr["name"] if pr else "?",
+                             club=cl["name"] if cl else "?", club_id=r["club_id"],
+                             goals=r["goals"], assists=r["assists"], avg_rating=avg,
+                             score=round(score, 1), player_id=r["player_id"])
+        con.execute("INSERT INTO awards (season,name,player_id,club_id,detail) VALUES (?,?,?,?,?)",
+                    (season, "Ballon d'Or", r["player_id"], r["club_id"],
+                     f"{r['goals']} goals, {r['assists']} assists"
+                     + (f", avg rating {avg}" if r["rating_n"] else "")))
+        add_news(con, save, "AWARD",
+                 f"{pr['name'] if pr else '?'} ({cl['name'] if cl else '?'}) win the Ballon d'Or.")
+        if r["club_id"] == save.get("club_id") and pr:
+            add_inbox(con, save, "AWARD", "URGENT", "Ballon d'Or: " + pr["name"],
+                      f"{pr['name']} has won this season's Ballon d'Or "
+                      f"({r['goals']} goals, {r['assists']} assists, score {score:.1f}).",
+                      payload={"screen": "player", "pid": r["player_id"]})
+    return out
+
+
 def _season_end(con, save, rng, events):
     cid = save["club_id"]
     c = club(con, cid)
@@ -3624,8 +3857,9 @@ def _season_end(con, save, rng, events):
                     play_human_match(con, save, dict(f), mode="instant", rng=rng)
             _check_competitions(con, save, rng)
         con.commit()
-    con.execute("""UPDATE fixtures SET played=1, hg=0, aw=0, report='{}'
-                   WHERE season=? AND played=0""", (save["season"],))
+    # whatever could not be played (abandoned comps only — normal competition
+    # completion happens in the world, independently of the league calendar)
+    _cancel_leftovers(con, save)
     con.commit()
     # --- league final positions, promotion / relegation
     leagues = con.execute("SELECT * FROM competitions WHERE ctype='league'").fetchall()
@@ -3702,6 +3936,9 @@ def _season_end(con, save, rng, events):
     prev_season = save["season"]
     pos = _league_position(con, save, season=prev_season)
     awards = _season_awards(con, save, rng, comp_id=(pos or {}).get("comp_id"))
+    # permanent player records (career aggregation + Golden Boots + Ballon d'Or)
+    # must run before the player stat reset below
+    awards["season_records"] = _season_player_records(con, save, prev_season)
     stats_snapshot = dict(save["season_stats"])
     xg_snapshot = (save["flags"].get("xg_season", 0.0), save["flags"].get("xga_season", 0.0))
     obj_lines, obj_delta = evaluate_objectives(con, save, rng, final=True)
@@ -3883,6 +4120,16 @@ def season_review_text(con, save, awards, summary, prize, season=None, pos=None,
             lines.append(f"Breakthrough player: {awards['breakthrough'][0]} ({awards['breakthrough'][1]} mins)")
     if awards.get("golden_boot"):
         lines.append(f"Divisional golden boot: {awards['golden_boot'][0]} ({awards['golden_boot'][1]}) — {awards['golden_boot'][2]} goals")
+    rec = (awards or {}).get("season_records") or {}
+    if rec.get("ballon"):
+        b = rec["ballon"]
+        lines.append(f"Ballon d'Or: {b['name']} ({b['club']}) — {b['goals']} goals, {b['assists']} assists")
+    gbs = rec.get("golden_boot") or {}
+    if gbs.get("UCL"):
+        lines.append(f"Champions League Golden Boot: {gbs['UCL']['name']} — {gbs['UCL']['goals']} goals")
+    for _code, g in sorted(((k, v) for k, v in gbs.items() if k != "UCL"),
+                           key=lambda kv: -kv[1]["goals"])[:2]:
+        lines.append(f"{g['comp']} Golden Boot: {g['name']} — {g['goals']} goals")
     lines.append(f"Prize money: {money(prize)}")
     fin = con.execute("SELECT cash, balance, wage_bill, transfer_budget FROM clubs WHERE id=?", (cid,)).fetchone()
     lines.append(f"Financial result: balance {money(fin['balance'])}, cash {money(fin['cash'])}")
@@ -4144,7 +4391,9 @@ def advance(con, save, days=1, until=None, stop_for=("match",), rng=None, ignore
         W = season_windows(save["season"])
         target = W["open"] if start < W["open"] else W["winter"][0]
     elif mode == "season_end":
-        target = date(save["season"] + 1, 7, 20)
+        # the season rolls when competitions finish; run to the calendar backstop
+        # and let the lifecycle trigger do its job
+        target = season_backstop(save["season"])
     elif mode == "date":
         target = d(days)
     elif mode == "week":
@@ -4152,8 +4401,21 @@ def advance(con, save, days=1, until=None, stop_for=("match",), rng=None, ignore
     log = []
     guard = 0
     stop_reason = None
+    # a fixture already scheduled TODAY: stop straight away instead of
+    # returning "no stop" (which made match-mode callers spin on the day)
+    if mode == "match" and target == start and save.get("club_id") \
+            and not save["flags"].get("unemployed"):
+        my_fix = fixtures_on(con, start, save["club_id"])
+        if my_fix and "match" in stop_for:
+            stop_reason = "match"
+            log.append({"date": ds(start), "event": "match_scheduled",
+                        "fixtures": [{"id": f["id"], "comp": f.get("comp_name") or "Friendly",
+                                      "home": (club(con, f["home_id"]) or {}).get("short", "?"),
+                                      "away": (club(con, f["away_id"]) or {}).get("short", "?"),
+                                      "is_home": f["home_id"] == save["club_id"],
+                                      "stage": f.get("stage")} for f in my_fix]})
     # auto_human now defaults False; old derived logic removed to fix 38-games bug
-    while d(save["date"]) < target and guard < 900:
+    while d(save["date"]) < target and guard < 900 and stop_reason != "match":
         guard += 1
         if save["flags"].get("unemployed"):
             stop_reason = "unemployed"
@@ -4391,79 +4653,136 @@ _GOD_GRP = {"GK": "GK", "DC": "DEF", "DL": "DEF", "DR": "DEF", "DM": "MID", "MC"
 
 
 def godfather_plan(con, save):
-    """Concrete actionable plan: best XI, match tactics, transfer targets."""
+    """Data-driven football intelligence: a verdict built from the actual state
+    of the squad, opponent, market, fixtures and finances. Every line reflects
+    live numbers — nothing is generic, nothing is hardcoded.
+    """
     cid = save.get("club_id")
-    plan = {"xi": [], "xi_names": [], "tactics": None, "sign": [], "opp": None}
+    plan = {"verdict": "", "xi_ids": [], "xi": [], "tactics": None, "sign": [],
+            "rejects": [], "threats": [], "squad": None, "fixtures": None,
+            "finance": None, "opp": None}
     if not cid or save["flags"].get("unemployed"):
         return plan
     tac = get_tactics(con, save)
     slots = C.FORMATIONS.get(tac["formation"], list(C.FORMATIONS.values())[0])
     rows = [dict(r) for r in con.execute(
-        "SELECT id,name,pos,pos2,ca,fitness,suspended,injured_weeks FROM players "
+        "SELECT id,name,pos,pos2,ca,pa,age,fitness,form,suspended,injured_weeks,"
+        "contract_end,wage,value FROM players "
         "WHERE club_id=? AND squad IN ('First Team','Reserve')", (cid,))]
-    avail = [p for p in rows if not p["suspended"] and not p["injured_weeks"]
-             and p["fitness"] >= 75]
-    used, xi = set(), []
+    fit = [p for p in rows if not p["suspended"] and not p["injured_weeks"]
+           and p["fitness"] >= 75]
+    squad_avg = sum(p["ca"] for p in rows) / max(1, len(rows))
 
     def fits(p, slot):
         g = _GOD_GRP.get(slot)
         return (p["pos"] == slot or p["pos2"] == slot
                 or _GOD_GRP.get(p["pos"]) == g or _GOD_GRP.get(p["pos2"]) == g)
 
+    used, xi = set(), []
     for slot in slots:
-        cands = [p for p in avail if p["id"] not in used and fits(p, slot)]
+        cands = [p for p in fit if p["id"] not in used and fits(p, slot)]
         if not cands:
-            cands = [p for p in avail if p["id"] not in used]
+            cands = [p for p in fit if p["id"] not in used]
         if not cands:
             break
-        pick = max(cands, key=lambda p: p["ca"])
+        ranked = sorted(cands, key=lambda p: -p["ca"])
+        pick = ranked[0]
+        backup = ranked[1] if len(ranked) > 1 else None
+        why = []
+        if len([p for p in rows if fits(p, slot) and not p["suspended"]
+                and not p["injured_weeks"]]) <= 1:
+            why.append("only fit option for this role")
+        if backup:
+            why.append(f"beats {backup['name']} by {pick['ca'] - backup['ca']:.1f}")
+        if pick["form"] > 1.0:
+            why.append(f"in form (+{pick['form']:.1f})")
         used.add(pick["id"])
-        xi.append(pick)
-    plan["xi"] = [p["id"] for p in xi]
-    plan["xi_names"] = [f"{p['pos']} · {p['name']}" for p in xi]
-    nf = con.execute("""SELECT f.home_id,f.away_id,c1.name hn,c2.name an FROM fixtures f
-        JOIN clubs c1 ON c1.id=f.home_id JOIN clubs c2 ON c2.id=f.away_id
+        xi.append(dict(pick, slot=slot, why="; ".join(why) or "best available in the group"))
+    plan["xi_ids"] = [p["id"] for p in xi]
+    plan["xi"] = [{"pid": p["id"], "name": p["name"], "pos": p["slot"],
+                   "ca": round(p["ca"], 1), "why": p["why"]} for p in xi]
+
+    nf = con.execute("""SELECT f.*, c1.name hn, c2.name an, k.name comp
+        FROM fixtures f JOIN clubs c1 ON c1.id=f.home_id JOIN clubs c2 ON c2.id=f.away_id
+        LEFT JOIN competitions k ON k.id=f.comp_id
         WHERE (f.home_id=? OR f.away_id=?) AND f.played=0 AND f.match_date>=?
         ORDER BY f.match_date LIMIT 1""", (cid, cid, save["date"])).fetchone()
+    # ---------------- tactics vs the next real opponent ----------------
     if nf:
-        opp = nf["away_id"] if nf["home_id"] == cid else nf["home_id"]
+        opp_id = nf["away_id"] if nf["home_id"] == cid else nf["home_id"]
+        opp_name = nf["an"] if nf["home_id"] == cid else nf["hn"]
+        is_home = nf["home_id"] == cid
         q = ("SELECT AVG(ca) c FROM (SELECT ca FROM players WHERE club_id=? "
              "AND squad='First Team' ORDER BY ca DESC LIMIT 11)")
         my = con.execute(q, (cid,)).fetchone()["c"] or 10.0
-        op = con.execute(q, (opp,)).fetchone()["c"] or 10.0
+        op = con.execute(q, (opp_id,)).fetchone()["c"] or 10.0
         diff = my - op
-        plan["opp"] = {"name": nf["an"] if nf["home_id"] == cid else nf["hn"],
-                       "my": round(my, 1), "their": round(op, 1), "diff": round(diff, 1)}
+        plan["opp"] = {"name": opp_name, "my": round(my, 1), "their": round(op, 1),
+                       "diff": round(diff, 1), "comp": nf["comp"], "is_home": is_home}
+        o_tac = con.execute("""SELECT t.* FROM tactics t WHERE t.club_id=? AND t.active=1""",
+                            (opp_id,)).fetchone()
         instr = dict(C.INSTR_DEFAULT)
+        why = []
         if diff >= 1.2:
             ment = "Attacking"
             instr.update(line_of_engagement=3, defensive_line=3, tempo=3, width=3,
                          pressing_intensity=3, counter_press=True, work_ball_into_box=True)
-            why = "we are the stronger side — press high and pin them in"
+            why.append(f"we are the stronger side ({my:.1f} v {op:.1f} — press high and pin them in)")
         elif diff <= -0.8:
             ment = "Cautious"
             instr.update(line_of_engagement=1, defensive_line=1, tempo=1, width=1,
                          pressing_intensity=1, counter_attack=True, counter_press=False)
-            why = "they are stronger — stay compact, hurt them on the break"
+            why.append(f"they are the stronger side ({op:.1f} v {my:.1f}) — stay compact, hurt them on the break")
         else:
             ment = "Balanced"
             instr.update(pressing_intensity=3, counter_press=True)
-            why = "evenly matched — control the middle with a measured press"
+            why.append("evenly matched — control the middle with a measured press")
+        if o_tac:
+            o_instr = {}
+            try:
+                o_instr = json.loads(o_tac["instr"] or "{}")
+            except Exception:
+                o_instr = {}
+            if o_tac["mentality"] in ("Attacking", "Very Attacking", "All-Out Attack") \
+                    and instr.get("counter_attack"):
+                why.append(f"they play {o_tac['mentality'].lower()} — the space behind is where we live")
+            elif o_instr.get("defensive_line", 0) >= 3 and diff >= 0:
+                why.append("they sit high — stretch them with early crosses and long balls")
+            elif o_instr.get("pressing_intensity", 0) >= 3:
+                why.append("they press hard — play through the full-backs, avoid the middle")
+        if not is_home:
+            why.append(f"away at {opp_name} — win it, don't admire it")
         plan["tactics"] = {"mentality": ment, "instr": instr, "why": why,
-                           "formation": tac["formation"]}
-    fin = con.execute("SELECT transfer_budget, wage_budget - wage_bill AS head FROM clubs "
-                      "WHERE id=?", (cid,)).fetchone()
-    budget = (fin["transfer_budget"] if fin else 0) or 0
-    head = (fin["head"] if fin else 0) or 0
+                           "formation": tac["formation"], "opp": opp_name}
+        # ---------------- their threats ----------------
+        threats = [dict(r) for r in con.execute("""
+            SELECT p.name, p.pos, p.ca, p.goals, p.assists,
+                   COALESCE(sg.g, 0) sg
+            FROM players p LEFT JOIN (
+               SELECT player_id, SUM(goals) g FROM season_player_stats
+               WHERE comp_id IN (SELECT id FROM competitions WHERE ctype='league')
+               GROUP BY player_id) sg ON sg.player_id=p.id
+            WHERE p.club_id=? AND p.squad='First Team' AND p.suspended=0 AND p.injured_weeks=0
+            ORDER BY p.ca + COALESCE(sg.g,0)*0.18 DESC LIMIT 3""", (opp_id,))]
+        plan["threats"] = [{"name": t["name"], "pos": t["pos"],
+                            "ca": round(t["ca"], 1), "goals": t["goals"],
+                            "why": (f"{t['goals']} goals, {t['assists']} assists this season"
+                                    if t["goals"] + t["assists"] >= 5 else
+                                    f"their best starter (CA {t['ca']:.1f})")} for t in threats]
+    # ---------------- transfers: sign + rejects ----------------
+    club_row = con.execute("""SELECT transfer_budget, wage_budget, wage_bill, cash,
+        season_income FROM clubs WHERE id=?""", (cid,)).fetchone()
+    budget = (club_row["transfer_budget"] if club_row else 0) or 0
+    head = ((club_row["wage_budget"] - club_row["wage_bill"]) if club_row else 0) or 0
     need = {}
     for p in rows:
         g = _GOD_GRP.get(p["pos"], "MID")
         need[g] = need.get(g, 0) + 1
-    cands = con.execute("""SELECT p.id,p.name,p.pos,p.age,p.ca,p.pa,p.value,p.wage,c.name AS club
-        FROM players p JOIN clubs c ON c.id=p.club_id
+    cands = [dict(r) for r in con.execute("""SELECT p.id,p.name,p.pos,p.age,p.ca,p.pa,
+        p.value,p.wage,p.reputation,c.name AS club FROM players p JOIN clubs c ON c.id=p.club_id
         WHERE p.club_id<>? AND p.squad='First Team' AND p.age BETWEEN 17 AND 29
-          AND p.loaned_to IS NULL AND p.value <= ? ORDER BY p.ca DESC LIMIT 300""",
-        (cid, max(budget * 0.6, 500.0))).fetchall()
+          AND p.loaned_to IS NULL AND p.value <= ? ORDER BY p.ca DESC LIMIT 400""",
+        (cid, max(budget * 0.6, 500.0)))]
     scored = []
     for r in cands:
         if r["value"] > budget * 0.6 or r["wage"] * 0.052 > max(head * 0.4, 1.0):
@@ -4472,9 +4791,254 @@ def godfather_plan(con, save):
         nb = 2.0 if need.get(g, 0) < 4 else 0.0
         scored.append((r["ca"] + 0.4 * r["pa"] + nb, dict(r), g, nb))
     scored.sort(key=lambda x: -x[0])
-    for _sc, r, g, nb in scored[:3]:
-        plan["sign"].append({"pid": r["id"], "name": r["name"], "pos": r["pos"],
-                             "age": r["age"], "ca": round(r["ca"], 1), "pa": round(r["pa"], 1),
-                             "club": r["club"], "value": r["value"], "wage": r["wage"],
-                             "why": ("covers our thin " + g) if nb else "best quality we can afford"})
+    sign, seen_groups = [], set()
+    for _sc, r, g, nb in scored:
+        if len(sign) >= 4:
+            break
+        if nb and g in seen_groups:
+            continue  # one target per needy group
+        seen_groups.add(g)
+        why = (f"covers our thin {g} line ({need.get(g, 0)} available)" if nb
+               else f"best quality we can afford (value {money(r['value'])})")
+        if r["pa"] > r["ca"] + 1.0:
+            why += f", room to grow (PA {r['pa']:.1f})"
+        sign.append({"pid": r["id"], "name": r["name"], "pos": r["pos"], "age": r["age"],
+                     "ca": round(r["ca"], 1), "pa": round(r["pa"], 1), "club": r["club"],
+                     "value": r["value"], "wage": r["wage"], "why": why})
+    plan["sign"] = sign
+    # famous names we looked at and rejected — with the arithmetic, not sentiment
+    big = [dict(r) for r in con.execute("""SELECT p.id,p.name,p.pos,p.age,p.ca,p.pa,
+        p.value,p.wage,p.reputation,c.name AS club FROM players p JOIN clubs c ON c.id=p.club_id
+        WHERE p.club_id<>? AND p.squad='First Team' AND p.age BETWEEN 17 AND 31
+          AND p.loaned_to IS NULL AND p.reputation>=78 AND p.value > ?
+        ORDER BY p.reputation DESC LIMIT 8""", (cid, max(budget * 0.6, 1.0)))]
+    rejects = []
+    for b in big:
+        if len(rejects) >= 2:
+            break
+        fee_pct = b["value"] / max(budget, 0.01) * 100
+        wage_annual = b["wage"] * 0.052
+        g = _GOD_GRP.get(b["pos"], "MID")
+        alt = next((s for s in sign if _GOD_GRP.get(s["pos"], "MID") == g), None)
+        if b["value"] > budget:
+            why = (f"costs {money(b['value'])} — more than our entire "
+                   f"{money(budget)} transfer budget")
+        elif alt and b["value"] >= alt["value"] * 1.5:
+            why = (f"{alt['name']} covers the same {g} line for {money(alt['value'])} "
+                   f"({alt['value']/max(budget,0.01)*100:.0f}% of budget) — paying "
+                   f"{fee_pct:.0f}% for the same slot is poor value")
+        elif head > 0 and wage_annual > head * 0.25:
+            why = (f"wage of {money(wage_annual)}/yr would take "
+                   f"{wage_annual/max(head,0.01)*100:.0f}% of our wage headroom — "
+                   f"it breaks the structure")
+        elif fee_pct >= 60:
+            why = (f"one fee eats {fee_pct:.0f}% of the entire transfer budget — "
+                   f"nothing left to fix the rest of the squad")
+        else:
+            continue  # genuinely within our means — that is a target, not a reject
+        rejects.append({"name": b["name"], "club": b["club"], "pos": b["pos"],
+                        "value": b["value"], "why": why})
+    plan["rejects"] = rejects
+    # ---------------- squad: depth, contracts, sell, develop ----------------
+    depth, depth_issues = {}, []
+    for g in ("GK", "DEF", "MID", "ATT"):
+        n_all = sum(1 for p in rows if _GOD_GRP.get(p["pos"], "MID") == g)
+        n_fit = len([p for p in fit if _GOD_GRP.get(p["pos"], "MID") == g])
+        depth[g] = dict(all=n_all, fit=n_fit)
+        min_n = 2 if g == "GK" else 3
+        if n_fit < min_n:
+            depth_issues.append(f"{g}: only {n_fit} fit ({n_all} total) — a single injury leaves us exposed")
+    next_season_end = f"{save['season'] + 1}-06-30"
+    contracts = sorted([p["name"] for p in rows
+                        if p["contract_end"] and p["contract_end"] <= next_season_end
+                        and p["ca"] >= squad_avg - 0.5], key=lambda n: n)
+    wages = sorted(p["wage"] for p in rows)
+    w60 = wages[int(len(wages) * 0.6)] if wages else 0
+    sell = [p for p in rows
+            if (p["wage"] > max(w60 * 1.2, 15.0) and p["ca"] < squad_avg - 0.8)
+            or (p["wage"] > 25.0 and p["ca"] < 11.5)]
+    sell.sort(key=lambda p: -(p["wage"]))
+    develop = [p for p in rows if p["age"] <= 21 and p["pa"] >= p["ca"] + 1.2]
+    develop.sort(key=lambda p: -(p["pa"] - p["ca"]))
+    plan["squad"] = {
+        "depth": depth_issues,
+        "contracts": contracts[:4],
+        "sell": [{"name": p["name"], "pos": p["pos"], "wage": p["wage"],
+                  "ca": round(p["ca"], 1), "value": p["value"],
+                  "why": f"earns {money(p['wage']*0.052)}/yr at CA {p['ca']:.1f} (squad avg {squad_avg:.1f})"}
+                 for p in sell[:3]],
+        "develop": [{"name": p["name"], "pos": p["pos"], "age": p["age"],
+                     "ca": round(p["ca"], 1), "pa": round(p["pa"], 1),
+                     "why": f"CA {p['ca']:.1f} -> PA {p['pa']:.1f}; give him minutes"}
+                    for p in develop[:3]],
+    }
+    # ---------------- fixtures: next five + congestion ----------------
+    up = [dict(r) for r in con.execute("""
+        SELECT f.match_date, f.home_id, c1.name hn, c2.name an, k.name comp, k.ctype
+        FROM fixtures f JOIN clubs c1 ON c1.id=f.home_id JOIN clubs c2 ON c2.id=f.away_id
+        LEFT JOIN competitions k ON k.id=f.comp_id
+        WHERE (f.home_id=? OR f.away_id=?) AND f.played=0 AND f.match_date>=?
+        ORDER BY f.match_date LIMIT 5""", (cid, cid, save["date"]))]
+    load = len(up)
+    advice = ""
+    if up:
+        try:
+            span = (d(up[-1]["match_date"]) - d(up[0]["match_date"])).days
+            if load >= 3 and span <= 12:
+                league_up = [u for u in up if u["ctype"] == "league"]
+                advice = (f"{load} games in {span} days — rotate the XI midweek; "
+                          f"keep the eleven for the league" if league_up else
+                          f"{load} games in {span} days — manage the fitness load carefully")
+            else:
+                advice = f"{load} fixture(s) on the books; no congestion"
+        except Exception:
+            advice = f"{load} fixture(s) ahead"
+    plan["fixtures"] = {"next": [{"date": u["match_date"],
+                                  "text": f"{u['hn']} v {u['an']}", "comp": u["comp"],
+                                  "home": u["home_id"] == cid} for u in up],
+                        "advice": advice}
+    # ---------------- finance ----------------
+    proj = ((club_row["season_income"] if club_row else 0)
+            - (club_row["wage_bill"] if club_row else 0)) or 0
+    fin_why = []
+    if head <= max(1.5, (club_row["wage_budget"] if club_row else 0) * 0.05):
+        fin_why.append(f"wage headroom is only {money(head)}/yr — sell or release before signing")
+    if budget < 1:
+        fin_why.append("no transfer budget left — a sale must fund any purchase")
+    if proj < 0:
+        fin_why.append(f"projected {money(proj)} net this season — every fee must earn its keep")
+    if not fin_why:
+        fin_why.append(f"{money(budget)} available, {money(head)}/yr wage headroom — spend it on need, not names")
+    plan["finance"] = {"budget": budget, "head": head, "projected": proj, "why": fin_why}
+    # ---------------- the verdict: one decisive line ----------------
+    v = ""
+    if nf:
+        opp_name = nf["an"] if nf["home_id"] == cid else nf["hn"]
+        v = (f"Matchday vs {opp_name}: {plan['tactics']['mentality']} approach — "
+             + (plan["tactics"]["why"][0] if plan["tactics"] else ""))
+    elif sign:
+        s0 = sign[0]
+        v = (f"Market: sign {s0['name']} ({s0['pos']}, {money(s0['value'])}) "
+             f"— {s0['why'].split(',')[0]}")
+    elif plan["squad"]["contracts"]:
+        v = (f"Contracts: {plan['squad']['contracts'][0]}"
+             + (f" and {len(plan['squad']['contracts']) - 1} more"
+                if len(plan["squad"]["contracts"]) > 1 else "")
+             + " are expiring — renew now or lose them for free")
+    elif depth_issues:
+        v = depth_issues[0].capitalize()
+    else:
+        v = "No fire to put out — keep the structure, trust the training"
+    plan["verdict"] = v
     return plan
+
+
+def match_godfather(con, save, fx):
+    """Pre-match intelligence for one specific fixture (used in the match preview)."""
+    cid = save.get("club_id")
+    out = {"verdict": "", "threats": [], "plan": "", "xi_note": ""}
+    if not cid or not fx:
+        return out
+    opp_id = fx["away_id"] if fx["home_id"] == cid else fx["home_id"]
+    opp_name = con.execute("SELECT name FROM clubs WHERE id=?", (opp_id,)).fetchone()["name"]
+    q = ("SELECT AVG(ca) c FROM (SELECT ca FROM players WHERE club_id=? "
+         "AND squad='First Team' ORDER BY ca DESC LIMIT 11)")
+    my = con.execute(q, (cid,)).fetchone()["c"] or 10.0
+    op = con.execute(q, (opp_id,)).fetchone()["c"] or 10.0
+    diff = my - op
+    threats = con.execute("""SELECT p.name, p.pos, p.ca, p.goals, p.assists
+        FROM players p WHERE p.club_id=? AND p.squad='First Team'
+          AND p.suspended=0 AND p.injured_weeks=0
+        ORDER BY p.ca + p.goals*0.18 DESC LIMIT 3""", (opp_id,)).fetchall()
+    out["threats"] = [{"name": t["name"], "pos": t["pos"], "ca": round(t["ca"], 1),
+                       "goals": t["goals"],
+                       "why": (f"{t['goals']} goals this season" if t["goals"] >= 5
+                               else f"CA {t['ca']:.1f} — their best starter")} for t in threats]
+    if diff >= 1.2:
+        out["plan"] = "Attacking — press high, pin them in, take it to them"
+    elif diff <= -0.8:
+        out["plan"] = "Cautious — compact block, win it on the break"
+    else:
+        out["plan"] = "Balanced — control the middle, force them to earn the ball"
+    # is the user's current selection weaker than the best available XI?
+    sel = []
+    try:
+        sel = json.loads(save["flags"].get("selected_xi") or "[]")
+    except Exception:
+        sel = []
+    if sel:
+        cur = [p for p in con.execute("SELECT ca FROM players WHERE id IN (%s)"
+                                      % ",".join("?" * len(sel)), [int(x) for x in sel]).fetchall()]
+        cur_ca = sum(r["ca"] for r in cur) / max(1, len(cur))
+        rows = [dict(r) for r in con.execute(
+            "SELECT ca,fitness,suspended,injured_weeks FROM players WHERE club_id=? "
+            "AND squad IN ('First Team','Reserve')", (cid,))]
+        best_fit = [p["ca"] for p in rows if not p["suspended"] and not p["injured_weeks"]
+                    and p["fitness"] >= 75]
+        best_ca = sum(sorted(best_fit, reverse=True)[:11]) / 11 if len(best_fit) >= 11 else 0
+        if best_ca and best_ca - cur_ca >= 0.6:
+            out["xi_note"] = (f"your current XI averages {cur_ca:.1f} — the best available "
+                              f"eleven is {best_ca:.1f}. Check the selection before kickoff.")
+    home_away = "at home" if fx["home_id"] == cid else "away"
+    out["verdict"] = (f"{opp_name} {home_away}: {out['plan']}"
+                      + (f" · mind {out['threats'][0]['name']} ({out['threats'][0]['pos']})"
+                         if out["threats"] else ""))
+    return out
+
+
+def live_guidance(state):
+    """Live match guidance from the actual match state. Returns an optional
+    touchline order plus the reasoning. Deterministic — same state, same call.
+    """
+    minute = state.get("minute", 0)
+    diff = state.get("diff", 0)            # my goals - their goals
+    xg_diff = state.get("xg_diff", 0.0)    # my xG - their xG
+    subs_left = state.get("subs_left", 0)
+    my_fatigue = state.get("my_fatigue", 0.0)
+    momentum = state.get("momentum", 50)   # home-side share, 0-100
+    my_mom = momentum if state.get("is_home", True) else 100 - momentum
+    out = {"order": None, "action": "Stay the course", "why": "", "sub_hint": None}
+    sub_hint = state.get("sub_hint")
+    if sub_hint:
+        out["sub_hint"] = sub_hint
+    if minute >= 78 and diff == 1:
+        out.update(order="time_waste", action="Protect the lead",
+                   why="1-0 with the last ten minutes: kill the clock, keep the ball away "
+                       "from our box, no needless risks")
+    elif minute >= 68 and diff >= 2:
+        out.update(order="time_waste", action="Bank it",
+                   why="Two up late — the game is ours. Slow it down and don't open the back door")
+    elif minute >= 55 and diff <= -1 and subs_left > 0:
+        out.update(order="all_out_attack", action="Win it or lose it",
+                   why=f"losing with {90 - minute} minutes left — a draw is nothing. "
+                       "throw everything forward")
+    elif diff == 0 and minute >= 55 and xg_diff <= -0.8:
+        my_x, op_x = state.get("my_xg", 0), state.get("opp_xg", 0)
+        xg_txt = (f"xG {my_x:.1f} v {op_x:.1f}" if (my_x or op_x)
+                  else f"xG down by {abs(xg_diff):.1f}")
+        out.update(order="press_hard", action="Force their mistake",
+                   why=f"level but outplayed ({xg_txt}) — win the ball high and "
+                       "force turnovers in their half")
+    elif diff == 0 and xg_diff >= 0.8 and minute < 75:
+        my_x, op_x = state.get("my_xg", 0), state.get("opp_xg", 0)
+        xg_txt = (f"xG {my_x:.1f} v {op_x:.1f}" if (my_x or op_x)
+                  else f"xG up by {xg_diff:.1f}")
+        out.update(action="Patience — the chances are coming",
+                   why=f"the score lies ({xg_txt}) — keep playing, the goal "
+                       "will find its way in")
+    elif minute >= 60 and diff == 1 and my_fatigue > 62 and subs_left > 0:
+        out.update(order="sit_deep", action="Bend, don't break",
+                   why="leading but our legs are gone (fatigue "
+                       f"{my_fatigue:.0f}) — drop the line and soak it up")
+    elif minute >= 45 and diff == 0 and my_mom < 35 and state.get("minute", 0) < 75:
+        out.update(order="press_hard", action="Win the momentum",
+                   why=f"momentum is drifting their way ({my_mom:.0f}% ours) — press hard, "
+                       "win the ball high, stop the rhythm before it builds")
+    else:
+        if diff > 0:
+            out["why"] = "ahead and on top — keep the structure, stay disciplined"
+        elif diff < 0:
+            out["why"] = "behind but creating — stay patient, the goal is coming"
+        else:
+            out["why"] = "level and level — small edges decide these, don't chase chaos"
+    return out

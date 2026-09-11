@@ -196,6 +196,23 @@ def player_card(con, save, pid):
                            "rating": round(pl.get("rating", 0), 2), "mins": pl.get("mins", 0),
                            "goals": pl.get("goals", 0), "assists": pl.get("assists", 0)})
     out["recent"] = recent
+    # permanent career record: one row per season (all competitions folded in),
+    # plus every award the player has collected
+    career_rows = []
+    for r in con.execute("""SELECT s.season, s.club_id, c.name club, s.apps, s.minutes,
+        s.goals, s.assists, s.yellow, s.red, s.clean_sheets, s.rating_n,
+        ROUND(s.rating_sum / MAX(1, s.rating_n), 2) avg_r
+        FROM career_player_stats s LEFT JOIN clubs c ON c.id = s.club_id
+        WHERE s.player_id=? ORDER BY s.season DESC""", (pid,)).fetchall():
+        career_rows.append(dict(season=r["season"], club=r["club"] or "?",
+                                apps=r["apps"], minutes=r["minutes"], goals=r["goals"],
+                                assists=r["assists"], yellow=r["yellow"], red=r["red"],
+                                clean_sheets=r["clean_sheets"],
+                                avg_rating=r["avg_r"] if r["rating_n"] else None))
+    out["career"] = career_rows
+    out["career_awards"] = [dict(season=r["season"], name=r["name"]) for r in con.execute(
+        "SELECT season, name FROM awards WHERE player_id=? ORDER BY season DESC",
+        (pid,)).fetchall()]
     return out
 
 
@@ -967,20 +984,27 @@ def stats_screen(con, save):
     assists = []
     csheets = []
     if comp_id:
-        q = """SELECT p.id pid, p.name, p.pos, p.goals g, p.assists a, p.apps ap,
-                      p.clean_sheets cs, c.code ccode, c.name club
-               FROM players p JOIN clubs c ON c.id = p.club_id
-               WHERE c.league = ? AND p.club_id IS NOT NULL AND (? IS NULL OR 1=1)"""
-        rows = con.execute(q + " AND p.goals > 0 ORDER BY p.goals DESC, p.assists DESC LIMIT 15",
-                           (comp_id, None)).fetchall()
+        # League-wide races from the persistent per-competition season stats, so
+        # they stay accurate for the running season (players columns reset each
+        # season; season_player_stats is the permanent record).
+        q = """SELECT p.id pid, p.name, p.pos, SUM(s.goals) g, SUM(s.assists) a,
+                      SUM(s.apps) ap, SUM(s.clean_sheets) cs,
+                      c.code ccode, c.name club
+               FROM season_player_stats s
+               JOIN players p ON p.id = s.player_id
+               JOIN clubs c ON c.id = p.club_id
+               WHERE s.season = ? AND s.comp_id = ?
+               GROUP BY s.player_id"""
+        rows = con.execute(q + " HAVING SUM(s.goals) > 0 ORDER BY g DESC, a DESC LIMIT 15",
+                           (season, comp_id)).fetchall()
         scorers = [dict(pid=r["pid"], name=r["name"], pos=r["pos"], goals=r["g"],
                         assists=r["a"], code=r["ccode"], club=r["club"]) for r in rows]
-        rows = con.execute(q + " AND p.assists > 0 ORDER BY p.assists DESC, p.goals DESC LIMIT 10",
-                           (comp_id, None)).fetchall()
+        rows = con.execute(q + " HAVING SUM(s.assists) > 0 ORDER BY a DESC, g DESC LIMIT 10",
+                           (season, comp_id)).fetchall()
         assists = [dict(pid=r["pid"], name=r["name"], pos=r["pos"], assists=r["a"],
                         goals=r["g"], code=r["ccode"], club=r["club"]) for r in rows]
-        rows = con.execute(q + " AND p.clean_sheets > 0 ORDER BY p.clean_sheets DESC LIMIT 10",
-                           (comp_id, None)).fetchall()
+        rows = con.execute(q + " HAVING SUM(s.clean_sheets) > 0 ORDER BY cs DESC LIMIT 10",
+                           (season, comp_id)).fetchall()
         csheets = [dict(pid=r["pid"], name=r["name"], pos=r["pos"], cs=r["cs"],
                         code=r["ccode"], club=r["club"]) for r in rows]
 
@@ -1051,3 +1075,60 @@ def stats_screen(con, save):
                 my_code=me["code"] if me else "", my_name=me["name"] if me else "",
                 season=season, scorers=scorers, assists=assists, csheets=csheets,
                 xg=xg_rows[:20], leaders=leaders, form=form)
+
+
+def season_history(con, save, season=None):
+    """Permanent historical record. Past seasons are never overwritten: every
+    finished season keeps its final tables, champions, movement and awards.
+
+    `season` defaults to the latest completed season.
+    """
+    row = con.execute("""SELECT MIN(season) lo, MAX(season) hi FROM (
+        SELECT season FROM history UNION SELECT season FROM awards)""").fetchone()
+    if row and row["lo"] is not None:
+        seasons = list(range(row["hi"], row["lo"] - 1, -1))
+    else:
+        seasons = [save["season"] - 1]
+    season = season if season in seasons else seasons[0]
+    out = {
+        "seasons": seasons, "season": season,
+        "label": f"{season}/{str(season + 1)[2:]}",
+        "champions": [], "promoted": [], "relegated": [],
+        "my_league": None, "awards": [],
+    }
+    for h in con.execute("""SELECT k.name comp, k.code, k.tier, k.ctype,
+        c2.name club, h.pos, h.note, h.trophy
+        FROM history h JOIN competitions k ON k.id = h.comp_id
+        LEFT JOIN clubs c2 ON c2.id = h.club_id
+        WHERE h.season=? ORDER BY k.ctype, k.tier, h.pos""", (season,)).fetchall():
+        if h["trophy"]:
+            out["champions"].append(dict(comp=h["comp"], club=h["club"] or "?",
+                                         tier=h["tier"], ctype=h["ctype"],
+                                         trophy=h["trophy"]))
+        elif "Relegated" in (h["note"] or ""):
+            out["relegated"].append(dict(comp=h["comp"], club=h["club"] or "?"))
+        elif "Promoted" in (h["note"] or ""):
+            out["promoted"].append(dict(comp=h["comp"], club=h["club"] or "?"))
+    # full final table for the club's league that season (if we played in one)
+    cid = save.get("club_id")
+    if cid:
+        st = con.execute("""SELECT * FROM standings WHERE season=? AND club_id=?
+            AND stage='league' AND p>0 ORDER BY pts DESC LIMIT 1""", (season, cid)).fetchone()
+        if st:
+            lg = con.execute("SELECT * FROM competitions WHERE id=?", (st["comp_id"],)).fetchone()
+            rows = con.execute("""SELECT s.pos, s.p, s.w, s.d, s.l, s.gf, s.ga, s.pts, s.form,
+                c.name, c.short, c.code FROM standings s JOIN clubs c ON c.id = s.club_id
+                WHERE s.comp_id=? AND s.season=? AND s.stage='league' ORDER BY s.pos""",
+                (st["comp_id"], season)).fetchall()
+            out["my_league"] = {
+                "comp": dict(lg) if lg else {},
+                "my_pos": st["pos"], "my_pts": st["pts"], "my_played": st["p"],
+                "rows": [dict(r) for r in rows],
+            }
+    for a in con.execute("""SELECT a2.season, a2.name, a2.detail, p.name player, c2.name club
+        FROM awards a2 LEFT JOIN players p ON p.id = a2.player_id
+        LEFT JOIN clubs c2 ON c2.id = a2.club_id
+        WHERE a2.season=? ORDER BY a2.id""", (season,)).fetchall():
+        out["awards"].append(dict(season=a["season"], name=a["name"], detail=a["detail"] or "",
+                                  player=a["player"] or "", club=a["club"] or ""))
+    return out

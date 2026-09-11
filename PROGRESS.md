@@ -181,3 +181,74 @@ is this box's free disk (1.9 GB RAM, 2 vCPUs). Workflow restructured around that
   283 s → 250 s; league goal-rates drift ≤ ±0.08/match; ALL tests pass (season_test 3
   seasons, smoke, live_match e2e, order_effect statistical, ui_sanity 21/52/17).
 - `tests/perf_probe.py` added to the repo for future regressions.
+
+## v1.14.0–v1.16.0 — recap (shipped 2026-09-10/11, changelog here for completeness)
+- v1.14.0 (+1.14.1): FEATURE #1 Facilities — stadium/training/youth-akaademi levels, cash + balance cost model, condition/training/development effects, UI screen.
+- v1.15.0: FEATURE #2 Staff management — hire/sack/renew coaching staff, wages, effects on training/condition/pressing, board reactions.
+- v1.16.0: FEATURE #3 Transfer market — AI approaches to listed players (FIFA/EA-style accept/counter), incoming-bid inbox, outgoing offers with budget checks, market-day world transfer activity.
+
+## v1.17.0 — FINAL GAMEPLAY INTELLIGENCE + FOOTBALL-WORLD SIMULATION UPDATE (2026-09-11)
+Single approved 19-item batch. All items verified in the playable build before shipping.
+
+### 1. Global calendar (one world, many competitions)
+- 23 leagues / 444 clubs in the world (was 21/402): +24 MLS, +18 Saudi Pro League, with
+  real club names, nationalities, brand multipliers (world.py GLOBAL_BRAND) and positional squads.
+- Season lifecycle is competition-aware: the season now rolls over only AFTER the last
+  fixture in the world (UCL final 29 May, leagues end 8 May) — backstop `date(season+1, 7, 5)`;
+  every competition ends with its final played (no orphaned fixtures), comp_state tracks KO stages.
+- `tests/competition_test.py`: 11/11 (lifecycle, double-header ordering, cup finals, KO ranks).
+
+### 2–5. Persistent stats, Golden Boot, Ballon d'Or, permanent records
+- New tables: season_player_stats (per competition, apps/starts/goals/assists/mins/clean sheets/
+  rating), career_player_stats (per season totals, permanent), awards (permanent, never overwritten).
+- Written on every simulated match — AI and player — via the existing match-report path.
+- Season end: Golden Boot per competition (top scorer, real numbers in detail) + Ballon d'Or
+  (weighted goals/assists/rating formula).
+- New **History** screen ("Seasons & records", grouped nav → World): completed-season list
+  (seasons stay browsable forever), per-season champions, promotion/relegation, awards, my club's
+  final league positions. Player card shows the permanent career record (per-season table) and
+  career awards.
+- Full-season probe on the new 23-league world: 9,294 season rows / 6,158 career rows /
+  40 awards / 16 comp_state rows; MCI rows split PL/UCL/FA Cup correctly.
+
+### 6. US + Saudi transfer eligibility (logic level, not UI)
+- MLS (24) + Saudi Pro (18) clubs get real club_ids, brand multipliers and appear in every
+  market path: search, offers (negotiate/accept — price-based, not blocked), buyer pool for
+  listed players, career starts. Database audited: no other league accidentally excluded.
+
+### 7–16. Godfather Mode — decisive football-intelligence system (existing toggle kept)
+`godfather_plan` rewritten as a VERDICT object (one decisive line that answers the current
+priority: matchday → market → contracts → depth → season), all data-driven from actual state:
+- **Best XI**: 11 picks with per-pick reasons ("beats X by n", "only fit option", "in form");
+  one-tap selection into the tactics screen (selected XI persisted in save flags, used by match sim).
+- **Tactics vs opponent**: mentality/instructions/formation chosen from CA differential,
+  opponent's stored mentality+instructions, home/away — each instruction carries a why.
+- **Transfer intelligence**: targets with real fees/wages + one-click bids; explicitly REJECTS
+  famous players when the arithmetic says so (over budget, fee ≥60% of budget, wage >25% of wage
+  headroom, or a cheaper same-position fit covers the slot — names both players + prices).
+  Verified: Haaland rejected for MIA (€30.5m vs €16.1m Thuram, same slot) and SBA (entire budget);
+  Haaland pursued for RMA (€99.8m budget).
+- **Squad building**: depth gaps per position group, contracts expiring within a season,
+  overpaid-low-CA sell candidates, high-potential youth to develop (PA ≥ CA+1.2).
+- **Fixture management**: next 5 fixtures with congestion verdict (rotation advice when ≥3 league
+  games in ≤8 days across competitions).
+- **Financial intelligence**: budget, wage headroom, projected spend and why-lines.
+- **Pre-match** (`/api/match/next` preview.godfather): plan vs the actual opponent, threats
+  (top 3 by CA + season scoring), selected-XI quality check vs best fit.
+- **Live guidance** (`live_guidance` → `/api/match/live_step` → `#lv-god` banner):
+  priority-ordered rules on score/xG/fatigue/momentum/minute — time_waste, all_out_attack,
+  press_high, sit_deep, patience — with a one-line reason and a concrete sub hint
+  (tired XI player → same-position bench player, named). "DO IT ▶" button sends the order
+  through the normal instruction API. Verified in a real live match (0-2 at m60 →
+  all_out_attack applied mid-game).
+
+### 17–19. React-to-state, preservation, testing
+- No hardcoded advice: every verdict line, why, target and reject is computed from DB state
+  (squad, contracts, finances, fixtures, opponent DB rows, market DB).
+- No existing feature, data, screen, graphic or save path removed; Godfather toggle unchanged.
+- 9-scenario verification matrix (all PASS in the playable build):
+  1. Global calendar lifecycle (competition_test 11/11)  2. per-competition persistent stats
+  3. Golden Boot + Ballon d'Or  4. History screen permanence  5. player permanent career
+  6. MLS/Saudi transfer eligibility  7. Godfather verdict + rejects  8. Godfather live guidance
+     in a real live match  9. regression sweep (19 API screens, transfers, tactics, save, nav,
+     toggle round-trip, instant match, version/wiring).

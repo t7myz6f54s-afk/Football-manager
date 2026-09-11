@@ -157,6 +157,28 @@ CREATE TABLE IF NOT EXISTS training (
 CREATE TABLE IF NOT EXISTS news (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, cat TEXT, text TEXT, club_id INT, player_id INT);
 CREATE TABLE IF NOT EXISTS promises (id INTEGER PRIMARY KEY AUTOINCREMENT, player_id INT, ptype TEXT, value TEXT, date TEXT, deadline TEXT, status TEXT, note TEXT);
 CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY AUTOINCREMENT, season INT, comp_id INT, club_id INT, pos INT, note TEXT, trophy TEXT);
+CREATE TABLE IF NOT EXISTS comp_state (
+  comp_id INT, season INT, status TEXT DEFAULT 'active', winner_id INT,
+  finished TEXT, PRIMARY KEY(comp_id, season)
+);
+CREATE TABLE IF NOT EXISTS season_player_stats (
+  player_id INT, season INT, comp_id INT,
+  apps INT DEFAULT 0, starts INT DEFAULT 0, minutes INT DEFAULT 0,
+  goals INT DEFAULT 0, assists INT DEFAULT 0, yellow INT DEFAULT 0, red INT DEFAULT 0,
+  clean_sheets INT DEFAULT 0, rating_sum REAL DEFAULT 0, rating_n INT DEFAULT 0,
+  PRIMARY KEY(player_id, season, comp_id)
+);
+CREATE TABLE IF NOT EXISTS career_player_stats (
+  player_id INT, season INT, club_id INT,
+  apps INT DEFAULT 0, minutes INT DEFAULT 0, goals INT DEFAULT 0, assists INT DEFAULT 0,
+  yellow INT DEFAULT 0, red INT DEFAULT 0, clean_sheets INT DEFAULT 0,
+  rating_sum REAL DEFAULT 0, rating_n INT DEFAULT 0,
+  PRIMARY KEY(player_id, season)
+);
+CREATE TABLE IF NOT EXISTS awards (
+  id INTEGER PRIMARY KEY, season INT, name TEXT, player_id INT, club_id INT,
+  detail TEXT
+);
 CREATE TABLE IF NOT EXISTS managers (id INTEGER PRIMARY KEY, name TEXT, nat TEXT, age INT, club_id INT, reputation REAL, style TEXT, hired TEXT, human INT, attrs TEXT);
 CREATE TABLE IF NOT EXISTS matches_log (id INTEGER PRIMARY KEY AUTOINCREMENT, fixture_id INT, date TEXT, home TEXT, away TEXT, hs INT, as_away INT, comp TEXT, data TEXT);
 CREATE INDEX IF NOT EXISTS ix_players_club ON players(club_id);
@@ -438,6 +460,8 @@ GLOBAL_BRAND = {
     "TOR": 0.70, "ATA": 0.70, "TSG": 0.60, "SCF": 0.60, "WOB": 0.65, "BMG": 0.70,
     "CLU": 0.75, "AND": 0.80, "GENK": 0.65, "TRA": 0.70, "SAO": 0.85, "COR1": 0.85,
     "GRE": 0.75, "INT1": 0.75, "CRU": 0.80, "ATM1": 0.80, "FLU": 0.75, "BOTF": 0.75,
+    "MIA": 1.40, "LAF": 1.05, "LAG": 1.05, "SEA": 1.00, "TORC": 0.95, "NYC": 1.00,
+    "HIL": 1.50, "NSR": 1.45, "ITT": 1.15, "AHL": 1.15,
 }
 
 

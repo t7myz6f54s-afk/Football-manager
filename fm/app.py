@@ -422,9 +422,11 @@ def api_state():
 
 
 @app.get("/api/screen/{name}")
-def api_screen(name: str, id: int = 0):
+def api_screen(name: str, id: int = 0, season: int = 0):
     s = need_save()
     c = con()
+    if name == "history":
+        return V.season_history(c, s, season or None)
     if name in ("home", "dashboard"):
         return V.home(c, s)
     if name == "squad":
@@ -574,7 +576,10 @@ def api_match_next():
     row = con().execute("""SELECT f.*, k.name AS comp_name, k.code AS comp_code, k.ctype
         FROM fixtures f LEFT JOIN competitions k ON k.id=f.comp_id WHERE f.id=?""",
                         (nf["id"],)).fetchone()
-    return {"ok": True, "preview": V.match_preview(con(), s, dict(row)), "fixture": dict(row)}
+    preview = V.match_preview(con(), s, dict(row))
+    if s["flags"].get("godfather"):
+        preview["godfather"] = E.match_godfather(con(), s, dict(row))
+    return {"ok": True, "preview": preview, "fixture": dict(row)}
 
 
 @app.post("/api/match/select")
@@ -686,6 +691,25 @@ def _live_view(s, runner, ev_i, new_events=None, colour=None, extra=None):
         "ev_i": ev_i, "talks": ["praise", "encourage", "neutral", "firm", "aggressive", "defensive", "attacking"],
         "fixture": fx,
     }
+    if s["flags"].get("godfather"):
+        xi = view["xi"] or []
+        my_fat = sum(p["fatigue"] for p in xi) / max(1, len(xi))
+        sub_hint = None
+        if xi:
+            tired = max(xi, key=lambda p: p["fatigue"])
+            if tired["fatigue"] >= 55 and view["bench"]:
+                same = [b for b in view["bench"] if b["pos"] == tired["pos"]] or list(view["bench"])
+                fresh = max(same, key=lambda b: b["ca"])
+                sub_hint = {"out": tired["name"], "in": fresh["name"], "pos": tired["pos"],
+                            "why": (f"{tired['name']} is at {tired['fatigue']:.0f} fatigue — "
+                                    f"{fresh['name']} (CA {fresh['ca']:.1f}) is the freshest option")}
+        view["godfather"] = E.live_guidance({
+            "minute": view["minute"], "diff": view["my_score"] - view["opp_score"],
+            "my_xg": view["stats"]["me"].get("xg", 0), "opp_xg": view["stats"]["opp"].get("xg", 0),
+            "xg_diff": round(view["stats"]["me"].get("xg", 0) - view["stats"]["opp"].get("xg", 0), 2),
+            "subs_left": view["subs_left"], "my_fatigue": my_fat,
+            "momentum": view["momentum"], "is_home": view["is_home"],
+            "sub_hint": sub_hint})
     if extra:
         view.update(extra)
     return view
